@@ -13,5 +13,5 @@ from nfp_download.bls import (
     list_programs,
     parse_series_id,
 )
-from nfp_download.client import create_client, get_with_retry
+from nfp_download.client import create_client, create_impersonating_session, get_with_retry
 from nfp_download.fred import fetch_fred_series

@@ -15,7 +15,7 @@ End-to-end pipeline: download → process → build for managing real-time data 
 ## Tech Stack
 
 - **Language**: Python 3.12 (requires >= 3.10)
-- **Dependencies**: httpx, polars, typer (CLI)
+- **Dependencies**: httpx, curl-cffi (www.bls.gov fetches), polars, typer (CLI)
 - **Build**: hatchling
 - **Internal deps**: `nfp-lookups` (industry, geography, revision schedules), `nfp-download` (HTTP client), `nfp-ingest` (vintage store read/write)
 
@@ -70,6 +70,7 @@ src/nfp_vintages/
 ## Key Patterns
 
 - **Vintage store format**: Hive-partitioned parquet at `data/store/`, partitioned by `(source, seasonally_adjusted)`. Sources: `ces`, `qcew`, `sae`.
+- **www.bls.gov downloads** (`download/ces.py`, `download/qcew.py::download_qcew`): transport is the Chrome-impersonating curl_cffi session from `nfp_download.client.create_impersonating_session()` — Akamai fingerprints TLS, so plain httpx gets 403 there. data.bls.gov bulk files (`download_qcew_bulk`) stay on httpx.
 - **QCEW bulk download** (`download/qcew.py`): downloads yearly singlefile ZIPs, filters to `own_code in {0,1,2,3,5}` and `agglvl_code in {10,11,14,15,50,51,54,55}`. Saves as `qcew_bulk.parquet`.
 - **QCEW processing** (`processing/qcew.py`): four input streams: (1) total all-ownership, (2) private 2-digit NAICS, (3) government by ownership (→ sectors 91/92/93), (4) manufacturing 3-digit NAICS (→ durable 31 / nondurable 32). Employment units converted from persons to thousands.
 - **CES processing** (`processing/ces_national.py`): parses triangular revision CSV structure from `cesvinall/`, assigns vintage dates from release schedule.
@@ -102,3 +103,4 @@ data/
 
 Tests live in `tests/` within this package:
 - `test_vintages.py` — vintage view & evaluation tests
+- `test_download_network.py` — live www.bls.gov download transport tests (network-marked)

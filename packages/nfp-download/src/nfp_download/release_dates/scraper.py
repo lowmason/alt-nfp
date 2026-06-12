@@ -2,6 +2,12 @@
 
 Fetches index page, parses release links, downloads each release HTML to
 data/downloads/releases/{pub}/.
+
+www.bls.gov sits behind Akamai bot management, which fingerprints the TLS
+ClientHello and HTTP/2 handshake — plain httpx and curl get 403 regardless
+of headers. Transport here is curl_cffi impersonating Chrome (handshake plus
+a coherent browser header set); httpx stays the transport everywhere else
+in this package. Scraped paths are allowed by www.bls.gov/robots.txt.
 """
 
 from __future__ import annotations
@@ -11,8 +17,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
 from bs4 import BeautifulSoup, Tag
+from curl_cffi.requests import AsyncSession
+from curl_cffi.requests.exceptions import RequestException
 
 from nfp_download.release_dates.config import (
     BASE_URL,
@@ -159,29 +166,32 @@ def parse_index_page(
     return entries
 
 
-def _request_headers() -> dict[str, str]:
-    """Browser-like headers for BLS requests."""
-    return {
-        'User-Agent': (
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        ),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': 'https://www.bls.gov/',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-    }
+# Transport errors (HTTP status, timeout, connection) raised by this module;
+# re-exported so callers don't import curl_cffi directly.
+FetchError = RequestException
 
 
-async def fetch_index(client: httpx.AsyncClient, url: str) -> str:
+def create_session(timeout: float = 30.0) -> AsyncSession:
+    """Async HTTP session that passes BLS's TLS-fingerprint bot detection.
+
+    ``impersonate='chrome'`` tracks the newest Chrome handshake curl_cffi
+    supports and supplies matching default headers; spoofing our own
+    User-Agent here would contradict the fingerprint, so we send none.
+    """
+    return AsyncSession(
+        impersonate='chrome',
+        allow_redirects=True,
+        timeout=timeout,
+    )
+
+
+async def fetch_index(session: AsyncSession, url: str) -> str:
     """Fetch index page HTML.
 
     Parameters
     ----------
-    client : httpx.AsyncClient
-        HTTP client.
+    session : AsyncSession
+        HTTP session from :func:`create_session`.
     url : str
         Index page URL.
 
@@ -190,13 +200,13 @@ async def fetch_index(client: httpx.AsyncClient, url: str) -> str:
     str
         Raw HTML string.
     """
-    r = await client.get(url, headers=_request_headers())
+    r = await session.get(url)
     r.raise_for_status()
     return r.text
 
 
 async def download_one(
-    client: httpx.AsyncClient,
+    session: AsyncSession,
     semaphore: asyncio.Semaphore,
     entry: ReleaseEntry,
     publication_name: str,
@@ -210,7 +220,7 @@ async def download_one(
         return path
 
     async with semaphore:
-        r = await client.get(entry.url)
+        r = await session.get(entry.url)
         r.raise_for_status()
         path.write_text(r.text, encoding='utf-8')
         return path
@@ -219,7 +229,7 @@ async def download_one(
 async def download_all(
     entries: list[ReleaseEntry],
     publication_name: str,
-    concurrency: int = 5,
+    concurrency: int = 3,
 ) -> list[Path]:
     """Download all release HTMLs for a publication; skip existing files.
 
@@ -230,7 +240,8 @@ async def download_all(
     publication_name : str
         Publication name (used for output directory and filenames).
     concurrency : int
-        Maximum concurrent downloads.
+        Maximum concurrent downloads (kept low — BLS usage policy asks
+        bots not to interfere with interactive traffic).
 
     Returns
     -------
@@ -240,15 +251,9 @@ async def download_all(
     out_dir = RELEASES_DIR / publication_name
     semaphore = asyncio.Semaphore(concurrency)
 
-    async with httpx.AsyncClient(
-        http2=True,
-        base_url=BASE_URL,
-        follow_redirects=True,
-        timeout=30.0,
-        headers=_request_headers(),
-    ) as client:
+    async with create_session() as session:
         tasks = [
-            download_one(client, semaphore, e, publication_name, out_dir)
+            download_one(session, semaphore, e, publication_name, out_dir)
             for e in entries
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -276,14 +281,9 @@ async def scrape_publication(publication_name: str | None = None) -> None:
         if not pubs:
             raise ValueError(f'Unknown publication: {publication_name!r}')
 
-    async with httpx.AsyncClient(
-        http2=True,
-        follow_redirects=True,
-        timeout=30.0,
-        headers=_request_headers(),
-    ) as client:
+    async with create_session() as session:
         for pub in pubs:
-            html = await fetch_index(client, pub.index_url)
+            html = await fetch_index(session, pub.index_url)
             entries = parse_index_page(html, pub.name, pub.series, pub.frequency)
             if not entries:
                 continue

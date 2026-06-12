@@ -66,11 +66,12 @@ def _build_release_calendar() -> None:
     """
     import asyncio
 
-    import httpx
     import polars as pl
     from nfp_download.release_dates.config import PUBLICATIONS
     from nfp_download.release_dates.parser import collect_release_dates
     from nfp_download.release_dates.scraper import (
+        FetchError,
+        create_session,
         download_all,
         fetch_index,
         parse_index_page,
@@ -86,17 +87,32 @@ def _build_release_calendar() -> None:
     )
 
     async def _download_all_publications() -> None:
-        async with httpx.AsyncClient(
-            http2=True, follow_redirects=True, timeout=30.0,
-        ) as client:
+        async with create_session() as session:
             for pub in PUBLICATIONS:
                 print(f'Fetching index for {pub.name}...')
-                html = await fetch_index(client, pub.index_url)
+                try:
+                    html = await fetch_index(session, pub.index_url)
+                except FetchError as e:
+                    # Safety net: if BLS's bot detection changes again, the
+                    # calendar can still be built from release pages already
+                    # on disk; only newly published pages are missed.
+                    print(
+                        f'  WARNING: index fetch failed for {pub.name} ({e}); '
+                        f'using cached release pages only'
+                    )
+                    continue
                 entries = parse_index_page(
                     html, pub.name, pub.series, pub.frequency,
                 )
                 print(f'  Found {len(entries)} releases for {pub.name}')
-                paths = await download_all(entries, pub.name)
+                try:
+                    paths = await download_all(entries, pub.name)
+                except FetchError as e:
+                    print(
+                        f'  WARNING: release download failed for {pub.name} '
+                        f'({e}); using cached release pages only'
+                    )
+                    continue
                 print(f'  Downloaded {len(paths)} new files for {pub.name}')
 
     asyncio.run(_download_all_publications())

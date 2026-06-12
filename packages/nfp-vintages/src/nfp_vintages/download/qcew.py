@@ -6,6 +6,12 @@ Two download functions:
 - ``download_qcew_bulk``: quarterly singlefile ZIPs (2003-present), for
   sector-level employment by state.  Each ~280 MB ZIP is downloaded, filtered
   to the needed rows, and discarded — only the compact filtered parquet is kept.
+
+The revisions CSV lives on www.bls.gov, where Akamai bot management
+fingerprints the TLS handshake (plain httpx gets 403 regardless of headers),
+so it uses the Chrome-impersonating session from
+:func:`nfp_download.client.create_impersonating_session`. The bulk files
+live on data.bls.gov, which plain httpx fetches fine.
 """
 
 from __future__ import annotations
@@ -17,7 +23,8 @@ from pathlib import Path
 
 import httpx
 import polars as pl
-from nfp_download.client import create_client, get_with_retry
+from curl_cffi.requests import Session
+from nfp_download.client import create_client, create_impersonating_session, get_with_retry
 from nfp_lookups.geography import STATES
 from nfp_lookups.paths import DATA_DIR
 
@@ -49,7 +56,7 @@ _KEEP_COLUMNS: list[str] = [
 def download_qcew(
     data_dir: Path | None = None,
     *,
-    client: httpx.Client | None = None,
+    session: Session | None = None,
 ) -> None:
     """Download the QCEW revisions CSV.
 
@@ -57,26 +64,27 @@ def download_qcew(
     ----------
     data_dir : Path or None
         Root data directory. Defaults to ``DATA_DIR``.
-    client : httpx.Client or None
-        Optional pre-built client. A new one is created if not provided.
+    session : curl_cffi.requests.Session or None
+        Optional pre-built impersonating session. A new one is created if
+        not provided.
     """
     base = (data_dir or DATA_DIR) / 'downloads'
     qcew_dir = base / 'qcew'
     qcew_dir.mkdir(parents=True, exist_ok=True)
     out_path = qcew_dir / QCEW_FILENAME
 
-    own_client = client is None
-    if client is None:
-        client = create_client()
+    own_session = session is None
+    if session is None:
+        session = create_impersonating_session()
 
     try:
-        r = get_with_retry(client, QCEW_CSV_URL)
+        r = get_with_retry(session, QCEW_CSV_URL)
         r.raise_for_status()
         out_path.write_bytes(r.content)
         print(f'  saved {QCEW_FILENAME}')
     finally:
-        if own_client:
-            client.close()
+        if own_session:
+            session.close()
 
 
 def _filter_bulk_csv(csv_bytes: bytes) -> pl.DataFrame:

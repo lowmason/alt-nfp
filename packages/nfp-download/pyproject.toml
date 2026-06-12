@@ -7,6 +7,7 @@ license = {text = "MIT"}
 dependencies = [
     "nfp-lookups",
     "beautifulsoup4>=4.12.0",
+    "curl-cffi>=0.15.0",
     "httpx[http2]>=0.24.0",
     "lxml>=4.9.0",
     "polars>=0.20.0",

@@ -4,6 +4,11 @@ Scrapes the CES vintage-data page for the ``cesvinall.zip`` bundle and
 extracts it into ``DATA_DIR / 'downloads' / 'ces' / 'cesvinall'``.
 Only the zip is needed; the individual xlsx workbooks on the same page
 contain the same data and are not used downstream.
+
+Both URLs live on www.bls.gov, where Akamai bot management fingerprints
+the TLS handshake (plain httpx gets 403 regardless of headers), so
+transport is the Chrome-impersonating session from
+:func:`nfp_download.client.create_impersonating_session`.
 """
 
 from __future__ import annotations
@@ -12,9 +17,9 @@ import zipfile
 from pathlib import Path
 from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup
-from nfp_download.client import create_client, get_with_retry
+from curl_cffi.requests import Session
+from nfp_download.client import create_impersonating_session, get_with_retry
 from nfp_lookups.paths import DATA_DIR
 
 CES_INDEX_URL = 'https://www.bls.gov/web/empsit/cesvindata.htm'
@@ -34,7 +39,7 @@ def _find_zip_url(html: str) -> str:
 def download_ces(
     data_dir: Path | None = None,
     *,
-    client: httpx.Client | None = None,
+    session: Session | None = None,
 ) -> None:
     """Download and extract ``cesvinall.zip`` from the BLS CES vintage page.
 
@@ -44,22 +49,23 @@ def download_ces(
     ----------
     data_dir : Path or None
         Root data directory. Defaults to ``DATA_DIR``.
-    client : httpx.Client or None
-        Optional pre-built client. A new one is created if not provided.
+    session : curl_cffi.requests.Session or None
+        Optional pre-built impersonating session. A new one is created if
+        not provided.
     """
     ces_dir = (data_dir or DATA_DIR) / 'downloads' / 'ces'
     ces_dir.mkdir(parents=True, exist_ok=True)
 
-    own_client = client is None
-    if client is None:
-        client = create_client()
+    own_session = session is None
+    if session is None:
+        session = create_impersonating_session()
 
     try:
-        r = get_with_retry(client, CES_INDEX_URL)
+        r = get_with_retry(session, CES_INDEX_URL)
         r.raise_for_status()
         zip_url = _find_zip_url(r.text)
 
-        r = get_with_retry(client, zip_url)
+        r = get_with_retry(session, zip_url)
         r.raise_for_status()
 
         extract_to = ces_dir / 'cesvinall'
@@ -71,5 +77,5 @@ def download_ces(
         zip_path.unlink()
         print(f'  extracted cesvinall.zip -> {extract_to}/')
     finally:
-        if own_client:
-            client.close()
+        if own_session:
+            session.close()

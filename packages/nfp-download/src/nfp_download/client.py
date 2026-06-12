@@ -1,7 +1,11 @@
-"""Shared HTTP client with retry logic for vintage pipeline requests.
+"""Shared HTTP clients with retry logic for vintage pipeline requests.
 
 Provides a pre-configured :class:`httpx.Client` with HTTP/2, browser-like
-headers, and exponential back-off on 429 / transient 5xx errors.
+headers, and exponential back-off on 429 / transient 5xx errors, plus a
+Chrome-impersonating :class:`curl_cffi.requests.Session` for www.bls.gov
+fetches — Akamai bot management there fingerprints the TLS handshake, so
+plain httpx gets 403 regardless of headers (``release_dates/scraper.py``
+holds the async counterpart). Other hosts stay on httpx.
 
 If ``BLS_API_KEY`` is set in the environment, it is appended as a
 ``registrationkey`` query parameter on requests to ``bls.gov`` domains.
@@ -14,6 +18,7 @@ import os
 import time
 
 import httpx
+from curl_cffi import requests as curl_requests
 
 logger = logging.getLogger(__name__)
 USER_AGENT = 'Mozilla/5.0 (compatible; alt-nfp/0.1.0)'
@@ -59,13 +64,41 @@ def create_client(
     return httpx.Client(http2=http2, headers=merged, timeout=timeout)
 
 
+def create_impersonating_session(
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> curl_requests.Session:
+    """Sync HTTP session that passes www.bls.gov's TLS-fingerprint bot detection.
+
+    Sync counterpart of ``release_dates.scraper.create_session``.
+    ``impersonate='chrome'`` tracks the newest Chrome handshake curl_cffi
+    supports and supplies matching default headers; spoofing our own
+    User-Agent here would contradict the fingerprint, so we send none.
+
+    Parameters
+    ----------
+    timeout : float
+        Default per-request timeout in seconds.
+
+    Returns
+    -------
+    curl_cffi.requests.Session
+        Caller is responsible for closing it.
+    """
+    return curl_requests.Session(
+        impersonate='chrome',
+        allow_redirects=True,
+        timeout=timeout,
+    )
+
+
 def get_with_retry(
-    client: httpx.Client,
+    client: httpx.Client | curl_requests.Session,
     url: str,
     *,
     timeout: float = DEFAULT_TIMEOUT,
     max_retries: int = MAX_RETRIES,
-) -> httpx.Response:
+) -> httpx.Response | curl_requests.Response:
     """GET *url* with exponential back-off on 429 and transient 5xx errors.
 
     If ``BLS_API_KEY`` is set and the URL contains ``bls.gov``, the key is
@@ -73,8 +106,10 @@ def get_with_retry(
 
     Parameters
     ----------
-    client : httpx.Client
-        An open ``httpx.Client``.
+    client : httpx.Client or curl_cffi.requests.Session
+        An open client from :func:`create_client` or
+        :func:`create_impersonating_session` (both expose the same
+        ``get(url, timeout=..., params=...)`` surface).
     url : str
         Absolute URL to fetch.
     timeout : float
@@ -84,12 +119,12 @@ def get_with_retry(
 
     Returns
     -------
-    httpx.Response
+    httpx.Response or curl_cffi.requests.Response
         The successful response.
 
     Raises
     ------
-    httpx.HTTPStatusError
+    httpx.HTTPStatusError or curl_cffi.requests.exceptions.HTTPError
         After exhausting retries or on a non-retryable error.
     """
     params: dict[str, str] = {}

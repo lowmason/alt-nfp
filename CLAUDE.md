@@ -50,6 +50,12 @@ to `main`.
 - **`data/` is proprietary and gitignored** — this repo is public. Tests that
   need the vintage store self-skip when it's unavailable; network tests are
   marked `@pytest.mark.network`.
+- **Never rebuild the canonical store in place.** `s3://alt-nfp/store`
+  contains live-captured release-day vintage rows (national CES, Mar 2025–
+  Jan 2026 and ongoing) that exist in no raw input — a from-scratch
+  `alt-nfp build` to that URI would silently destroy them. Rebuilds target a
+  scratch prefix (`NFP_STORE_URI=s3://alt-nfp/store-rebuild …`); the
+  canonical store only ever takes appends.
 - **Specs workflow**: implemented specs move from `specs/` to `archive/`.
 - The old repo at `~/Projects/alt_nfp` is the frozen reference — read it for
   parity questions, never modify it.

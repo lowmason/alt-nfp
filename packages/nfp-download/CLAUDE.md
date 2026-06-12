@@ -7,13 +7,13 @@ HTTP clients and scrapers for downloading raw BLS and FRED data.
 Generic download layer — no data transformation, just fetching. Provides:
 - **BLS API client** (`bls/`): structured HTTP layer for CES and QCEW series
 - **FRED client** (`fred.py`): single-series JSON API downloader with retry
-- **HTTP retry client** (`client.py`): shared httpx client with exponential backoff
+- **HTTP retry client** (`client.py`): shared httpx client with exponential backoff, plus Chrome-impersonating curl_cffi session for www.bls.gov
 - **Release date scraper** (`release_dates/`): BLS publication schedule HTML scraping + parsing
 
 ## Tech Stack
 
 - **Language**: Python 3.12 (requires >= 3.10)
-- **HTTP**: httpx (async, HTTP/2)
+- **HTTP**: httpx (async, HTTP/2); curl_cffi (Chrome impersonation) for www.bls.gov pages only
 - **Parsing**: BeautifulSoup4 + lxml
 - **Build**: hatchling
 - **Internal deps**: `nfp-lookups` (geography for QCEW state filtering)
@@ -33,7 +33,7 @@ ruff check src/nfp_download/
 ```
 src/nfp_download/
 ├── __init__.py
-├── client.py               # create_client(), get_with_retry() — shared httpx utilities
+├── client.py               # create_client(), create_impersonating_session(), get_with_retry()
 ├── fred.py                 # fetch_fred_series(series_id) — FRED JSON API, requires FRED_API_KEY
 ├── bls/
 │   ├── __init__.py
@@ -59,7 +59,8 @@ src/nfp_download/
 - **FRED client** (`fred.py`): `fetch_fred_series(series_id)` returns a Polars DataFrame with `(ref_date, value)`. Uses httpx with exponential-backoff retry. Requires `FRED_API_KEY` env var.
 - **BLS HTTP client** (`bls/_http.py`): `BLSHttpClient` handles CSV downloads from BLS. No internal dependencies beyond `_programs.py` for series ID construction.
 - **Series-ID grammar**: `build_series_id()` / `parse_series_id()` live in `nfp_lookups.series_ids` (pure reference data); `bls/_programs.py` re-exports them for back-compat.
-- **Release date scraper** (`release_dates/scraper.py`): async httpx scraper that fetches BLS schedule HTML. Config values (URLs, start year, output dirs) should be passed as parameters, not imported from other packages.
+- **Release date scraper** (`release_dates/scraper.py`): async scraper for BLS schedule HTML. Transport is curl_cffi `AsyncSession(impersonate='chrome')` via `create_session()` — www.bls.gov (Akamai) fingerprints TLS, so httpx/plain curl get 403 regardless of headers. Callers catch the re-exported `FetchError`. Config values (URLs, start year, output dirs) should be passed as parameters, not imported from other packages.
+- **Sync www.bls.gov transport** (`client.py`): `create_impersonating_session()` is the sync counterpart of the scraper's `create_session()`, used by nfp-vintages for the CES vintage zip and QCEW revisions CSV. `get_with_retry()` accepts either an `httpx.Client` or this session (same `get`/`raise_for_status` surface). Non-www.bls.gov hosts (api.bls.gov, data.bls.gov, FRED) stay on httpx.
 - **All download functions should accept output paths as parameters** rather than importing path constants, to maintain package independence.
 - **`@pytest.mark.network`**: tests requiring network access are marked; deselect with `-m "not network"`.
 
@@ -69,5 +70,6 @@ Tests live in `tests/` within this package:
 - `tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
 - `tests/bls/test_http.py` — BLS HTTP client tests
 - `tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
+- `tests/release_dates/test_scraper_network.py` — live BLS scraper transport tests (network-marked)
 - `tests/test_fred.py` — FRED client tests
 - `tests/test_client.py` — HTTP client retry logic tests

@@ -86,6 +86,25 @@ Copy the four data packages, the rooted test suite for them, lookups data, and a
 
 **Gate:** ported test suite green; `uv run alt-nfp build` reproduces the vintage store from raw downloads.
 
+> **Gate status: ✅ PASSED (2026-06-12).** Suite: 361 passed / 1 intentional
+> skip. Reproduction run: old repo's frozen raw downloads (323 MB) copied in,
+> `alt-nfp process` → all three revision parquets **byte-identical** to the
+> reference intermediates (release/vintage-dates identical modulo 4 additive
+> run-date-projected future slots); `alt-nfp build --releases <frozen
+> releases.parquet>` into a scratch S3 prefix → **770,506 rows, every
+> derivable value identical to the reference store**. The reference store has
+> 64 additional/different national-headline CES rows (62 extra keys + 2
+> values) that exist in **no raw input** — they were live-captured by the old
+> repo's monthly `current` runs (release-day vintages, Mar 2025–Jan 2026).
+> Conclusion: the ported pipeline reproduces 100% of what is derivable from
+> raw downloads; the canonical store's live-captured rows are by nature
+> irreproducible, which is the vintage store's purpose. Two operational notes:
+> (1) **never rebuild the canonical store in place** — rebuilds go to a
+> scratch prefix (now also a hard rule in root CLAUDE.md); (2) BLS now 403s
+> the calendar index scrape — the builder degrades gracefully to cached
+> release pages (warning, not crash); fresh-page scraping needs a header/
+> client fix before the next live `current`/`process` run.
+
 ### A1 — Golden-master censoring fixtures
 
 Generate censored panels in the **old** repo for a set of as-of dates chosen to exercise the known edge cases: a January (benchmark month), a current-frontier month, each QCEW quarter-boundary rule, the COVID era break, a month with stale provider data. Commit them as fixtures. The new repo must reproduce them value-identical.
