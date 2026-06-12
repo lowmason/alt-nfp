@@ -1,6 +1,6 @@
 """Tag estimate DataFrames with vintage_date, revision, and benchmark_revision.
 
-Reads vintage_dates (from :mod:`alt_nfp.ingest.release_dates`), computes the
+Reads vintage_dates (from :mod:`nfp_ingest.release_dates`), computes the
 latest vintage lookup per publication/ref_date, and joins onto estimate
 DataFrames. Can optionally append the tagged rows to the vintage store.
 """
@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 import polars as pl
-from nfp_download.release_dates.config import VINTAGE_DATES_PATH
+from nfp_lookups.paths import VINTAGE_DATES_PATH
 
 logger = logging.getLogger(__name__)
 

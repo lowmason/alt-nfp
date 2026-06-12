@@ -5,12 +5,12 @@ Loads payroll provider parquet files with a standard multi-dimensional schema::
     ref_date, geographic_type, geographic_code,
     industry_type, industry_code, employment, [birth_rate]
 
-Filters to the slice specified by :class:`~alt_nfp.config.ProviderConfig`
+Filters to the slice specified by :class:`~nfp_lookups.provider_config.ProviderConfig`
 and produces flat ``(ref_date, employment[, birth_rate])`` time series for
 the model pipeline, as well as PANEL_SCHEMA rows for the observation panel.
 
 Cell-level provider parquets (``geographic_type='region'``) are routed
-through :mod:`~alt_nfp.ingest.compositing` for QCEW-weighted national
+through :mod:`~nfp_ingest.compositing` for QCEW-weighted national
 compositing before entering the standard pipeline.
 """
 
@@ -157,7 +157,7 @@ def ingest_provider(
     Parameters
     ----------
     config : ProviderConfig
-        Provider configuration from alt_nfp.config.
+        Provider configuration from nfp_lookups.provider_config.
     raw_dir : Path, optional
         Directory containing raw provider files. Falls back to *data_dir*
         if not provided or if file not found in raw_dir.

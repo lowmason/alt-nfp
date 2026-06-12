@@ -13,7 +13,7 @@ Generic download layer — no data transformation, just fetching. Provides:
 ## Tech Stack
 
 - **Language**: Python 3.12 (requires >= 3.10)
-- **HTTP**: httpx (async, HTTP/2), requests (BLS legacy)
+- **HTTP**: httpx (async, HTTP/2)
 - **Parsing**: BeautifulSoup4 + lxml
 - **Build**: hatchling
 - **Internal deps**: `nfp-lookups` (geography for QCEW state filtering)
@@ -38,7 +38,7 @@ src/nfp_download/
 ├── bls/
 │   ├── __init__.py
 │   ├── _http.py            # BLSHttpClient — CSV download transport for BLS API
-│   ├── _programs.py        # BLS program definitions (CES, QCEW series ID structure)
+│   ├── _programs.py        # Back-compat shim → nfp_lookups.series_ids (series-ID grammar)
 │   ├── ces_national.py     # fetch_ces_national() — CES national series
 │   ├── ces_state.py        # fetch_ces_state() — CES state series
 │   └── qcew.py             # fetch_qcew(), fetch_qcew_with_geography()
@@ -58,15 +58,16 @@ src/nfp_download/
 
 - **FRED client** (`fred.py`): `fetch_fred_series(series_id)` returns a Polars DataFrame with `(ref_date, value)`. Uses httpx with exponential-backoff retry. Requires `FRED_API_KEY` env var.
 - **BLS HTTP client** (`bls/_http.py`): `BLSHttpClient` handles CSV downloads from BLS. No internal dependencies beyond `_programs.py` for series ID construction.
-- **BLS programs** (`bls/_programs.py`): `build_series_id()` and `parse_series_id()` encode/decode BLS series ID conventions. Pure functions, no I/O.
+- **Series-ID grammar**: `build_series_id()` / `parse_series_id()` live in `nfp_lookups.series_ids` (pure reference data); `bls/_programs.py` re-exports them for back-compat.
 - **Release date scraper** (`release_dates/scraper.py`): async httpx scraper that fetches BLS schedule HTML. Config values (URLs, start year, output dirs) should be passed as parameters, not imported from other packages.
 - **All download functions should accept output paths as parameters** rather than importing path constants, to maintain package independence.
 - **`@pytest.mark.network`**: tests requiring network access are marked; deselect with `-m "not network"`.
 
 ## Test Mapping
 
-Tests from the monorepo `tests/` that belong here:
-- `tests/ingest/bls/test_downloads.py` — BLS download integration tests
-- `tests/ingest/bls/test_http.py` — BLS HTTP client tests
-- `tests/ingest/bls/test_programs.py` — Series ID construction/parsing tests
-- `test_fred.py` — FRED client tests
+Tests live in `tests/` within this package:
+- `tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
+- `tests/bls/test_http.py` — BLS HTTP client tests
+- `tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
+- `tests/test_fred.py` — FRED client tests
+- `tests/test_client.py` — HTTP client retry logic tests

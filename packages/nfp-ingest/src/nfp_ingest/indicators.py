@@ -3,7 +3,7 @@
 Indicators are stored as individual parquet files under
 ``data/indicators/<name>.parquet`` with a uniform ``(ref_date, value)``
 schema.  The :func:`download_indicators` function fetches all series
-defined in :data:`~alt_nfp.config.CYCLICAL_INDICATORS` from the FRED API,
+defined in :data:`~nfp_lookups.provider_config.CYCLICAL_INDICATORS_DEFAULT` from the FRED API,
 and :func:`read_indicator` provides a convenience reader.
 """
 

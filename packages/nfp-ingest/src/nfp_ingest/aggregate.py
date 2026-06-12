@@ -2,7 +2,7 @@
 
 Takes DataFrames with national and state-level rows, adds region and division
 rows by mapping state FIPS to Census Region/Division (via
-:mod:`alt_nfp.lookups.geography`) and summing employment within each group.
+:mod:`nfp_lookups.geography`) and summing employment within each group.
 """
 
 from __future__ import annotations

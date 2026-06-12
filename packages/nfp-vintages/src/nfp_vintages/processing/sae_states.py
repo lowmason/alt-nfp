@@ -20,9 +20,8 @@ from pathlib import Path
 
 import httpx
 import polars as pl
-from nfp_download.release_dates.config import VINTAGE_DATES_PATH
-from nfp_lookups.industry import _CES_SECTOR_TO_NAICS, SINGLE_SECTOR_SUPERSECTORS
-from nfp_lookups.paths import INTERMEDIATE_DIR
+from nfp_lookups.industry import CES_SECTOR_TO_NAICS, SINGLE_SECTOR_SUPERSECTORS
+from nfp_lookups.paths import INTERMEDIATE_DIR, VINTAGE_DATES_PATH
 
 OUTPUT_PATH = INTERMEDIATE_DIR / 'sae_revisions.parquet'
 CHECKPOINT_PATH = INTERMEDIATE_DIR / 'sae_checkpoint.parquet'
@@ -442,7 +441,7 @@ def _split_revisions(
 
 _SECTOR_RECODE = {
     ces: naics
-    for ces, naics in _CES_SECTOR_TO_NAICS.items()
+    for ces, naics in CES_SECTOR_TO_NAICS.items()
     if ces != naics
 }
 

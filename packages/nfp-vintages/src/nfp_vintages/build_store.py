@@ -1,13 +1,13 @@
 """Build the Hive-partitioned vintage store from revisions + releases.
 
-Merges historical revisions (from :mod:`~alt_nfp.vintages.processing.combine`)
+Merges historical revisions (from :mod:`~nfp_vintages.processing.combine`)
 with current estimates (``releases.parquet`` from ``bls-estimates``), normalizes
 ``industry_type``, deduplicates, and writes the vintage store partitioned by
 ``(source, seasonally_adjusted)``.
 
 Can be run as a module::
 
-    python -m alt_nfp.vintages.build_store [--releases PATH]
+    python -m nfp_vintages.build_store [--releases PATH]
 """
 
 from __future__ import annotations
@@ -15,8 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
-from nfp_ingest.vintage_store import VINTAGE_STORE_PATH
-from nfp_lookups.paths import DATA_DIR, INTERMEDIATE_DIR
+from nfp_lookups.paths import DATA_DIR, INTERMEDIATE_DIR, VINTAGE_STORE_PATH
 
 REVISIONS_PATH = INTERMEDIATE_DIR / 'revisions.parquet'
 RELEASES_PATH = DATA_DIR / 'releases.parquet'

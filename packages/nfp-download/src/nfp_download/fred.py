@@ -2,7 +2,7 @@
 
 Provides a single ``fetch_fred_series`` function that retrieves observation
 data from the FRED JSON API (``api.stlouisfed.org``).  Retry logic mirrors
-the pattern in :mod:`alt_nfp.vintages.processing.sae_states`.
+the pattern in :mod:`nfp_vintages.processing.sae_states`.
 
 Requires ``FRED_API_KEY`` in the environment (loaded via ``python-dotenv``).
 """

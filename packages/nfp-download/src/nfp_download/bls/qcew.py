@@ -21,6 +21,7 @@ import logging
 import re
 
 import polars as pl
+from nfp_lookups.geography import STATES
 
 from ._http import BLSHttpClient
 
@@ -217,7 +218,7 @@ def fetch_qcew_with_geography(
         Include state-level rows. Defaults to ``True``.
     state_fips_list : list[str] or None
         Specific state FIPS to include. If ``None``, uses all from
-        :data:`~alt_nfp.lookups.geography.STATES`.
+        :data:`~nfp_lookups.geography.STATES`.
     client : BLSHttpClient or None
         Optional HTTP client.
 
@@ -237,7 +238,6 @@ def fetch_qcew_with_geography(
     if ownership_codes is None:
         ownership_codes = ['5']
     if state_fips_list is None:
-        from alt_nfp.lookups.geography import STATES
         state_fips_list = STATES
 
     ownership_set = set(ownership_codes)

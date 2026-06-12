@@ -2,8 +2,8 @@
 
 Provides the industry hierarchy as a Polars LazyFrame, CES series ID mappings,
 CES-to-QCEW industry cross-mapping (:class:`IndustryEntry`, :data:`INDUSTRY_MAP`),
-EN (QCEW) series ID construction, and index-builder functions for PyMC
-hierarchical indexing.
+EN (QCEW) series ID construction, and index-builder functions for the
+model layer's hierarchical indexing.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
+
+from nfp_lookups.series_ids import build_series_id
 
 # --- Industry hierarchy ---
 # Each row maps a 2-digit NAICS sector to its BLS CES supersector and domain.
@@ -284,7 +286,7 @@ _CES_SECTOR = [
 
 # CES sector code → NAICS code.  Most are identity but CES uses its own
 # codes for Wholesale/Retail/Transportation that differ from NAICS.
-_CES_SECTOR_TO_NAICS: dict[str, str] = {
+CES_SECTOR_TO_NAICS: dict[str, str] = {
     '21': '21',     # Mining
     '31': '31',     # Manufacturing (NAICS 31-33 mapped to simplified '31')
     '32': '32',     # Nondurable goods (sub-split of manufacturing)
@@ -391,7 +393,7 @@ def _build_industry_map() -> list[IndustryEntry]:
 
     # Sector: qcew_naics is the NAICS code that appears in QCEW responses.
     for ces_code, code, name in _CES_SECTOR:
-        qcew = _CES_SECTOR_TO_NAICS.get(code, code)
+        qcew = CES_SECTOR_TO_NAICS.get(code, code)
         entries.append(IndustryEntry(
             industry_code=code,
             industry_type='sector',
@@ -470,11 +472,6 @@ def en_series_id(
     str
         Full EN series ID string (e.g. ``'ENUUS0001010000001'``).
     """
-    try:
-        from nfp_download.bls import build_series_id
-    except ImportError:
-        from alt_nfp.ingest.bls import build_series_id
-
     return build_series_id(
         'EN',
         seasonal='N',

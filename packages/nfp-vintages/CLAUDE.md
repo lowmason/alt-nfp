@@ -100,5 +100,5 @@ data/
 
 ## Test Mapping
 
-Tests from the monorepo `tests/` that belong here:
+Tests live in `tests/` within this package:
 - `test_vintages.py` — vintage view & evaluation tests

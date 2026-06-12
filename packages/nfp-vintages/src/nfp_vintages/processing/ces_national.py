@@ -10,13 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
-from nfp_download.release_dates.config import VINTAGE_DATES_PATH
 from nfp_lookups.industry import (
-    _CES_SECTOR_TO_NAICS,
+    CES_SECTOR_TO_NAICS,
     INDUSTRY_MAP,
     SINGLE_SECTOR_SUPERSECTORS,
 )
-from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR
+from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR, VINTAGE_DATES_PATH
 from polars import selectors as cs
 
 CES_DIR = DOWNLOADS_DIR / 'ces' / 'cesvinall'
@@ -164,7 +163,7 @@ def read_triangular_ces(
 
 _SECTOR_RECODE = {
     ces: naics
-    for ces, naics in _CES_SECTOR_TO_NAICS.items()
+    for ces, naics in CES_SECTOR_TO_NAICS.items()
     if ces != naics
 }
 

@@ -404,7 +404,7 @@ def fetch_qcew_current_with_geography(
         Include state-level rows. Defaults to ``True``.
     state_fips_list : list[str] or None
         Specific 2-digit state FIPS codes. If ``None``, uses all from
-        :data:`~alt_nfp.lookups.geography.STATES`.
+        :data:`~nfp_lookups.geography.STATES`.
     client : BLSHttpClient or None
         Optional HTTP client.
 

@@ -23,20 +23,9 @@ dependencies = [
     "nfp-vintages",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
-]
-viz = [
-    "matplotlib>=3.7.0",
-    "arviz>=0.17.0",
-]
-
-# No build-system: this is a virtual workspace root (no installable package)
+# No build-system: this is a virtual workspace root (no installable package).
+# Dev tooling lives in [dependency-groups] below (uv-native; extras on a
+# virtual root are inert).
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -92,10 +81,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "packages/nfp-vintages/src/nfp_vintages/__main__.py" = ["B008"]  # typer.Option in defaults is idiomatic
-"tests/*" = ["B017", "B011"]  # blind exception + assert False are common in tests
+"packages/*/tests/**" = ["B017", "B011"]  # blind exception + assert False are common in tests
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["packages"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -108,16 +97,9 @@ markers = [
 python_version = "3.12"
 warn_unused_configs = true
 ignore_missing_imports = true
-# This is a research codebase that leans on dynamic libraries (ArviZ,
-# PyMC, Polars expressions). We rely on tests + ruff for correctness
-# and keep mypy as a soft check.
+# Research codebase that leans on dynamic libraries (Polars expressions).
+# We rely on tests + ruff for correctness and keep mypy as a soft check.
+# Re-add per-library overrides (JAX/NumPyro/dynamax) when nfp-model-jax lands.
 disallow_untyped_defs = false
 warn_return_any = false
 check_untyped_defs = false
-
-[[tool.mypy.overrides]]
-# ArviZ exposes `posterior`, `posterior_predictive`, etc. dynamically
-# via attribute access; mypy cannot see them.
-module = ["arviz", "arviz.*", "pymc", "pymc.*", "pytensor", "pytensor.*"]
-ignore_missing_imports = true
-follow_imports = "skip"

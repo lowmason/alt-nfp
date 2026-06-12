@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import polars as pl
-from nfp_download.release_dates.config import RELEASE_DATES_PATH, VINTAGE_DATES_PATH
+from nfp_lookups.paths import RELEASE_DATES_PATH, VINTAGE_DATES_PATH
 
 CES_MONTHLY_REVISIONS = [0, 1, 2]
 # SAE_MONTHLY_REVISIONS = [0, 1]

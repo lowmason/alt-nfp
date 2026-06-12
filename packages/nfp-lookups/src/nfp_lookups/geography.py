@@ -6,7 +6,7 @@ Regions (1-4) and Divisions (01-09). Puerto Rico (FIPS ``'72'``) is assigned
 to Region 3 (South) and Division 05 (South Atlantic), the same as Florida.
 
 Optionally exposes :data:`GEOGRAPHY_HIERARCHY` as a Polars LazyFrame for
-consistency with :data:`~alt_nfp.lookups.industry.INDUSTRY_HIERARCHY`.
+consistency with :data:`~nfp_lookups.industry.INDUSTRY_HIERARCHY`.
 """
 
 from __future__ import annotations

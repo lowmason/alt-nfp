@@ -4,7 +4,7 @@ Two data sources are merged:
 
 1. **Bulk quarterly files** (2003-present): employment from multiple ownership
    and aggregation-level streams, processed from
-   :func:`~alt_nfp.vintages.download.qcew.download_qcew_bulk`.
+   :func:`~nfp_vintages.download.qcew.download_qcew_bulk`.
 
    Streams:
    - Total all-ownership (``own_code='0'``) → ``(national, '00')``
@@ -19,7 +19,7 @@ Two data sources are merged:
    duplicated as sector rows (23, 51, 81).  All rows are ``revision=0``.
 
 2. **Revisions CSV** (2017-present): total employment with revision history
-   (``revision`` 0-4), from :func:`~alt_nfp.vintages.download.qcew.download_qcew`.
+   (``revision`` 0-4), from :func:`~nfp_vintages.download.qcew.download_qcew`.
    Where both sources overlap on ``(geographic_code, industry_code, ref_date,
    revision)``, the revisions CSV is preferred (it has exact vintage dates).
 """
@@ -29,7 +29,6 @@ from __future__ import annotations
 from datetime import date
 
 import polars as pl
-from nfp_download.release_dates.config import VINTAGE_DATES_PATH
 from nfp_lookups.industry import (
     GOVT_OWNERSHIP_TO_SECTOR,
     NAICS3_TO_MFG_SECTOR,
@@ -37,7 +36,7 @@ from nfp_lookups.industry import (
     get_supersector_components,
     qcew_to_sector,
 )
-from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR
+from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR, VINTAGE_DATES_PATH
 from nfp_lookups.revision_schedules import get_qcew_vintage_date
 
 OUTPUT_PATH = INTERMEDIATE_DIR / 'qcew_revisions.parquet'

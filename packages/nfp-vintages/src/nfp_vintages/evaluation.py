@@ -1,7 +1,7 @@
 """Vintage evaluation: revision analysis and noise multiplier construction.
 
 Provides functions to compute revision differences between vintages and
-to build per-observation noise multiplier arrays for the PyMC model.
+to build per-observation noise multiplier arrays for the model.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def build_noise_multiplier_vector(panel_view: pl.DataFrame) -> np.ndarray:
     np.ndarray
         Float array of length len(panel_view), where each entry is the
         noise multiplier for that observation. Suitable for passing to
-        the PyMC model as observation-level noise scaling.
+        the model as observation-level noise scaling.
     """
     n = len(panel_view)
     multipliers = np.ones(n, dtype=np.float64)

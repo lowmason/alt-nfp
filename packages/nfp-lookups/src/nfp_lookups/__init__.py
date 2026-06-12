@@ -13,6 +13,7 @@ from .geography import (
     STATES,
 )
 from .industry import (
+    CES_SECTOR_TO_NAICS,
     CES_SERIES_MAP,
     DOMAIN_DEFINITIONS,
     GOVT_OWNERSHIP_TO_SECTOR,
@@ -61,4 +62,11 @@ from .schemas import (
     VINTAGE_STORE_SCHEMA,
     empty_panel,
     validate_panel,
+)
+from .series_ids import (
+    PROGRAMS,
+    build_series_id,
+    get_program,
+    list_programs,
+    parse_series_id,
 )

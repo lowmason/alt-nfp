@@ -2,7 +2,7 @@
 
 Usage::
 
-    alt-nfp                          # Run all steps (or: python -m alt_nfp.vintages)
+    alt-nfp                          # Run all steps (or: python -m nfp_vintages)
     alt-nfp download                  # Download CES + QCEW revision files
     alt-nfp download-indicators       # Download cyclical indicators from FRED
     alt-nfp process                   # Scrape BLS calendar + process revisions
@@ -68,12 +68,7 @@ def _build_release_calendar() -> None:
 
     import httpx
     import polars as pl
-    from nfp_download.release_dates.config import (
-        PUBLICATIONS,
-        RELEASE_DATES_PATH,
-        RELEASES_DIR,
-        VINTAGE_DATES_PATH,
-    )
+    from nfp_download.release_dates.config import PUBLICATIONS
     from nfp_download.release_dates.parser import collect_release_dates
     from nfp_download.release_dates.scraper import (
         download_all,
@@ -83,6 +78,11 @@ def _build_release_calendar() -> None:
     from nfp_ingest.release_dates.vintage_dates import (
         SUPPLEMENTAL_RELEASE_DATES,
         build_vintage_dates,
+    )
+    from nfp_lookups.paths import (
+        RELEASE_DATES_PATH,
+        RELEASES_DIR,
+        VINTAGE_DATES_PATH,
     )
 
     async def _download_all_publications() -> None:

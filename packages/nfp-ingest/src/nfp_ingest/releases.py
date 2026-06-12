@@ -15,8 +15,7 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
-from nfp_download.release_dates.config import VINTAGE_DATES_PATH
-from nfp_lookups.paths import DATA_DIR
+from nfp_lookups.paths import DATA_DIR, VINTAGE_DATES_PATH
 
 logger = logging.getLogger(__name__)
 

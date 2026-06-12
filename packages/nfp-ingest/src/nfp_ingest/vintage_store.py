@@ -18,11 +18,9 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
-from nfp_lookups.paths import STORE_DIR
+from nfp_lookups.paths import VINTAGE_STORE_PATH
 
 logger = logging.getLogger(__name__)
-
-VINTAGE_STORE_PATH = STORE_DIR
 
 VINTAGE_STORE_SCHEMA: dict[str, pl.DataType] = {
     "geographic_type": pl.Utf8,

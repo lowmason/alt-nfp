@@ -5,17 +5,16 @@ building release_dates.parquet / vintage_dates.parquet.
 """
 
 from dataclasses import dataclass
-from pathlib import Path
 
-from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR
+# Re-exported for back-compat; canonical home is nfp_lookups.paths
+from nfp_lookups.paths import (  # noqa: F401
+    RELEASE_DATES_PATH,
+    RELEASES_DIR,
+    VINTAGE_DATES_PATH,
+)
 
 BASE_URL = 'https://www.bls.gov'
 START_YEAR = 2003
-
-# Output paths
-RELEASES_DIR: Path = DOWNLOADS_DIR / 'releases'
-RELEASE_DATES_PATH: Path = INTERMEDIATE_DIR / 'release_dates.parquet'
-VINTAGE_DATES_PATH: Path = INTERMEDIATE_DIR / 'vintage_dates.parquet'
 
 
 @dataclass(frozen=True)

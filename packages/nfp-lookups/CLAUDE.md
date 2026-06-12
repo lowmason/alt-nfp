@@ -38,7 +38,8 @@ src/nfp_lookups/
 ├── schemas.py              # PANEL_SCHEMA, VINTAGE_STORE_SCHEMA, CES/QCEW_VINTAGE_SCHEMA
 ├── industry.py             # NAICS → supersector → domain hierarchy + CES series ID map
 │                           #   NAICS3_TO_MFG_SECTOR, SINGLE_SECTOR_SUPERSECTORS,
-│                           #   GOVT_OWNERSHIP_TO_SECTOR, _CES_SECTOR_TO_NAICS
+│                           #   GOVT_OWNERSHIP_TO_SECTOR, CES_SECTOR_TO_NAICS
+├── series_ids.py           # BLS LABSTAT series-ID grammar (CE/SM/EN): build_series_id, parse_series_id
 ├── geography.py            # FIPS_TO_DIVISION, FIPS_TO_REGION, STATES, REGION_NAMES, etc.
 ├── revision_schedules.py   # CES_REVISIONS, QCEW_REVISIONS, get_noise_multiplier, vintage date helpers
 ├── benchmark_revisions.py  # BENCHMARK_REVISIONS dict (historical actuals)
@@ -58,8 +59,15 @@ src/nfp_lookups/
 - **ProviderConfig**: dataclass defining provider name, file paths, error structure (`iid`/`ar1`), optional `birth_file`. Used by ingest and models packages.
 - **CYCLICAL_INDICATORS**: dict mapping indicator names to FRED series IDs and metadata (frequency, publication lag). Used by both ingest (download) and models (censoring).
 - **Schemas are Polars-native**: defined as `dict[str, pl.DataType]` for use with `pl.DataFrame.cast()` and validation.
+- **Paths** (`paths.py`): every path constant derives from `BASE_DIR`. Discovery precedence: `NFP_BASE_DIR` env var (set before first import) → walk up to the first dir containing `packages/` + `pyproject.toml` → fixed-depth fallback for editable installs. Includes pipeline artifact paths (`RELEASE_DATES_PATH`, `VINTAGE_DATES_PATH`, `RELEASES_DIR`, `VINTAGE_STORE_PATH`) — other packages must import paths from here, never define their own.
+- **Series-ID grammar** (`series_ids.py`): `build_series_id()` / `parse_series_id()` for CE/SM/EN. Pure reference data; `nfp_download.bls` re-exports it. This package imports nothing from other `nfp_*` packages — keep it that way.
 
 ## Test Mapping
 
-Tests from the monorepo `tests/` that belong here:
+Tests live in `tests/` within this package:
 - `test_lookups.py` — industry hierarchy & revision schedule tests
+- `test_series_ids.py` — BLS series-ID grammar (registry, build/parse) tests
+- `test_paths.py` — base-dir discovery (env override, marker walk, fallback) & derived layout
+- `test_revision_schedules.py` — noise multiplier & vintage timing tests
+- `test_provider_config.py` — `ProviderConfig` dataclass tests
+- `test_benchmark_revisions.py` — historical benchmark revision lookup tests
