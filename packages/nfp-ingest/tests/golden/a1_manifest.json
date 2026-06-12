@@ -1,0 +1,258 @@
+{
+  "provenance": {
+    "generator": "scripts/generate_golden_masters.py",
+    "generated_on": "2026-06-12",
+    "old_repo": "/Users/lowell/Projects/alt_nfp",
+    "old_repo_commit": "3cfe4caf6f9962b57410f3563f933f8ba3da6928",
+    "polars_version": "1.38.0",
+    "start_year": 2012,
+    "end_year": 2026
+  },
+  "fixtures": {
+    "panel_asof_2020-05-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2020-05-12",
+      "rows": 11020,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "a14ab7c69aa91caf081df46e9bc8ac25908b798518b63aae4d0de8ffc4c2d963"
+    },
+    "panel_asof_2023-07-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2023-07-12",
+      "rows": 15390,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "ef5021644f0014aaec10f5f780112146692fe88b89aa04d55683e48608fbe511"
+    },
+    "panel_asof_2024-09-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2024-09-12",
+      "rows": 17024,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "07b6a51306db5a4afe7a2d1cae8294eabfea4040f8a387e2b84a2083f0a1d154"
+    },
+    "panel_asof_2024-12-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2024-12-12",
+      "rows": 17366,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "fdc8e9899ebf42f209b75f321017c4a23231bfee824f6274926b3e1efe719a44"
+    },
+    "panel_asof_2025-02-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2025-02-12",
+      "rows": 17518,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "278563c73b95f5d3f8619f544cb6afa7c40b89687f644673a63a48217ed3f306"
+    },
+    "panel_asof_2025-03-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2025-03-12",
+      "rows": 17634,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "4f34452ff2c830e4d91a1c1f72fff2887672ffdb188e1146d4a36e14b5ba636e"
+    },
+    "panel_asof_2025-07-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2025-07-12",
+      "rows": 17756,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "24d688d036b2e1f89b278b716381b6d3991eb2db5289cefc10b88d9607dec11a"
+    },
+    "panel_asof_2025-11-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2025-11-12",
+      "rows": 17874,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "1cda85e68cf42bba3adbe3bc972e293b218b53db1bdd9f691701aad0f7035916"
+    },
+    "panel_asof_2026-01-12.parquet": {
+      "kind": "censored_panel",
+      "as_of_ref": "2026-01-12",
+      "rows": 17996,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "201d24a5e63385b334f2f345310e4be3eb9d88a0cf5d8ab052307b5162178bec"
+    },
+    "provider_G.parquet": {
+      "kind": "provider_panel",
+      "provider_config": {
+        "name": "G",
+        "file": "providers/g/g_provider.parquet",
+        "error_model": "iid",
+        "birth_file": "providers/g/g_births.parquet",
+        "industry_type": "national",
+        "industry_code": "00",
+        "geography_type": "national",
+        "geography_code": "00"
+      },
+      "rows": 83,
+      "columns": [
+        "period",
+        "geographic_type",
+        "geographic_code",
+        "industry_code",
+        "industry_level",
+        "source",
+        "source_type",
+        "growth",
+        "employment_level",
+        "is_seasonally_adjusted",
+        "vintage_date",
+        "revision_number",
+        "is_final",
+        "publication_lag_months",
+        "coverage_ratio"
+      ],
+      "sha256": "551a8219a8e145c8aadbf97faae8d05dfe1c53c22845d02132c8ab22135d13fd"
+    }
+  },
+  "expected_failures": [
+    {
+      "as_of_ref": "2026-02-12",
+      "error_contains": "ref_date gap"
+    }
+  ]
+}
