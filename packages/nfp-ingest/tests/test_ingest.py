@@ -170,7 +170,11 @@ class TestValidatePanel:
         """build_panel() produces a valid panel from the vintage store."""
         from nfp_ingest.vintage_store import VINTAGE_STORE_PATH
 
-        if not VINTAGE_STORE_PATH.exists():
+        try:
+            store_present = VINTAGE_STORE_PATH.exists()
+        except Exception:
+            store_present = False
+        if not store_present:
             pytest.skip('Vintage store not present')
 
         panel = build_panel()

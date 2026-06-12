@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from nfp_lookups.paths import DATA_DIR, STORE_DIR
+from nfp_lookups.paths import DATA_DIR, VINTAGE_STORE_PATH
 from nfp_lookups.provider_config import MIN_PSEUDO_ESTABS_PER_CELL, ProviderConfig
 from nfp_lookups.schemas import PANEL_SCHEMA, empty_panel
 
@@ -90,7 +90,7 @@ def load_provider_series(
     Returns ``None`` if the file is missing or the filtered result is empty.
     """
     _data_dir = data_dir if data_dir is not None else DATA_DIR
-    _store_dir = store_dir if store_dir is not None else STORE_DIR
+    _store_dir = store_dir if store_dir is not None else VINTAGE_STORE_PATH
     _min_estabs = min_pseudo_estabs if min_pseudo_estabs is not None else MIN_PSEUDO_ESTABS_PER_CELL
 
     fpath = _data_dir / config.file
@@ -164,7 +164,7 @@ def ingest_provider(
     data_dir : Path, optional
         Root data directory. Defaults to ``DATA_DIR``.
     store_dir : Path, optional
-        Vintage store directory (for compositing). Defaults to ``STORE_DIR``.
+        Vintage store directory (for compositing). Defaults to ``VINTAGE_STORE_PATH``.
     min_pseudo_estabs : int, optional
         Minimum pseudo-establishments per cell. Defaults to config constant.
 
@@ -174,7 +174,7 @@ def ingest_provider(
         Observation panel rows conforming to PANEL_SCHEMA.
     """
     _data_dir = data_dir if data_dir is not None else DATA_DIR
-    _store_dir = store_dir if store_dir is not None else STORE_DIR
+    _store_dir = store_dir if store_dir is not None else VINTAGE_STORE_PATH
     _min_estabs = min_pseudo_estabs if min_pseudo_estabs is not None else MIN_PSEUDO_ESTABS_PER_CELL
 
     fpath = None

@@ -5,7 +5,7 @@ Data ingestion, vintage store management, panel construction, and compositing.
 ## Overview
 
 Transforms raw downloaded data into analysis-ready panels. Provides:
-- **Vintage store** (`vintage_store.py`): Hive-partitioned parquet read/write with rank-based horizon censoring
+- **Vintage store** (`vintage_store.py`): Hive-partitioned parquet read/write with rank-based horizon censoring. `store_path` accepts a local `Path` or an `s3://` `UPath` (default `VINTAGE_STORE_PATH` from `nfp_lookups.paths`, which is MinIO/S3 when `NFP_STORE_URI` is set); Polars I/O passes `storage_options_for(store_path)` and `mkdir` is guarded by `is_remote()`
 - **Panel construction** (`panel.py`): `build_panel()` assembles CES + QCEW + provider data into a unified panel
 - **CES/QCEW ingestion** (`ces_national.py`, `ces_state.py`, `qcew.py`): source-specific transformers
 - **Provider ingestion** (`payroll.py`): auto-detects cell-level vs national providers

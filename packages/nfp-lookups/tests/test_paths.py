@@ -1,9 +1,11 @@
-"""Tests for nfp_lookups.paths — base-dir discovery and derived layout."""
+"""Tests for nfp_lookups.paths — base-dir discovery, store location, layout."""
 
+import os
 from pathlib import Path
 
+import pytest
 from nfp_lookups import paths
-from nfp_lookups.paths import _find_base_dir
+from nfp_lookups.paths import _find_base_dir, _store_location
 
 
 class TestFindBaseDir:
@@ -37,9 +39,76 @@ class TestDerivedLayout:
         assert paths.OUTPUT_DIR == paths.BASE_DIR / "output"
 
     def test_vintage_store_path_is_store_dir(self):
+        if os.environ.get("NFP_STORE_URI"):
+            pytest.skip("NFP_STORE_URI set; store is remote in this session")
         assert paths.VINTAGE_STORE_PATH == paths.STORE_DIR
 
     def test_release_dates_artifacts(self):
         assert paths.RELEASES_DIR == paths.DOWNLOADS_DIR / "releases"
         assert paths.RELEASE_DATES_PATH == paths.INTERMEDIATE_DIR / "release_dates.parquet"
         assert paths.VINTAGE_DATES_PATH == paths.INTERMEDIATE_DIR / "vintage_dates.parquet"
+
+
+_S3_ENV = {
+    "NFP_STORE_URI": "s3://test-bucket/store",
+    "AWS_ACCESS_KEY_ID": "test-key",
+    "AWS_SECRET_ACCESS_KEY": "test-secret",
+    "AWS_ENDPOINT_URL": "http://127.0.0.1:9000",
+}
+
+
+def _set_s3_env(monkeypatch):
+    for k, v in _S3_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("AWS_REGION", raising=False)
+
+
+class TestStoreLocation:
+    def test_default_is_local_store_dir(self, monkeypatch):
+        monkeypatch.delenv("NFP_STORE_URI", raising=False)
+        assert _store_location() == paths.STORE_DIR
+
+    def test_uri_selects_remote_upath(self, monkeypatch):
+        _set_s3_env(monkeypatch)
+        loc = _store_location()
+        assert paths.is_remote(loc)
+        assert str(loc) == "s3://test-bucket/store"
+
+    def test_remote_path_joins_preserve_uri(self, monkeypatch):
+        _set_s3_env(monkeypatch)
+        loc = _store_location()
+        joined = loc / "source=ces" / "f.parquet"
+        assert str(joined) == "s3://test-bucket/store/source=ces/f.parquet"
+
+    def test_is_remote_false_for_plain_path(self):
+        assert not paths.is_remote(Path("/tmp/store"))
+        assert not paths.is_remote(paths.STORE_DIR)
+
+
+class TestStorageOptions:
+    def test_local_path_returns_none(self):
+        assert paths.storage_options_for(Path("/tmp/store")) is None
+        assert paths.storage_options_for(paths.STORE_DIR) is None
+
+    def test_remote_http_endpoint(self, monkeypatch):
+        _set_s3_env(monkeypatch)
+        opts = paths.storage_options_for(_store_location())
+        assert opts == {
+            "aws_region": "us-east-1",
+            "aws_access_key_id": "test-key",
+            "aws_secret_access_key": "test-secret",
+            "aws_endpoint_url": "http://127.0.0.1:9000",
+            "aws_allow_http": "true",
+        }
+
+    def test_remote_https_endpoint_omits_allow_http(self, monkeypatch):
+        _set_s3_env(monkeypatch)
+        monkeypatch.setenv("AWS_ENDPOINT_URL", "https://s3.example.com")
+        opts = paths.storage_options_for(_store_location())
+        assert "aws_allow_http" not in opts
+        assert opts["aws_endpoint_url"] == "https://s3.example.com"
+
+    def test_region_env_respected(self, monkeypatch):
+        _set_s3_env(monkeypatch)
+        monkeypatch.setenv("AWS_REGION", "eu-west-1")
+        assert paths.storage_options_for(_store_location())["aws_region"] == "eu-west-1"

@@ -38,10 +38,24 @@ uv run alt-nfp --help                # vintage pipeline CLI
 
 ## Data
 
-`data/` holds proprietary provider files and pipeline artifacts; it is not in
-the repository. Tests that need the vintage store self-skip when it is absent.
-The directory layout is centralized in `nfp_lookups.paths`; set `NFP_BASE_DIR`
-to point the layout at a different root (e.g. a snapshot directory).
+The **vintage store** lives in S3-compatible object storage (a local MinIO by
+default), configured via a gitignored `.env`:
+
+```
+NFP_STORE_URI=s3://alt-nfp/store
+AWS_ACCESS_KEY_ID=…
+AWS_SECRET_ACCESS_KEY=…
+AWS_ENDPOINT_URL=http://127.0.0.1:9000
+```
+
+With `NFP_STORE_URI` unset the store falls back to the local `data/store/`
+(this is how CI runs). Tests that need the store self-skip when it is
+unavailable. `scripts/mirror_store.py` uploads a local store into the bucket.
+
+The rest of `data/` (downloads, intermediate pipeline artifacts, proprietary
+provider files) stays local and is not in the repository. The directory
+layout is centralized in `nfp_lookups.paths`; set `NFP_BASE_DIR` to point the
+layout at a different root (e.g. a snapshot directory).
 
 ## License
 

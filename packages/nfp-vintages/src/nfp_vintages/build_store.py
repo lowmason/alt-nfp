@@ -15,7 +15,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
-from nfp_lookups.paths import DATA_DIR, INTERMEDIATE_DIR, VINTAGE_STORE_PATH
+from nfp_lookups.paths import (
+    DATA_DIR,
+    INTERMEDIATE_DIR,
+    VINTAGE_STORE_PATH,
+    is_remote,
+    storage_options_for,
+)
 
 REVISIONS_PATH = INTERMEDIATE_DIR / 'revisions.parquet'
 RELEASES_PATH = DATA_DIR / 'releases.parquet'
@@ -79,25 +85,31 @@ def build_store(
 
     print(f'Combined store: {combined.height:,} rows')
 
-    # Write Hive-partitioned parquet
-    out_path.mkdir(parents=True, exist_ok=True)
+    # Write Hive-partitioned parquet (local dir or object storage)
+    if not is_remote(out_path):
+        out_path.mkdir(parents=True, exist_ok=True)
 
     for (source, sa), partition_df in combined.group_by(
         ['source', 'seasonally_adjusted'], maintain_order=True,
     ):
         sa_str = str(sa).lower()
         partition_dir = out_path / f'source={source}' / f'seasonally_adjusted={sa_str}'
-        partition_dir.mkdir(parents=True, exist_ok=True)
+        if not is_remote(out_path):
+            partition_dir.mkdir(parents=True, exist_ok=True)
 
         # Remove existing files in partition
-        for f in partition_dir.glob('*.parquet'):
-            f.unlink()
+        if partition_dir.exists():
+            for f in partition_dir.glob('*.parquet'):
+                f.unlink()
 
         write_df = partition_df.drop(['source', 'seasonally_adjusted'])
         vmin = write_df['vintage_date'].min()
         vmax = write_df['vintage_date'].max()
         fname = f'v_{vmin}_{vmax}.parquet'
-        write_df.write_parquet(partition_dir / fname)
+        write_df.write_parquet(
+            str(partition_dir / fname),
+            storage_options=storage_options_for(out_path),
+        )
         print(f'  {partition_dir.name}: {write_df.height:,} rows -> {fname}')
 
     print(f'Wrote vintage store to {out_path}')

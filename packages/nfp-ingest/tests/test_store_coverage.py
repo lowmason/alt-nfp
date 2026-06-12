@@ -19,11 +19,22 @@ from nfp_lookups.industry import (
     INDUSTRY_MAP,
     SINGLE_SECTOR_SUPERSECTORS,
 )
-from nfp_lookups.paths import STORE_DIR
+from nfp_lookups.paths import VINTAGE_STORE_PATH
+
+
+def _store_available() -> bool:
+    """True if the vintage store (local dir or S3) is reachable and non-empty."""
+    try:
+        return VINTAGE_STORE_PATH.exists() and (
+            next(VINTAGE_STORE_PATH.glob("**/*.parquet"), None) is not None
+        )
+    except Exception:  # unreachable endpoint / bad credentials → skip, not error
+        return False
+
 
 pytestmark = pytest.mark.skipif(
-    not STORE_DIR.exists() or not list(STORE_DIR.glob("**/*.parquet")),
-    reason="Vintage store not built (data/store/ missing or empty)",
+    not _store_available(),
+    reason="Vintage store not available (no local data/store/ and no reachable NFP_STORE_URI)",
 )
 
 VINTAGE_CUTOFF = date(2022, 1, 1)

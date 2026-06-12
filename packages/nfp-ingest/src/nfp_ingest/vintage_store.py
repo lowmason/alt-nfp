@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
-from nfp_lookups.paths import VINTAGE_STORE_PATH
+from nfp_lookups.paths import VINTAGE_STORE_PATH, is_remote, storage_options_for
 
 logger = logging.getLogger(__name__)
 
@@ -369,9 +369,10 @@ def read_vintage_store(
         Lazy scan of the vintage store with filters applied.
     """
     lf = pl.scan_parquet(
-        store_path / "**/*.parquet",
+        str(store_path / "**/*.parquet"),
         hive_partitioning=True,
         schema=VINTAGE_STORE_SCHEMA,
+        storage_options=storage_options_for(store_path),
     )
 
     if source is not None:
@@ -692,7 +693,10 @@ def append_to_vintage_store(
         partition_dir = store_path / f"source={source}" / f"seasonally_adjusted={sa_str}"
 
         if partition_dir.exists():
-            existing = pl.read_parquet(partition_dir / "*.parquet")
+            existing = pl.read_parquet(
+                str(partition_dir / "*.parquet"),
+                storage_options=storage_options_for(store_path),
+            )
             partition_df = partition_df.join(
                 existing.select(ukey).unique(),
                 on=ukey,
@@ -702,14 +706,16 @@ def append_to_vintage_store(
         if len(partition_df) == 0:
             continue
 
-        partition_dir.mkdir(parents=True, exist_ok=True)
+        if not is_remote(store_path):  # object storage has no directories
+            partition_dir.mkdir(parents=True, exist_ok=True)
 
         vmin = partition_df["vintage_date"].min()
         vmax = partition_df["vintage_date"].max()
         fname = f"v_{vmin}_{vmax}.parquet"
 
         partition_df.drop(["source", "seasonally_adjusted"]).write_parquet(
-            partition_dir / fname
+            str(partition_dir / fname),
+            storage_options=storage_options_for(store_path),
         )
         total_appended += len(partition_df)
         logger.info("Appended %d rows to %s", len(partition_df), partition_dir / fname)
@@ -762,14 +768,20 @@ def compact_partition(
     ]
 
     combined = (
-        pl.read_parquet(partition_dir / "*.parquet")
+        pl.read_parquet(
+            str(partition_dir / "*.parquet"),
+            storage_options=storage_options_for(store_path),
+        )
         .sort("vintage_date", descending=True)
         .unique(subset=ukey, keep="first")
         .sort("ref_date", "industry_code", "revision")
     )
 
     compacted_path = partition_dir / "compacted.parquet"
-    combined.write_parquet(compacted_path)
+    combined.write_parquet(
+        str(compacted_path),
+        storage_options=storage_options_for(store_path),
+    )
 
     for f in files:
         if f != compacted_path:

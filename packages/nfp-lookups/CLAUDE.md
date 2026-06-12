@@ -16,7 +16,7 @@ This is the foundation package with no internal dependencies. It provides:
 ## Tech Stack
 
 - **Language**: Python 3.12 (requires >= 3.10)
-- **Dependencies**: numpy, polars (minimal footprint)
+- **Dependencies**: numpy, polars, universal-pathlib + s3fs (S3-backed store paths)
 - **Build**: hatchling
 
 ## Key Commands
@@ -60,6 +60,7 @@ src/nfp_lookups/
 - **CYCLICAL_INDICATORS**: dict mapping indicator names to FRED series IDs and metadata (frequency, publication lag). Used by both ingest (download) and models (censoring).
 - **Schemas are Polars-native**: defined as `dict[str, pl.DataType]` for use with `pl.DataFrame.cast()` and validation.
 - **Paths** (`paths.py`): every path constant derives from `BASE_DIR`. Discovery precedence: `NFP_BASE_DIR` env var (set before first import) → walk up to the first dir containing `packages/` + `pyproject.toml` → fixed-depth fallback for editable installs. Includes pipeline artifact paths (`RELEASE_DATES_PATH`, `VINTAGE_DATES_PATH`, `RELEASES_DIR`, `VINTAGE_STORE_PATH`) — other packages must import paths from here, never define their own.
+- **Store location** (`paths.py`): `VINTAGE_STORE_PATH` is the switch point — a `upath.UPath` (S3 via s3fs) when `NFP_STORE_URI` is set (with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_ENDPOINT_URL`, region default `us-east-1`), else the local `STORE_DIR`. `storage_options_for(path)` builds the Polars/object_store options for a remote path (`aws_allow_http` derived from an `http://` endpoint); `is_remote(path)` guards directory-only operations like `mkdir`. Env is read at import time.
 - **Series-ID grammar** (`series_ids.py`): `build_series_id()` / `parse_series_id()` for CE/SM/EN. Pure reference data; `nfp_download.bls` re-exports it. This package imports nothing from other `nfp_*` packages — keep it that way.
 
 ## Test Mapping
@@ -67,7 +68,7 @@ src/nfp_lookups/
 Tests live in `tests/` within this package:
 - `test_lookups.py` — industry hierarchy & revision schedule tests
 - `test_series_ids.py` — BLS series-ID grammar (registry, build/parse) tests
-- `test_paths.py` — base-dir discovery (env override, marker walk, fallback) & derived layout
+- `test_paths.py` — base-dir discovery (env override, marker walk, fallback), store location (`NFP_STORE_URI` → UPath, `storage_options_for`), derived layout
 - `test_revision_schedules.py` — noise multiplier & vintage timing tests
 - `test_provider_config.py` — `ProviderConfig` dataclass tests
 - `test_benchmark_revisions.py` — historical benchmark revision lookup tests

@@ -13,7 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
-from nfp_lookups.paths import STORE_DIR
+from nfp_lookups.paths import VINTAGE_STORE_PATH
 from nfp_lookups.provider_config import ProviderConfig
 from nfp_lookups.schemas import PANEL_SCHEMA, validate_panel
 
@@ -36,7 +36,7 @@ def build_panel(
     ----------
     store_path : Path, optional
         Root of the Hive-partitioned vintage store.
-        Defaults to ``STORE_DIR``.
+        Defaults to ``VINTAGE_STORE_PATH``.
     providers : list[ProviderConfig], optional
         Provider list. Defaults to PROVIDERS from config.
     start_year : int
@@ -59,7 +59,7 @@ def build_panel(
     if end_year is None:
         end_year = date.today().year
     if store_path is None:
-        store_path = STORE_DIR
+        store_path = VINTAGE_STORE_PATH
 
     parts: list[pl.DataFrame] = []
     start_ref = date(start_year, 1, 12)

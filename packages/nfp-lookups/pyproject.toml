@@ -7,6 +7,8 @@ license = {text = "MIT"}
 dependencies = [
     "numpy>=1.24.0,<2.4",
     "polars>=0.20.0",
+    "s3fs>=2026.4.0",
+    "universal-pathlib>=0.3.10",
 ]
 
 [build-system]
