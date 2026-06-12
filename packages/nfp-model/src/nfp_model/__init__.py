@@ -10,6 +10,7 @@ contract with the PyMC reference is defined in double precision.
 
 import numpyro as _numpyro
 
+from .batch import BatchedInputs, BatchFitResult, fit_model_batch, pad_model_inputs
 from .config import PRESETS, ModelPriors, SamplerSettings
 from .data import from_snapshot, model_inputs
 from .model import DETERMINISTIC_SITES, nfp_model
@@ -21,13 +22,17 @@ _numpyro.enable_x64()
 __all__ = [
     "DETERMINISTIC_SITES",
     "PRESETS",
+    "BatchedInputs",
+    "BatchFitResult",
     "FitResult",
     "ModelPriors",
     "SamplerSettings",
     "ces_sa_predictive",
     "fit_model",
+    "fit_model_batch",
     "from_snapshot",
     "model_inputs",
     "nfp_model",
     "nowcast_summary",
+    "pad_model_inputs",
 ]

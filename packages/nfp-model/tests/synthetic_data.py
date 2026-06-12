@@ -30,10 +30,14 @@ def make_synthetic_data(
     with_ces: bool = True,
     provider_obs: bool = True,
     era: bool = True,
+    era_break_at: int | None = None,
     config_as_dict: bool = False,
 ) -> dict:
     rng = np.random.default_rng(7)
     n_years = (T + 11) // 12
+    # Default keeps the break relative to T; batch tests pin it to a fixed
+    # calendar position so mixed-T batches share era_idx on the overlap.
+    break_at = T - 10 if era_break_at is None else era_break_at
 
     g_ces_sa = rng.normal(0.0015, 0.002, T)
     g_ces_nsa = g_ces_sa + rng.normal(0.0, 0.003, T)
@@ -76,7 +80,7 @@ def make_synthetic_data(
         "ces_vintage_map": {0: 0, 1: 1, 2: 2},
         "month_of_year": np.array([i % 12 for i in range(T)]),
         "year_of_obs": np.array([i // 12 for i in range(T)]),
-        "era_idx": np.array([0] * (T - 10) + [1] * 10) if era else None,
+        "era_idx": np.array([0 if i < break_at else 1 for i in range(T)]) if era else None,
         "g_ces_sa": g_ces_sa,
         "ces_sa_obs": ces_obs,
         "ces_sa_vintage_idx": vintage_idx,

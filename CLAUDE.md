@@ -31,8 +31,8 @@ Each package has its own `CLAUDE.md` with the internal map.
 
 ```bash
 uv sync                                   # install workspace + dev group
-uv run pytest -m "not network" --no-cov   # fast suite (~30s); coverage runs by default otherwise
-uv run pytest -m "not network and not slow" --no-cov  # skip MCMC smoke too
+uv run pytest -m "not network" --no-cov   # full local suite (~3 min; MCMC smoke included)
+uv run pytest -m "not network and not slow" --no-cov  # fast suite (~30s), skips MCMC smoke
 uv run ruff check .                       # lint (line 100; E,W,F,I,B,C4,UP)
 uv run alt-nfp --help                     # vintage pipeline CLI
 ```

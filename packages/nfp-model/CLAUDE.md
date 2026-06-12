@@ -26,7 +26,13 @@ Faithful translation of the frozen PyMC reference
   reference backtest's index/jobs-added arithmetic.
 - **Parity** (`parity.py`): A3 gate criteria (MCSE z-tests, SD-ratio bands,
   path and nowcast comparison) shared by `scripts/run_a3_parity.py` and the
-  spot-check test.
+  spot-check test. Also the A4 serial-vs-batched equivalence instrument.
+- **Batch** (`batch.py`, A4): `pad_model_inputs(list_of_inputs)` pads a
+  date grid to common shapes (likelihood masks for padded slots; static
+  calendar/structure asserted uniform and closed over);
+  `fit_model_batch(...)` fits the whole grid in one `jit(vmap(MCMC.run))`
+  program (vectorized inner chains) and reduces each date *in graph* to
+  the A3 fixture schema (`BatchFitResult.date_arrays(i)`).
 
 ## Hard boundary
 
@@ -46,12 +52,18 @@ polars, no store access, no plotting. Enforced by
 
 ```bash
 pytest packages/nfp-model -m "not slow"      # fast structure/intake tests
-pytest packages/nfp-model -m slow            # MCMC smoke (~30 s)
+pytest packages/nfp-model -m slow            # MCMC smoke incl. vmapped batch (~4 min)
 NFP_A3_PARITY=1 pytest packages/nfp-model/tests/test_parity_golden.py  # minutes
 
 # Full A3 parity (14 fits; restartable; see plans/5)
 uv run python scripts/run_a3_parity.py fit data/golden_a3_staging data/a3
 uv run python scripts/run_a3_parity.py compare data/golden_a3_staging data/a3
+
+# A4 vmapped 24-month backtest (snapshot grid → serial baseline → batched → report)
+uv run python scripts/run_a4_backtest.py snapshot data/backtests
+uv run python scripts/run_a4_backtest.py serial   data/backtests   # restartable, ~1 h
+uv run python scripts/run_a4_backtest.py batched  data/backtests   # minutes
+uv run python scripts/run_a4_backtest.py compare  data/backtests   # report + exit code
 ```
 
 ## Test Mapping
@@ -63,6 +75,11 @@ uv run python scripts/run_a3_parity.py compare data/golden_a3_staging data/a3
   cyclical gating, iid/ar1/empty-provider branches, the import boundary
 - `test_model_smoke.py` — tiny-MCMC end-to-end (`slow`): layout, chain-major
   deterministic consistency, seed reproducibility, nowcast arithmetic
+- `test_batch_unit.py` — padding/masking exactness: substituted-draw
+  log-density equality between padded+masked and unpadded models (iid and
+  ar1), uniform-structure assertions, mask bookkeeping
+- `test_batch_smoke.py` — vmapped batch vs serial fits (`slow`): scalar/
+  path/nowcast agreement under the A3 criteria, batch seed reproducibility
 - `test_parity_golden.py` — single-fixture parity spot check vs
   `s3://alt-nfp/golden/a3` (opt-in: `NFP_A3_PARITY=1` + store env;
   manifest committed in `tests/golden/`)
@@ -83,3 +100,11 @@ uv run python scripts/run_a3_parity.py compare data/golden_a3_staging data/a3
   the likelihood — deliberate deviation, can't affect parity).
 - **The model never sees a vintage_date**: all censoring happens in
   `nfp_ingest` before arrays arrive (A2 boundary).
+- **Batched mode = padding + masks, never new structure**: padded latent
+  timesteps are prior-only N(0,1) dimensions (posterior-invariant, proven
+  exactly in `test_batch_unit.py`); anything that changes a site's
+  *dimension* (cyclical gating, provider set, era presence) must be uniform
+  across a batch and is asserted in `pad_model_inputs`. Calendar keys
+  (`T`, `n_years`, `month_of_year`, `year_of_obs`, `era_idx`,
+  `n_ces_vintages`) stay concrete/static under `vmap`; obs
+  values/indices/masks are traced.

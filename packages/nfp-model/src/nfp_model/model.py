@@ -18,9 +18,23 @@ same distribution up to Monte Carlo error (the A3 parity gate). Components:
 6. **Provider likelihoods** — per-provider iid or AR(1) measurement error.
 
 Site names match the reference so posterior comparisons are key-for-key.
+
+Batched (vmapped) fitting traces this model with per-date arrays as JAX
+tracers, so observation values/indices/multipliers are consumed via ``jnp``
+and three kinds of optional keys exist (absent ⇒ unbatched behavior):
+
+- ``qcew_mask`` / ``ces_sa_mask`` / ``ces_nsa_mask`` and per-provider
+  ``mask`` — boolean likelihood masks for padded observation slots;
+- ``cyclical_active`` — static tuple of indicator names, replacing the
+  data-driven all-zero gating (which cannot branch on tracers);
+- calendar/structure keys (``T``, ``n_years``, ``n_ces_vintages``,
+  ``month_of_year``, ``year_of_obs``, ``era_idx``) must stay concrete —
+  they are shared across a batch, never traced (see ``batch.py``).
 """
 
 from __future__ import annotations
+
+from contextlib import nullcontext
 
 import jax
 import jax.numpy as jnp
@@ -34,6 +48,13 @@ from .config import ModelPriors
 DETERMINISTIC_SITES = (
     "g_cont", "seasonal", "fourier_coefs_det", "bd", "g_total_sa", "g_total_nsa",
 )
+
+
+def _maybe_mask(mask):
+    """``handlers.mask`` context for padded likelihood slots; no-op when None."""
+    if mask is None:
+        return nullcontext()
+    return numpyro.handlers.mask(mask=jnp.asarray(mask, dtype=bool))
 
 
 def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
@@ -55,9 +76,9 @@ def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
         "sigma_qcew_boundary",
         dist.LogNormal(p.qcew.log_sigma_boundary_mu, p.qcew.log_sigma_boundary_sd),
     )
-    qcew_is_m2 = np.asarray(data["qcew_is_m2"], dtype=bool)
+    qcew_is_m2 = jnp.asarray(data["qcew_is_m2"], dtype=bool)
     base_sigma = jnp.where(qcew_is_m2, sigma_qcew_mid, sigma_qcew_boundary)
-    qcew_sigma = base_sigma * jnp.asarray(np.asarray(data["qcew_noise_mult"], dtype=float))
+    qcew_sigma = base_sigma * jnp.asarray(data["qcew_noise_mult"], dtype=float)
 
     # =============================================================
     # Latent continuing-units growth: AR(1), tau = stationary SD
@@ -135,17 +156,20 @@ def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
     xi_bd = numpyro.sample("xi_bd", dist.Normal(0.0, 1.0).expand([T]))
     bd_t = phi_0 + sigma_bd * xi_bd
 
-    cyclical_arrays = []
-    for ind_name in p.indicator_names:
-        arr = data.get(f"{ind_name}_c")
-        if arr is not None and np.any(np.asarray(arr) != 0.0):
-            cyclical_arrays.append(np.asarray(arr, dtype=float))
+    active = data.get("cyclical_active")
+    if active is None:  # data-driven gating (unbatched path; can't run on tracers)
+        active = tuple(
+            name for name in p.indicator_names
+            if data.get(f"{name}_c") is not None
+            and np.any(np.asarray(data[f"{name}_c"]) != 0.0)
+        )
+    cyclical_arrays = [jnp.asarray(data[f"{name}_c"], dtype=float) for name in active]
     if cyclical_arrays:
         phi_3 = numpyro.sample(
             "phi_3", dist.Normal(0.0, p.birth_death.phi3_sd).expand([len(cyclical_arrays)])
         )
         for i, arr in enumerate(cyclical_arrays):
-            bd_t = bd_t + phi_3[i] * jnp.asarray(arr)
+            bd_t = bd_t + phi_3[i] * arr
     numpyro.deterministic("bd", bd_t)
 
     # =============================================================
@@ -160,12 +184,13 @@ def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
     # =============================================================
     # QCEW likelihood — truth anchor
     # =============================================================
-    qcew_obs = np.asarray(data["qcew_obs"], dtype=int)
-    numpyro.sample(
-        "obs_qcew",
-        dist.StudentT(p.qcew.nu, g_total_nsa[qcew_obs], qcew_sigma),
-        obs=jnp.asarray(np.asarray(data["g_qcew"], dtype=float)[qcew_obs]),
-    )
+    qcew_obs = jnp.asarray(data["qcew_obs"], dtype=int)
+    with _maybe_mask(data.get("qcew_mask")):
+        numpyro.sample(
+            "obs_qcew",
+            dist.StudentT(p.qcew.nu, jnp.take(g_total_nsa, qcew_obs), qcew_sigma),
+            obs=jnp.take(jnp.asarray(data["g_qcew"], dtype=float), qcew_obs),
+        )
 
     # =============================================================
     # CES likelihood — best-available print, vintage-indexed sigma
@@ -185,22 +210,30 @@ def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
         dist.LogNormal(p.ces.log_sigma_mu, p.ces.log_sigma_sd).expand([n_ces_v]),
     )
 
-    ces_sa_obs = np.asarray(data["ces_sa_obs"], dtype=int)
-    ces_nsa_obs = np.asarray(data["ces_nsa_obs"], dtype=int)
-    if len(ces_sa_obs) > 0:
-        vidx = np.asarray(data["ces_sa_vintage_idx"], dtype=int)
-        numpyro.sample(
-            "obs_ces_sa",
-            dist.Normal(alpha_ces + lambda_ces * g_total_sa[ces_sa_obs], sigma_ces_sa[vidx]),
-            obs=jnp.asarray(np.asarray(data["g_ces_sa"], dtype=float)[ces_sa_obs]),
-        )
-    if len(ces_nsa_obs) > 0:
-        vidx = np.asarray(data["ces_nsa_vintage_idx"], dtype=int)
-        numpyro.sample(
-            "obs_ces_nsa",
-            dist.Normal(alpha_ces + lambda_ces * g_total_nsa[ces_nsa_obs], sigma_ces_nsa[vidx]),
-            obs=jnp.asarray(np.asarray(data["g_ces_nsa"], dtype=float)[ces_nsa_obs]),
-        )
+    if len(data["ces_sa_obs"]) > 0:
+        obs_idx = jnp.asarray(data["ces_sa_obs"], dtype=int)
+        vidx = jnp.asarray(data["ces_sa_vintage_idx"], dtype=int)
+        with _maybe_mask(data.get("ces_sa_mask")):
+            numpyro.sample(
+                "obs_ces_sa",
+                dist.Normal(
+                    alpha_ces + lambda_ces * jnp.take(g_total_sa, obs_idx),
+                    jnp.take(sigma_ces_sa, vidx),
+                ),
+                obs=jnp.take(jnp.asarray(data["g_ces_sa"], dtype=float), obs_idx),
+            )
+    if len(data["ces_nsa_obs"]) > 0:
+        obs_idx = jnp.asarray(data["ces_nsa_obs"], dtype=int)
+        vidx = jnp.asarray(data["ces_nsa_vintage_idx"], dtype=int)
+        with _maybe_mask(data.get("ces_nsa_mask")):
+            numpyro.sample(
+                "obs_ces_nsa",
+                dist.Normal(
+                    alpha_ces + lambda_ces * jnp.take(g_total_nsa, obs_idx),
+                    jnp.take(sigma_ces_nsa, vidx),
+                ),
+                obs=jnp.take(jnp.asarray(data["g_ces_nsa"], dtype=float), obs_idx),
+            )
 
     # =============================================================
     # Provider likelihoods — config-driven, iid or AR(1) errors
@@ -208,11 +241,11 @@ def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
     for pp in data["pp_data"]:
         name = str(pp["name"]).lower()
         error_model = pp.get("error_model", "iid")
-        obs_idx = np.asarray(pp["pp_obs"], dtype=int)
-        if len(obs_idx) == 0:
+        n_obs = len(pp["pp_obs"])  # static (padded) length
+        if n_obs == 0:
             continue  # censored backtest iterations can empty a provider
-        y_np = np.asarray(pp["g_pp"], dtype=float)[obs_idx]
-        y = jnp.asarray(y_np)
+        obs_idx = jnp.asarray(pp["pp_obs"], dtype=int)
+        y = jnp.take(jnp.asarray(pp["g_pp"], dtype=float), obs_idx)
 
         alpha_p = numpyro.sample(f"alpha_{name}", dist.Normal(0.0, p.provider.alpha_sd))
         lam_p = numpyro.sample(
@@ -222,24 +255,28 @@ def nfp_model(data: dict, priors: ModelPriors | None = None) -> None:
             f"sigma_pp_{name}",
             dist.InverseGamma(p.provider.sigma_concentration, p.provider.sigma_rate),
         )
-        mu_base = alpha_p + lam_p * g_cont_nsa[obs_idx]
+        mu_base = alpha_p + lam_p * jnp.take(g_cont_nsa, obs_idx)
 
         if error_model == "ar1":
             rho_p = numpyro.sample(
                 f"rho_{name}", dist.Beta(p.provider.rho_alpha, p.provider.rho_beta)
             )
+            # Padded slots sit at the end, so every real obs conditions on a
+            # real predecessor; padded terms are masked out below.
             mu_cond = jnp.concatenate(
                 [mu_base[:1], mu_base[1:] + rho_p * (y[:-1] - mu_base[:-1])]
             )
             sigma_cond = jnp.concatenate(
                 [
                     (sigma_p / jnp.sqrt(1.0 - rho_p**2))[None],
-                    jnp.broadcast_to(sigma_p, (len(obs_idx) - 1,)),
+                    jnp.broadcast_to(sigma_p, (n_obs - 1,)),
                 ]
             )
-            numpyro.sample(f"obs_{name}", dist.Normal(mu_cond, sigma_cond), obs=y)
+            with _maybe_mask(pp.get("mask")):
+                numpyro.sample(f"obs_{name}", dist.Normal(mu_cond, sigma_cond), obs=y)
         elif error_model == "iid":
-            numpyro.sample(f"obs_{name}", dist.Normal(mu_base, sigma_p), obs=y)
+            with _maybe_mask(pp.get("mask")):
+                numpyro.sample(f"obs_{name}", dist.Normal(mu_base, sigma_p), obs=y)
         else:
             # The reference silently skipped unknown error models — that is a
             # data-loss footgun, not a behavior worth parity.
