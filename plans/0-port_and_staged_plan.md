@@ -63,7 +63,7 @@ Package layout in the new repo (uv workspace, same pattern as old repo):
 | `nfp-download` | **copy** | BLS/FRED clients, release-date scraper |
 | `nfp-ingest` | **copy** | Vintage store, panel, compositing, indicators |
 | `nfp-vintages` | **copy** | Pipeline + `alt-nfp` CLI |
-| `nfp-model-jax` | **new** | dynamax/JAX/NumPyro model, sampling, diagnostics, backtests |
+| `nfp-model` | **new** | JAX/NumPyro model, sampling, diagnostics, backtests (named `nfp-model-jax` in early drafts; renamed at A3) |
 
 Two known seams in the old layout, fixed in Phase A2 (deliberately *after* golden-master tests exist):
 
@@ -148,7 +148,7 @@ Consolidate the download layers. Move all knowability logic (panel_adapter censo
 > behavior; **the A3 parity baseline must use the corrected config** or the
 > reference posterior will lack φ₃. Details: `plans/4-a2_seams_snapshots.md`.
 
-### A3 — `nfp-model-jax` parity
+### A3 — `nfp-model` parity
 
 Port the model to JAX. Pragmatic sequencing:
 
@@ -156,6 +156,22 @@ Port the model to JAX. Pragmatic sequencing:
 2. **Kalman marginalization second**, where structure allows. The linear-Gaussian core (latent AR(1), CES observations, provider loadings) can be marginalized through a Kalman filter — dynamax's filtering primitives inside a NumPyro likelihood — so only static parameters are sampled. Note: the QCEW Student-t breaks exact Gaussianity; either keep QCEW as a sampled-latent branch, or use the scale-mixture-of-normals representation (per-obs auxiliary variance) which preserves conditional Gaussianity. Expect dynamax's packaged model classes to be insufficient for the hierarchical/regression structure — use its filters, not its models.
 
 **Gate:** on identical snapshots, posterior parity with the HMC reference within Monte Carlo error (key params: era `mu_g`, `phi`, sigma hierarchy, `lambda_G`, `alpha_G`, BD path; criterion: |mean difference| small relative to pooled posterior SD and MCSE), plus matched nowcast distributions across a 12-month backtest window. If JAX can't match HMC, that's a bug found cheap; if it can, Stages 0–4 are banked.
+
+> **Gate status: ✅ PASSED (2026-06-12). 14 fixtures, 476/476 criteria.**
+> The package landed as **`nfp-model`** (direct NumPyro translation; Kalman
+> marginalization deferred to A4-if-needed). Reference baseline: 14 seeded
+> nutpie fits with the **corrected indicators config** (per the A2 finding),
+> 2 default-preset + the 12-month light-preset window 2025-02 … 2026-01
+> (fixtures: `s3://alt-nfp/golden/a3/`, manifest committed). Every sampled
+> site, every latent path, and every window nowcast matched within MC error
+> — worst |Δnowcast| 32k jobs, inside MCSE bounds; new side sampled with
+> **zero divergences in all 14 fits** (ref: 0–4) at ~70% of the reference's
+> wall time. One SD-band criterion was recalibrated kurtosis/ESS-aware after
+> a reference-side low-ESS excursion (centered-GRW scale params, ESS ≈ 175;
+> re-seed evidence in `plans/5-a3_model_parity.md`). The model layer imports
+> nothing from the data packages (test-enforced); ModelData dicts and v2
+> snapshots are the only interface. **Stages 0–4 are banked.** Details:
+> `plans/5-a3_model_parity.md`.
 
 ### A4 — Speed: the actual GPU payoff
 

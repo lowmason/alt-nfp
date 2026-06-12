@@ -26,7 +26,7 @@ from nfp_lookups.paths import DATA_DIR, is_remote
 
 from nfp_ingest.model_data import build_model_data
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2: provider meta carries error_model (model-side need)
 
 #: model-data keys serialized into every snapshot (global arrays)
 GLOBAL_ARRAY_KEYS = [
@@ -93,7 +93,12 @@ def collect_snapshot(data: dict) -> tuple[dict[str, np.ndarray], dict]:
             arrays[f"{name}__births"] = np.asarray(pp["births"])
             arrays[f"{name}__births_obs"] = np.asarray(pp["births_obs"])
         providers_meta.append(
-            {"name": name, "emp_col": pp["emp_col"], "has_births": has_births}
+            {
+                "name": name,
+                "emp_col": pp["emp_col"],
+                "has_births": has_births,
+                "error_model": getattr(pp.get("config"), "error_model", "iid"),
+            }
         )
 
     meta = {

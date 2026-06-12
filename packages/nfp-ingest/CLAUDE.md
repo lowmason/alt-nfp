@@ -12,7 +12,7 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 - **Compositing** (`compositing.py`): QCEW-weighted national compositing for cell-level providers
 - **Indicator store** (`indicators.py`): download + read cyclical indicator parquets
 - **Model data** (`model_data.py`): `build_model_data(as_of=D)` — the single entry point answering "what was knowable on D" (A2). Layer-1 `build_panel(as_of_ref=D)` + layer-2 extraction (best-available CES selection with vintage remap, QCEW noise multipliers incl. post-COVID boundary inflation, provider pub-lag censoring, cyclical pub-lag masking). Knobs in `ModelDataConfig` (defaults frozen from the reference settings). No plotting concerns, no acquisition imports.
-- **Snapshots** (`snapshots.py`): hash-pinned ModelData artifacts (`.npz` arrays + embedded JSON meta) under `NFP_SNAPSHOTS_URI` (S3) or `data/snapshots/`. `content_hash` is over array bytes + canonical meta — never npz file bytes (zip timestamps). `alt-nfp snapshot --as-of D [--grid-end E]` writes them.
+- **Snapshots** (`snapshots.py`): hash-pinned ModelData artifacts (`.npz` arrays + embedded JSON meta) under `NFP_SNAPSHOTS_URI` (S3) or `data/snapshots/`. `content_hash` is over array bytes + canonical meta — never npz file bytes (zip timestamps). `alt-nfp snapshot --as-of D [--grid-end E]` writes them. Schema v2 (A3): provider meta carries `error_model` so `nfp_model.data.from_snapshot` can rebuild likelihood structure; v1 snapshots are read with an `"iid"` fallback.
 - **Release dates** (`release_dates/`): config and vintage date builder
 
 ## Tech Stack

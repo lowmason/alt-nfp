@@ -2,24 +2,28 @@
 
 Bayesian state-space NFP nowcasting from real-time data vintages. This is the
 v2 repo: data packages ported from the frozen reference implementation at
-`~/Projects/alt_nfp` (underscore); the model layer will be rewritten in JAX as
-`nfp-model-jax` behind parity gates. Roadmap: `plans/`; design record:
-`specs/` (active) and `archive/` (implemented/superseded).
+`~/Projects/alt_nfp` (underscore); the model layer is rewritten in
+JAX/NumPyro as `nfp-model` behind parity gates. Roadmap: `plans/`; design
+record: `specs/` (active) and `archive/` (implemented/superseded).
 
 ## Workspace
 
-uv workspace, **linear dependency chain** — enforce it:
+uv workspace. The four data packages form a **linear dependency chain** —
+enforce it; `nfp-model` sits apart and imports **no** `nfp_*` package:
 
 ```
 nfp-lookups → nfp-download → nfp-ingest → nfp-vintages
+                                  ⇣ (arrays/snapshots only, no import)
+                              nfp-model
 ```
 
 | Package | Role |
 |---|---|
 | `nfp-lookups` | Foundation: schemas, hierarchies, revision schedules, series-ID grammar, canonical paths. Imports no other `nfp_*` package — ever. |
 | `nfp-download` | HTTP clients/scrapers for BLS + FRED. Fetching only, no transformation. |
-| `nfp-ingest` | Vintage store API, as-of censoring, panel construction, provider ingestion, compositing. |
+| `nfp-ingest` | Vintage store API, as-of censoring, panel construction, provider ingestion, compositing, ModelData + snapshots. |
 | `nfp-vintages` | Historical vintage reconstruction pipeline + `alt-nfp` CLI (top of the chain). |
+| `nfp-model` | JAX/NumPyro inference: ModelData arrays in, posterior out. Imports only jax/numpyro/numpy; importing it enables global float64. |
 
 Each package has its own `CLAUDE.md` with the internal map.
 
@@ -27,7 +31,8 @@ Each package has its own `CLAUDE.md` with the internal map.
 
 ```bash
 uv sync                                   # install workspace + dev group
-uv run pytest -m "not network" --no-cov   # fast suite (~2s); coverage runs by default otherwise
+uv run pytest -m "not network" --no-cov   # fast suite (~30s); coverage runs by default otherwise
+uv run pytest -m "not network and not slow" --no-cov  # skip MCMC smoke too
 uv run ruff check .                       # lint (line 100; E,W,F,I,B,C4,UP)
 uv run alt-nfp --help                     # vintage pipeline CLI
 ```

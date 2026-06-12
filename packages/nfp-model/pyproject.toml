@@ -1,0 +1,18 @@
+[project]
+name = "nfp-model"
+version = "0.1.0"
+description = "JAX/NumPyro state-space model for NFP nowcasting — ModelData arrays in, posterior out"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+dependencies = [
+    "jax>=0.4.38",
+    "numpy>=1.24.0",
+    "numpyro>=0.16.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nfp_model"]

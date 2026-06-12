@@ -21,6 +21,7 @@ dependencies = [
     "nfp-download",
     "nfp-ingest",
     "nfp-vintages",
+    "nfp-model",
 ]
 
 # No build-system: this is a virtual workspace root (no installable package).
@@ -35,6 +36,7 @@ nfp-lookups = { workspace = true }
 nfp-download = { workspace = true }
 nfp-ingest = { workspace = true }
 nfp-vintages = { workspace = true }
+nfp-model = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -89,9 +91,10 @@ testpaths = ["packages"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=packages/nfp-lookups/src/nfp_lookups --cov=packages/nfp-download/src/nfp_download --cov=packages/nfp-ingest/src/nfp_ingest --cov=packages/nfp-vintages/src/nfp_vintages --cov-report=term-missing --cov-report=html"
+addopts = "--cov=packages/nfp-lookups/src/nfp_lookups --cov=packages/nfp-download/src/nfp_download --cov=packages/nfp-ingest/src/nfp_ingest --cov=packages/nfp-vintages/src/nfp_vintages --cov=packages/nfp-model/src/nfp_model --cov-report=term-missing --cov-report=html"
 markers = [
     "network: tests that require network access (deselect with '-m not network')",
+    "slow: MCMC/sampling tests measured in tens of seconds, not milliseconds",
 ]
 
 [tool.mypy]
@@ -100,7 +103,7 @@ warn_unused_configs = true
 ignore_missing_imports = true
 # Research codebase that leans on dynamic libraries (Polars expressions).
 # We rely on tests + ruff for correctness and keep mypy as a soft check.
-# Re-add per-library overrides (JAX/NumPyro/dynamax) when nfp-model-jax lands.
+# Re-add per-library overrides (JAX/NumPyro) if nfp-model needs them.
 disallow_untyped_defs = false
 warn_return_any = false
 check_untyped_defs = false
