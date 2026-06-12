@@ -1,15 +1,21 @@
-"""Download QCEW data from BLS.
+"""Bulk file downloads from BLS: CES triangular vintages + QCEW files.
 
-Two download functions:
+Three download functions (moved here from ``nfp_vintages.download`` — they
+are acquisition, not vintage processing):
 
-- ``download_qcew``: the revisions CSV (2017-present), for revision history.
-- ``download_qcew_bulk``: quarterly singlefile ZIPs (2003-present), for
-  sector-level employment by state.  Each ~280 MB ZIP is downloaded, filtered
-  to the needed rows, and discarded — only the compact filtered parquet is kept.
+- ``download_ces``: scrapes the CES vintage-data page for ``cesvinall.zip``
+  (triangular revision CSVs) and extracts it into
+  ``{data_dir}/downloads/ces/cesvinall/``. Only the zip is needed; the xlsx
+  workbooks on the same page contain the same data.
+- ``download_qcew``: the QCEW revisions CSV (2017-present).
+- ``download_qcew_bulk``: quarterly singlefile ZIPs (2003-present) for
+  sector-level employment by state. Each ~280 MB ZIP is downloaded,
+  filtered to the needed rows, and discarded — only the compact filtered
+  parquet is kept.
 
-The revisions CSV lives on www.bls.gov, where Akamai bot management
-fingerprints the TLS handshake (plain httpx gets 403 regardless of headers),
-so it uses the Chrome-impersonating session from
+The CES page and the revisions CSV live on www.bls.gov, where Akamai bot
+management fingerprints the TLS handshake (plain httpx gets 403 regardless
+of headers), so transport is the Chrome-impersonating session from
 :func:`nfp_download.client.create_impersonating_session`. The bulk files
 live on data.bls.gov, which plain httpx fetches fine.
 """
@@ -20,13 +26,87 @@ import io
 import tempfile
 import zipfile
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
 import polars as pl
+from bs4 import BeautifulSoup
 from curl_cffi.requests import Session
-from nfp_download.client import create_client, create_impersonating_session, get_with_retry
 from nfp_lookups.geography import STATES
 from nfp_lookups.paths import DATA_DIR
+
+from nfp_download.client import (
+    create_client,
+    create_impersonating_session,
+    get_with_retry,
+)
+
+# ---------------------------------------------------------------------------
+# CES triangular vintage files (cesvinall.zip)
+# ---------------------------------------------------------------------------
+
+CES_INDEX_URL = 'https://www.bls.gov/web/empsit/cesvindata.htm'
+CES_BASE_URL = 'https://www.bls.gov/web/empsit/'
+
+
+def _find_zip_url(html: str) -> str:
+    """Locate the ``cesvinall.zip`` link on the CES vintage-data page."""
+    soup = BeautifulSoup(html, 'html.parser')
+    for a in soup.find_all('a', href=True):
+        href = a['href'].strip()
+        if 'cesvinall.zip' in href.lower():
+            return urljoin(CES_BASE_URL, href)
+    raise RuntimeError('cesvinall.zip link not found on CES index page')
+
+
+def download_ces(
+    data_dir: Path | None = None,
+    *,
+    session: Session | None = None,
+) -> None:
+    """Download and extract ``cesvinall.zip`` from the BLS CES vintage page.
+
+    The zip is extracted into ``{data_dir}/downloads/ces/cesvinall/``.
+
+    Parameters
+    ----------
+    data_dir : Path or None
+        Root data directory. Defaults to ``DATA_DIR``.
+    session : curl_cffi.requests.Session or None
+        Optional pre-built impersonating session. A new one is created if
+        not provided.
+    """
+    ces_dir = (data_dir or DATA_DIR) / 'downloads' / 'ces'
+    ces_dir.mkdir(parents=True, exist_ok=True)
+
+    own_session = session is None
+    if session is None:
+        session = create_impersonating_session()
+
+    try:
+        r = get_with_retry(session, CES_INDEX_URL)
+        r.raise_for_status()
+        zip_url = _find_zip_url(r.text)
+
+        r = get_with_retry(session, zip_url)
+        r.raise_for_status()
+
+        extract_to = ces_dir / 'cesvinall'
+        extract_to.mkdir(parents=True, exist_ok=True)
+        zip_path = ces_dir / 'cesvinall.zip'
+        zip_path.write_bytes(r.content)
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(extract_to)
+        zip_path.unlink()
+        print(f'  extracted cesvinall.zip -> {extract_to}/')
+    finally:
+        if own_session:
+            session.close()
+
+
+# ---------------------------------------------------------------------------
+# QCEW revisions CSV + quarterly bulk singlefiles
+# ---------------------------------------------------------------------------
 
 QCEW_CSV_URL = 'https://www.bls.gov/cew/revisions/qcew-revisions.csv'
 QCEW_FILENAME = 'qcew-revisions.csv'

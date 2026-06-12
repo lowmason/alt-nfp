@@ -4,7 +4,7 @@ Two data sources are merged:
 
 1. **Bulk quarterly files** (2003-present): employment from multiple ownership
    and aggregation-level streams, processed from
-   :func:`~nfp_vintages.download.qcew.download_qcew_bulk`.
+   :func:`~nfp_download.bls.bulk.download_qcew_bulk`.
 
    Streams:
    - Total all-ownership (``own_code='0'``) → ``(national, '00')``
@@ -19,7 +19,7 @@ Two data sources are merged:
    duplicated as sector rows (23, 51, 81).  All rows are ``revision=0``.
 
 2. **Revisions CSV** (2017-present): total employment with revision history
-   (``revision`` 0-4), from :func:`~nfp_vintages.download.qcew.download_qcew`.
+   (``revision`` 0-4), from :func:`~nfp_download.bls.bulk.download_qcew`.
    Where both sources overlap on ``(geographic_code, industry_code, ref_date,
    revision)``, the revisions CSV is preferred (it has exact vintage dates).
 """

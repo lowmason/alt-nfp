@@ -1,0 +1,521 @@
+{
+  "provenance": {
+    "generator": "scripts/generate_a2_golden.py",
+    "generated_on": "2026-06-12",
+    "old_repo": "/Users/lowell/Projects/alt_nfp",
+    "old_repo_commit": "3cfe4caf6f9962b57410f3563f933f8ba3da6928",
+    "polars_version": "1.38.0",
+    "numpy_version": "2.2.6",
+    "start_year": 2012,
+    "end_year": 2026,
+    "providers": [
+      "G"
+    ]
+  },
+  "fixtures": {
+    "asof_2020-05-12": {
+      "as_of_ref": "2020-05-12",
+      "scalars": {
+        "T": 99,
+        "n_years": 9,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2020-04-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 11034,
+      "sha256_npz": "24ad0ff0cb8aa9c6479b8534f83c5fc9625c69dbb142d5db48118bdec6507eec",
+      "sha256_levels": "e59c81807f3cfeb376922a54189a92c035384c9a35ab5f4d6eb4700b47d17fe4",
+      "sha256_panel": "c0bdce9c8aade5a97b96c273b9d66d069cdb2dab01dcc0c5b59438cc4712f4a2"
+    },
+    "asof_2023-07-12": {
+      "as_of_ref": "2023-07-12",
+      "scalars": {
+        "T": 137,
+        "n_years": 12,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2023-06-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 15442,
+      "sha256_npz": "b9176f6f41c33067813067adbb6132ced5ddbcb2ca688006e08bba5fc565302b",
+      "sha256_levels": "df897664b8b1bac26ad0afa0c7834a390b4af171bfdf64437c14e6fb97731082",
+      "sha256_panel": "0727d58cc4164125d1916c09e03e8d225cde730209e51dbc93b8121da139aa39"
+    },
+    "asof_2024-09-12": {
+      "as_of_ref": "2024-09-12",
+      "scalars": {
+        "T": 151,
+        "n_years": 13,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2024-08-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 17090,
+      "sha256_npz": "c8e5c67efca57418200affcfd68cad02a1a0526c0fa0163611ba1c0058802e6d",
+      "sha256_levels": "5d753d221c9a3721ecdf1ce65b7578df4d21716e5028d0d9c6705e42c50523b2",
+      "sha256_panel": "9a523c80bd8ecd92377984e4755a5025abe52b11a1f6bd162aad0aec2c3f7b3e"
+    },
+    "asof_2024-12-12": {
+      "as_of_ref": "2024-12-12",
+      "scalars": {
+        "T": 154,
+        "n_years": 13,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2024-11-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 17435,
+      "sha256_npz": "66bd367307bbaa1911a2ccf28a4155a79f9d1189dcc14a8c70c464e0e82255bf",
+      "sha256_levels": "dadff790d40c6c5c69ceb715dcbbc890d35bc7f0f243aea3c2154b368dbdec2d",
+      "sha256_panel": "7d0234b646592e6923cfe9c90e87cecaf770fd3b4575d5a444ac0b1eb5d847d4"
+    },
+    "asof_2025-02-12": {
+      "as_of_ref": "2025-02-12",
+      "scalars": {
+        "T": 156,
+        "n_years": 14,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2025-01-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 17589,
+      "sha256_npz": "d921ec30014812ca9594768c56f0a1c37242c66cdec3669490d5a060da4f7ba9",
+      "sha256_levels": "68148ac9608a9ec401bae021f1f7f4a792edf5b58e621704ad90bca170f810c1",
+      "sha256_panel": "03fd36e50642ed0dff4800df7d9306fb2878861c4b79f4f06dd563816f3ef4e7"
+    },
+    "asof_2025-03-12": {
+      "as_of_ref": "2025-03-12",
+      "scalars": {
+        "T": 157,
+        "n_years": 14,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2025-02-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 17706,
+      "sha256_npz": "6946ca3081fbb91e5048e4460976eb214db60398195944a97431a28036e75ccb",
+      "sha256_levels": "f986dc1bc07b6ec267419cabfa806530ddde7f10af82e88922d290d30ede5138",
+      "sha256_panel": "897dee08e9102faa8a5226409aef294be102065848978366a831ccdad1dafe04"
+    },
+    "asof_2025-07-12": {
+      "as_of_ref": "2025-07-12",
+      "scalars": {
+        "T": 161,
+        "n_years": 14,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2025-06-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 17832,
+      "sha256_npz": "370eaddf5ee08776b2eae4bba01a98f5ccfbf9b5c98c0abca7c09c5388d82cb8",
+      "sha256_levels": "fdd4e84c0ae7bf4a5849cb7baa840ecb81bd2aee3bc88a1a6e757dd629b32edf",
+      "sha256_panel": "faf8c4e66403073b37d093ae6a51fe9bf7650d81b8db2677e77b5b932de95ce1"
+    },
+    "asof_2025-11-12": {
+      "as_of_ref": "2025-11-12",
+      "scalars": {
+        "T": 165,
+        "n_years": 14,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2025-10-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 17954,
+      "sha256_npz": "c38a500772e017a92390a61348d410f44abbd248c86c83fb4623f9a3e6dba509",
+      "sha256_levels": "eaf86ed8a875b9660e632c1a32ffaeda379683b3d6a8485c0f13564cf103a0c5",
+      "sha256_panel": "bbbe509f02d5cc4aebdfa0031249820043f4dcdaa52b3e5a3348688f0be07de4"
+    },
+    "asof_2026-01-12": {
+      "as_of_ref": "2026-01-12",
+      "scalars": {
+        "T": 167,
+        "n_years": 14,
+        "n_ces_vintages": 3,
+        "n_providers": 1
+      },
+      "dates_first": "2012-02-12",
+      "dates_last": "2025-12-12",
+      "ces_vintage_map": {
+        "0": 0,
+        "1": 1,
+        "2": 2
+      },
+      "cyclical_present": [
+        "claims_c",
+        "jolts_c"
+      ],
+      "cyclical_none": [],
+      "providers": [
+        {
+          "name": "G",
+          "emp_col": "g_employment",
+          "has_births": true
+        }
+      ],
+      "array_names": [
+        "G__births",
+        "G__births_obs",
+        "G__g_pp",
+        "G__pp_obs",
+        "bd_proxy",
+        "bd_qcew_lagged",
+        "birth_rate",
+        "ces_nsa_obs",
+        "ces_nsa_vintage_idx",
+        "ces_sa_obs",
+        "ces_sa_vintage_idx",
+        "claims_c",
+        "era_idx",
+        "g_ces_nsa",
+        "g_ces_sa",
+        "g_qcew",
+        "jolts_c",
+        "month_of_year",
+        "qcew_is_m2",
+        "qcew_noise_mult",
+        "qcew_obs",
+        "year_of_obs"
+      ],
+      "panel_rows": 18078,
+      "sha256_npz": "5c6eb27046e633cc05b28013e65081939814b1aa01b458e43a22ad8465da6c83",
+      "sha256_levels": "2cfb7162322fcba8c88b6d3402c66b27c99d47b34f0b675ed8922a919297db44",
+      "sha256_panel": "0ccf62d232063ac9fb30eae17b6f3e70f00f390a9914148fc36f382ecaefea1a"
+    }
+  }
+}

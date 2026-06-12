@@ -2130,7 +2130,6 @@ name = "nfp-vintages"
 version = "0.1.0"
 source = { editable = "packages/nfp-vintages" }
 dependencies = [
-    { name = "curl-cffi" },
     { name = "httpx", extra = ["http2"] },
     { name = "nfp-download" },
     { name = "nfp-ingest" },
@@ -2142,7 +2141,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "curl-cffi", specifier = ">=0.15.0" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.24.0" },
     { name = "nfp-download", editable = "packages/nfp-download" },
     { name = "nfp-ingest", editable = "packages/nfp-ingest" },

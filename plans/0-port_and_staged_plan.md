@@ -134,6 +134,20 @@ Consolidate the download layers. Move all knowability logic (panel_adapter censo
 
 **Gate:** golden masters still pass; the model package imports nothing from acquisition; snapshots are hash-stable across regeneration.
 
+> **Gate status: ✅ PASSED (2026-06-12).** Download layer consolidated into
+> `nfp_download.bls.bulk`; processing modules renamed (collision-free);
+> knowability ported to `nfp_ingest.model_data.build_model_data(as_of=D)`
+> with **9/9 array-exact parity** against the old `panel_to_model_data` at
+> the A1 dates (fixtures: `s3://alt-nfp/golden/a2/`); hash-pinned snapshots
+> (`nfp_ingest.snapshots`, `alt-nfp snapshot`) with build-twice hash
+> stability proven. A1 masters green throughout; no acquisition imports in
+> the model-data path. **Finding:** the frozen reference has a latent
+> indicators-path regression (default-config runs since the settings
+> refactor silently dropped claims/jolts — `panel_adapter` resolves
+> `indicators_dir` against the model package dir). Masters pin the intended
+> behavior; **the A3 parity baseline must use the corrected config** or the
+> reference posterior will lack φ₃. Details: `plans/4-a2_seams_snapshots.md`.
+
 ### A3 — `nfp-model-jax` parity
 
 Port the model to JAX. Pragmatic sequencing:

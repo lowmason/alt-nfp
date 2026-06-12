@@ -57,5 +57,15 @@ CYCLICAL_INDICATORS_DEFAULT: list[CyclicalIndicator] = [
     CyclicalIndicator(name="jolts", fred_id="JTSJOL", freq="monthly", pub_lag=2),
 ]
 
+# Default payroll providers (files live under DATA_DIR; see paths.py)
+PROVIDERS_DEFAULT: list[ProviderConfig] = [
+    ProviderConfig(
+        name="G",
+        file="providers/g/g_provider.parquet",
+        error_model="iid",
+        birth_file="providers/g/g_births.parquet",
+    ),
+]
+
 # Compositing threshold
 MIN_PSEUDO_ESTABS_PER_CELL: int = 5

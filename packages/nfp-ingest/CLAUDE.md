@@ -11,6 +11,8 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 - **Provider ingestion** (`payroll.py`): auto-detects cell-level vs national providers
 - **Compositing** (`compositing.py`): QCEW-weighted national compositing for cell-level providers
 - **Indicator store** (`indicators.py`): download + read cyclical indicator parquets
+- **Model data** (`model_data.py`): `build_model_data(as_of=D)` — the single entry point answering "what was knowable on D" (A2). Layer-1 `build_panel(as_of_ref=D)` + layer-2 extraction (best-available CES selection with vintage remap, QCEW noise multipliers incl. post-COVID boundary inflation, provider pub-lag censoring, cyclical pub-lag masking). Knobs in `ModelDataConfig` (defaults frozen from the reference settings). No plotting concerns, no acquisition imports.
+- **Snapshots** (`snapshots.py`): hash-pinned ModelData artifacts (`.npz` arrays + embedded JSON meta) under `NFP_SNAPSHOTS_URI` (S3) or `data/snapshots/`. `content_hash` is over array bytes + canonical meta — never npz file bytes (zip timestamps). `alt-nfp snapshot --as-of D [--grid-end E]` writes them.
 - **Release dates** (`release_dates/`): config and vintage date builder
 
 ## Tech Stack
@@ -77,5 +79,7 @@ Tests live in `tests/` within this package:
 - `test_compositing.py` — QCEW-weighted compositing tests
 - `test_store_coverage.py` — store data-integrity + CES censored diagonal invariant
 - `test_golden_masters.py` — A1 golden masters: censored panels vs frozen-reference fixtures in `s3://…/golden/a1/` (manifest in `tests/golden/`); self-skips without store env
+- `test_model_data_golden.py` — A2 golden masters: `build_model_data` arrays/frames vs frozen-reference `panel_to_model_data` outputs in `s3://…/golden/a2/`; self-skips without store env + local providers/indicators
+- `test_snapshots.py` — snapshot content hash (deterministic, order-insensitive, corruption-detecting), round-trip, and build-twice hash stability
 - `test_cyclical_indicators.py` — NOT yet ported: depends on `nfp_models.panel_adapter`; comes over when knowability logic moves into the data layer (Phase A2)
 - `test_fred.py` — lives in `packages/nfp-download/tests/` (imports only `nfp_download.fred`)

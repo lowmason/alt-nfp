@@ -36,7 +36,7 @@ def main(ctx: typer.Context) -> None:
 @app.command()
 def download() -> None:
     """Download CES and QCEW data files."""
-    from nfp_vintages.download import download_ces, download_qcew, download_qcew_bulk
+    from nfp_download.bls.bulk import download_ces, download_qcew, download_qcew_bulk
 
     print('Downloading CES vintage data...')
     download_ces()
@@ -160,15 +160,15 @@ def _build_release_calendar() -> None:
 @app.command()
 def process() -> None:
     """Scrape BLS release calendar, then process CES/QCEW revisions."""
-    from nfp_vintages.processing.ces_national import main as ces_national_main
+    from nfp_vintages.processing.ces_triangular import main as ces_triangular_main
     from nfp_vintages.processing.combine import main as combine_main
-    from nfp_vintages.processing.qcew import main as qcew_main
+    from nfp_vintages.processing.qcew_bulk import main as qcew_main
 
     print('=== Building BLS release calendar ===')
     _build_release_calendar()
 
     print('\n=== Processing CES national revisions ===')
-    ces_national_main()
+    ces_triangular_main()
     print('\n=== Processing QCEW revisions ===')
     qcew_main()
     print('\n=== Combining revisions ===')
@@ -197,6 +197,38 @@ def build(
     from nfp_vintages.build_store import build_store
 
     build_store(releases_path=releases_path)
+
+
+@app.command()
+def snapshot(
+    as_of: str = typer.Option(
+        ..., "--as-of", help="Knowledge cutoff, YYYY-MM-DD (day-12 convention)."
+    ),
+    grid_end: str | None = typer.Option(
+        None,
+        "--grid-end",
+        help="If set, snapshot every month's 12th from --as-of through this date.",
+    ),
+) -> None:
+    """Write hash-pinned ModelData snapshot(s) for the given as-of date(s)."""
+    from datetime import date as _date
+
+    from nfp_ingest.snapshots import snapshot_model_data
+
+    start = _date.fromisoformat(as_of)
+    if grid_end is None:
+        dates = [start]
+    else:
+        end = _date.fromisoformat(grid_end)
+        dates = []
+        y, m = start.year, start.month
+        while _date(y, m, 12) <= end:
+            dates.append(_date(y, m, 12))
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+
+    for d in dates:
+        path, digest = snapshot_model_data(d)
+        print(f'  {d}: {path} (hash {digest[:12]})')
 
 
 if __name__ == '__main__':

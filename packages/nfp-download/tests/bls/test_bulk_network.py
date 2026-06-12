@@ -9,9 +9,8 @@ here to keep the suite polite. Marked network; deselected in CI with
 """
 
 import pytest
+from nfp_download.bls.bulk import CES_INDEX_URL, QCEW_FILENAME, _find_zip_url, download_qcew
 from nfp_download.client import create_impersonating_session, get_with_retry
-from nfp_vintages.download.ces import CES_INDEX_URL, _find_zip_url
-from nfp_vintages.download.qcew import QCEW_FILENAME, download_qcew
 
 pytestmark = pytest.mark.network
 

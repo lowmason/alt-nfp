@@ -41,7 +41,8 @@ src/nfp_download/
 │   ├── _programs.py        # Back-compat shim → nfp_lookups.series_ids (series-ID grammar)
 │   ├── ces_national.py     # fetch_ces_national() — CES national series
 │   ├── ces_state.py        # fetch_ces_state() — CES state series
-│   └── qcew.py             # fetch_qcew(), fetch_qcew_with_geography()
+│   ├── qcew.py             # fetch_qcew(), fetch_qcew_with_geography()
+│   └── bulk.py             # download_ces (cesvinall.zip), download_qcew (revisions CSV), download_qcew_bulk (yearly singlefiles) — moved from nfp-vintages in A2
 └── release_dates/
     ├── __init__.py
     ├── scraper.py           # Async scraper for BLS publication schedule HTML pages
@@ -70,6 +71,7 @@ Tests live in `tests/` within this package:
 - `tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
 - `tests/bls/test_http.py` — BLS HTTP client tests
 - `tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
+- `tests/bls/test_bulk_network.py` — live www.bls.gov bulk-download transport tests (network-marked)
 - `tests/release_dates/test_scraper_network.py` — live BLS scraper transport tests (network-marked)
 - `tests/test_fred.py` — FRED client tests
 - `tests/test_client.py` — HTTP client retry logic tests
