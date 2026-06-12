@@ -111,6 +111,23 @@ Generate censored panels in the **old** repo for a set of as-of dates chosen to 
 
 **Gate:** golden masters committed; new-repo panels match for every fixture date. This — not "backtests run without look-ahead bias" — is the real Stage 0 gate.
 
+> **Gate status: ✅ PASSED (2026-06-12).** 9 censored panels + 1 provider
+> fixture generated from the old repo (its venv, its local store, read-only)
+> at as-of dates covering: COVID break (2020-05-12), mid-sample control,
+> all four QCEW quarter rules, the January benchmark print (2025-02-12),
+> stale-provider month (2025-11-12; staleness *behavior* gates in A2), and
+> the frontier (2026-01-12). The new repo reproduces **every panel
+> value-identical** (11/11 tests in
+> `packages/nfp-ingest/tests/test_golden_masters.py`) across polars
+> 1.38→1.41 and local→S3 store. One deviation: fixtures live in
+> `s3://alt-nfp/golden/a1/` rather than git (public repo, proprietary
+> provider values) — only the manifest is committed. One finding: the
+> originally planned frontier 2026-02-12 is *correctly unbuildable* — the
+> 2025 shutdown left Oct/Nov-2025 supersector detail unpublished until the
+> 2026-02-16 make-up print, so the fail-fast censoring validator raises;
+> this is pinned as a **negative master**. Details:
+> `plans/3-golden_masters.md`.
+
 ### A2 — Seam fixes and the ModelData snapshot
 
 Consolidate the download layers. Move all knowability logic (panel_adapter censoring, publication lags, best-available selection) into the data side behind a single `model_data(as_of=D)` entry point. Introduce the serialized snapshot artifact and precompute snapshots for the full backtest grid.

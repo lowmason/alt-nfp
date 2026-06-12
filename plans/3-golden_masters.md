@@ -1,5 +1,23 @@
 # Implementation Plan: A1 — Golden-Master Censoring Fixtures
 
+> **Status: ✅ COMPLETE (2026-06-12).** All steps done:
+>
+> - 10 fixtures generated read-only from the old repo
+>   (`scripts/generate_golden_masters.py` run with the old venv's
+>   interpreter): 9 censored panels (11,020–17,996 rows) + `provider_G`
+>   (83 rows), uploaded to `s3://alt-nfp/golden/a1/`; manifest committed at
+>   `packages/nfp-ingest/tests/golden/a1_manifest.json`.
+> - `packages/nfp-ingest/tests/test_golden_masters.py`: **11/11 pass** —
+>   9 value-identical panel comparisons, 1 negative master (2026-02-12
+>   raises on the shutdown ref-gap), 1 provider comparison. Verified to
+>   skip cleanly without `.env` (CI mode).
+> - Old repo's `data/providers/` rsynced to local `data/providers/`
+>   (gitignored) for the provider comparison.
+> - Full suite: 372 passed / 1 intentional skip; ruff clean.
+> - Frontier finding documented below (2026-02-12 → negative master;
+>   positive frontier moved to 2026-01-12, which also exercises the
+>   shutdown revision-fallback path).
+
 Phase A1 of `plans/0-port_and_staged_plan.md`: generate censored panels in
 the **old** repo (`~/Projects/alt_nfp`, frozen reference) for as-of dates
 that exercise the known censoring edge cases; the new repo must reproduce

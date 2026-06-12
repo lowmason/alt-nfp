@@ -76,5 +76,6 @@ Tests live in `tests/` within this package:
 - `test_vintage_store.py` — vintage store + rank-based censoring + validation guards
 - `test_compositing.py` — QCEW-weighted compositing tests
 - `test_store_coverage.py` — store data-integrity + CES censored diagonal invariant
+- `test_golden_masters.py` — A1 golden masters: censored panels vs frozen-reference fixtures in `s3://…/golden/a1/` (manifest in `tests/golden/`); self-skips without store env
 - `test_cyclical_indicators.py` — NOT yet ported: depends on `nfp_models.panel_adapter`; comes over when knowability logic moves into the data layer (Phase A2)
 - `test_fred.py` — lives in `packages/nfp-download/tests/` (imports only `nfp_download.fred`)
