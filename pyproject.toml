@@ -1,0 +1,123 @@
+[project]
+name = "alt-nfp"
+version = "0.1.0"
+description = "Bayesian time series estimation for employment and payroll indices"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Lowell Mason", email = "lowell@lowellmason.com"}
+]
+keywords = ["bayesian", "time-series", "dynamax", "jax", "employment-statistics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+dependencies = [
+    "nfp-lookups",
+    "nfp-download",
+    "nfp-ingest",
+    "nfp-vintages",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+viz = [
+    "matplotlib>=3.7.0",
+    "arviz>=0.17.0",
+]
+
+# No build-system: this is a virtual workspace root (no installable package)
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+nfp-lookups = { workspace = true }
+nfp-download = { workspace = true }
+nfp-ingest = { workspace = true }
+nfp-vintages = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "ipython>=8.0.0",
+    "jupyter>=1.0.0",
+]
+docs = [
+    "mkdocs-gen-files>=0.6.0",
+    "mkdocs-literate-nav>=0.6.2",
+    "mkdocs-material>=9.7.3",
+    "mkdocs-section-index>=0.3.10",
+    "mkdocstrings[python]>=1.0.3",
+]
+
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["archive", "docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"packages/nfp-vintages/src/nfp_vintages/__main__.py" = ["B008"]  # typer.Option in defaults is idiomatic
+"tests/*" = ["B017", "B011"]  # blind exception + assert False are common in tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--cov=packages/nfp-lookups/src/nfp_lookups --cov=packages/nfp-download/src/nfp_download --cov=packages/nfp-ingest/src/nfp_ingest --cov=packages/nfp-vintages/src/nfp_vintages --cov-report=term-missing --cov-report=html"
+markers = [
+    "network: tests that require network access (deselect with '-m not network')",
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+ignore_missing_imports = true
+# This is a research codebase that leans on dynamic libraries (ArviZ,
+# PyMC, Polars expressions). We rely on tests + ruff for correctness
+# and keep mypy as a soft check.
+disallow_untyped_defs = false
+warn_return_any = false
+check_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# ArviZ exposes `posterior`, `posterior_predictive`, etc. dynamically
+# via attribute access; mypy cannot see them.
+module = ["arviz", "arviz.*", "pymc", "pymc.*", "pytensor", "pytensor.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

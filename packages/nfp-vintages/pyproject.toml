@@ -1,0 +1,29 @@
+[project]
+name = "nfp-vintages"
+version = "0.1.0"
+description = "Vintage data pipeline for CES, QCEW, and SAE employment data"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "nfp-lookups",
+    "nfp-download",
+    "nfp-ingest",
+    "httpx[http2]>=0.24.0",
+    "polars>=0.20.0",
+    "typer>=0.9.0",
+]
+
+[project.scripts]
+alt-nfp = "nfp_vintages.__main__:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+nfp-lookups = { workspace = true }
+nfp-download = { workspace = true }
+nfp-ingest = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nfp_vintages"]
