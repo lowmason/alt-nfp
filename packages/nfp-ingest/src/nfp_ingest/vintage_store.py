@@ -37,9 +37,11 @@ VINTAGE_STORE_SCHEMA: dict[str, pl.DataType] = {
     "seasonally_adjusted": pl.Boolean,
 }
 
-# QCEW max revision number per quarter (asymmetric schedule).
-# Q1 accumulates the most revisions; Q4 the fewest.
-_QCEW_MAX_REVISION: dict[int, int] = {1: 4, 2: 3, 3: 2, 4: 1}
+# Boundary between pre-2017 (max-revision) and 2017+ (rank-based) QCEW regimes.
+# Before this date only a single revision exists per ref_date, so we just keep
+# the maximum revision.  The BLS started publishing quarterly QCEW revisions
+# in a structured cadence beginning with 2017 data.
+_QCEW_MONTHLY_START = date(2017, 1, 12)
 
 # Series keys for rank-based censoring.
 _CES_SERIES_KEY = [
@@ -138,10 +140,9 @@ def _select_qcew_at_horizon(qcew_df: pl.DataFrame, D: date) -> pl.DataFrame:
         return qcew_df
 
     sk = _QCEW_SERIES_KEY
-    cutoff = date(2017, 1, 12)
 
     # --- Pre-2017: max revision per (series, ref_date) --------------------
-    pre = qcew_df.filter(pl.col("ref_date") < cutoff)
+    pre = qcew_df.filter(pl.col("ref_date") < _QCEW_MONTHLY_START)
     if not pre.is_empty():
         pre = (
             pre.sort("revision", descending=True)
@@ -149,7 +150,7 @@ def _select_qcew_at_horizon(qcew_df: pl.DataFrame, D: date) -> pl.DataFrame:
         )
 
     # --- 2017+: rank + quarter rules -------------------------------------
-    post = qcew_df.filter(pl.col("ref_date") >= cutoff)
+    post = qcew_df.filter(pl.col("ref_date") >= _QCEW_MONTHLY_START)
     if post.is_empty():
         return pre
 
