@@ -176,10 +176,20 @@ A4's contribution is measuring how much this contaminates both evaluation
 tracks.
 
 **(c) Genuine capture artifacts — small, separable.** (i) Dec-2025's rev-1
-slot was never stored: `tagger.latest_vintage_lookup` (`tagger.py:39-51`)
-takes *independent* maxes of (vintage_date, revision, benchmark_revision)
-per ref_date, so on benchmark day the calendar's (rev2, bmr1) row shadows
-the same-day second print. (ii) Historical vintage stamps for rev-1/rev-2
+slot was never stored: the release-day tagger took *independent* maxes of
+(vintage_date, revision, benchmark_revision) per ref_date, so on benchmark
+day the calendar's (rev2, bmr1) row shadowed the same-day second print. The
+live-capture path is `releases._latest_ces_vintage_dates`
+(`alt-nfp current` → `build_releases` → `_fetch_ces_releases` →
+`releases.parquet` → `build_store`); `tagger.latest_vintage_lookup`
+(`tagger.py:39-51`) is a now-legacy mirror with no live callers. **Fixed**
+(2026-06-13): both functions now key on `(ref_date, benchmark_revision)`,
+emitting each track as a coherent `(vintage_date, revision)` pair so both
+prints reach the store; regressions in `test_new_ingest.py`
+(`test_benchmark_day_emits_both_prints`, `TestLatestCesVintageDates`).
+Tagging only changes which rows *future* captures emit — it never
+reinterprets the append-only store, so A1/A2 golden masters are untouched.
+(ii) Historical vintage stamps for rev-1/rev-2
 are schedule-derived, off the true release date by −3…+5 days in most
 months (only 20/271 rev-0 rows share an exact stamp with their same-release
 partner); the live-capture era stamps are true release dates. Both affect
@@ -250,9 +260,10 @@ Score both tracks, each under a convention that matches its question:
 first-print track via Option A (does the nowcast predict *what BLS will
 announce*); revised-truth track via Option C (does it predict *reality as
 later measured*). Keep the store and `transform_to_panel` untouched.
-Separately, file the §4c capture items (rev-1 shadowing on benchmark day;
-true release-date stamps for live captures) as small fixes that improve
-future reconstructions without touching pinned history, and carry the §3
+Of the §4c capture items, the rev-1 benchmark-day shadowing is **fixed**
+(2026-06-13, §4c-i); the remaining item — true release-date stamps for
+historical rev-1/rev-2 captures — stays open as a small fix that improves
+future reconstructions without touching pinned history. Carry the §3
 model-input observation (triple wedge at February as-ofs; permanent
 November rev-2 outliers) into the Phase-B model-evidence agenda.
 

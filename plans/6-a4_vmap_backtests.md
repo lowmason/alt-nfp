@@ -188,6 +188,20 @@ background while batched lands → compare → 6.5.
 
 ## Finding: evaluation actuals are convention-laden (dual-track scoring)
 
+> **The authoritative write-up is `specs/ces_growth_convention.md`** (a
+> deeper, independent 2026-06-12 analysis that predates this run). It
+> locates the growth computation
+> (`transform_to_panel`, read-time **revision-cohort** diff — same
+> print-ordinal across releases, *not* the within-release headline),
+> quantifies the disagreement store-wide (51/271 months >100k), and lays
+> out the A5 options (additive first-print extractor / opt-in convention
+> switch / coherent revised-truth target). Read that spec for A5; the
+> paragraphs below are A4's narrower, operational view. **Caveat A5 must
+> heed:** A4's report labels the rev-0 *cohort* growth as "first print",
+> but per that spec (§2, §5) the cohort track is **not** the published
+> headline (2025-07: cohort −185k vs headline +73k) — a true first-print
+> track needs the spec's Option A reconstruction, which A4 did not build.
+
 The grid build surfaced that the two "actual" conventions disagree by
 >150k on 5 of 24 window months, for three distinct reasons:
 

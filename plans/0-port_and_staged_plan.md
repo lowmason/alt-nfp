@@ -201,7 +201,9 @@ Port the model to JAX. Pragmatic sequencing:
 > >150k on 5/24 months — large revisions, annual benchmarks, store growth
 > semantics at revision edges); the report scores dual-track and flags
 > splice rows, and **defining the scoring convention is an A5 question**.
-> Details: `plans/6-a4_vmap_backtests.md`.
+> Full analysis: `specs/ces_growth_convention.md` (read-time revision-cohort
+> growth vs headline, A5 options A/B/C); A4 view:
+> `plans/6-a4_vmap_backtests.md`.
 
 ### A5 — Real competitors in the harness
 
