@@ -30,7 +30,7 @@ def main(ctx: typer.Context) -> None:
         download_indicators()
         process()
         current()
-        build(None)
+        build(None, allow_canonical=False)
 
 
 @app.command()
