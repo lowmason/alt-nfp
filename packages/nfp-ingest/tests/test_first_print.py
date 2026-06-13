@@ -5,6 +5,7 @@ Validated against published headlines. Skips when the store is unavailable.
 """
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from nfp_ingest.first_print import first_print_changes
 from nfp_lookups.paths import VINTAGE_STORE_PATH
@@ -47,8 +48,6 @@ def test_benchmark_fallback_headline_2026_01():
 
 
 def test_growth_and_change_consistent():
-    import numpy as np
-
     df = first_print_changes().drop_nulls("first_print_change_k")
     # change_k and growth agree in sign
     assert (df["first_print_growth"].is_not_null()).all()

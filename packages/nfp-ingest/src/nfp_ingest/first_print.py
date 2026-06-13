@@ -55,37 +55,55 @@ def first_print_changes(
         .collect()
     )
 
+    # Each month's first print: rev0/bmr0 (one vintage per month in practice;
+    # take the latest defensively). ``fp_vintage`` is the release these levels
+    # were published in — used below to censor the partner so we never use a
+    # prior-month revision published *after* this first print (no lookahead).
     first = (
         levels.filter((pl.col("revision") == 0) & (pl.col("benchmark_revision") == 0))
         .sort("vintage_date")
         .group_by("period")
-        .last()  # one first print per month
+        .last()
         .select(
             "period",
             pl.col("employment").alias("L_p"),
-            pl.col("vintage_date"),
+            pl.col("vintage_date").alias("fp_vintage"),
         )
         .with_columns(prev_period=pl.col("period").dt.offset_by("-1mo"))
     )
 
-    rev1 = (
-        levels.filter((pl.col("revision") == 1) & (pl.col("benchmark_revision") == 0))
+    # Prior-month level rows as known *by the first print's release date*.
+    # After this join ``period`` is the first-print month (the right frame's
+    # ``period`` is consumed as the join key).
+    cand = (
+        first.select("period", "fp_vintage", "prev_period")
+        .join(levels, left_on="prev_period", right_on="period", how="left")
+        .filter(pl.col("vintage_date") <= pl.col("fp_vintage"))
+    )
+
+    # Primary partner: prior month's original second print (rev1, bmr0).
+    # ``.first()`` after sorting by vintage takes the earliest (original) print,
+    # not a later correction — the level as published alongside p's first print.
+    primary = (
+        cand.filter((pl.col("revision") == 1) & (pl.col("benchmark_revision") == 0))
         .sort("vintage_date")
         .group_by("period")
         .first()
         .select("period", pl.col("employment").alias("L_prev_primary"))
     )
 
-    latest = (
-        levels.sort("benchmark_revision", "revision", "vintage_date")
+    # Fallback (benchmark months, where the rev1 partner is absent/shadowed):
+    # prior month's latest published level known by p's release.
+    fallback = (
+        cand.sort("benchmark_revision", "revision", "vintage_date")
         .group_by("period")
         .last()
         .select("period", pl.col("employment").alias("L_prev_fallback"))
     )
 
     out = (
-        first.join(rev1, left_on="prev_period", right_on="period", how="left")
-        .join(latest, left_on="prev_period", right_on="period", how="left")
+        first.join(primary, on="period", how="left")
+        .join(fallback, on="period", how="left")
         .with_columns(L_prev=pl.coalesce("L_prev_primary", "L_prev_fallback"))
         .with_columns(
             first_print_change_k=(pl.col("L_p") - pl.col("L_prev")),
@@ -95,7 +113,7 @@ def first_print_changes(
             pl.col("period").alias("ref_date"),
             "first_print_growth",
             "first_print_change_k",
-            "vintage_date",
+            pl.col("fp_vintage").alias("vintage_date"),
         )
         .sort("ref_date")
     )
