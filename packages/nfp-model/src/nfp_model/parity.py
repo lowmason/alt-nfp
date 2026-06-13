@@ -85,7 +85,7 @@ def collect_parity_arrays(
             arrays[f"draws__{var}"] = post[var]
     for name in post:
         if name.startswith(("alpha_", "lam_", "sigma_pp_", "rho_")) and name not in (
-            "alpha_ces", "lam_ces",
+            "alpha_ces",
         ):
             arrays[f"draws__{name}"] = post[name]
     for var in PATH_VARS:
