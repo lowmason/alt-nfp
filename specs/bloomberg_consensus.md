@@ -154,8 +154,8 @@ file — not the API path.
 The adapter lives at `nfp_vintages/competitors/consensus.py` (per
 `a5_real_competitors.md` §6). The A5 scoreboard
 (`scripts/run_a5_backtest.py`) calls `load_consensus()`, joins on
-`ref_month`, and scores `consensus_median_change_k` against both A5 targets
-(first print, revised truth) in the **release-eve** regime. Until the file
+`ref_month`, and scores `consensus_median_change_k` against the A5 target
+(the first print) in the **release-eve** regime. Until the file
 exists, `load_consensus()` returns `None` and the column renders `—`; the
 join and scoring are still exercised by a committed synthetic fixture so the
 path cannot rot.

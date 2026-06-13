@@ -211,11 +211,13 @@ Add the benchmarks that matter to every backtest report: **ADP prints** (FRED; m
 
 **Gate:** every backtest report scores model vs. ADP vs. consensus vs. naive, at each information regime. This closes the staged doc's biggest omission: it never named the competition.
 
+> **Refinement (2026-06-13, `specs/a5_real_competitors.md`):** **ADP is dropped** — post-Aug-2022 it publicly disclaims forecasting the BLS print (an independent measure), so it is not a fair first-print competitor. The competition is **consensus** (Bloomberg, release-eve / T−1, staged) + a **smart bridge baseline** (vintage-censored claims/JOLTS) + naive floors. The information regimes are **T−7 and T−1** (BLS-release(M) − 7 and − 1 days), both near the release where payroll-provider inputs are highest-quality — *not* day-12 of the reference month (which starves the model of provider data). Target = first print (SQ1).
+
 ---
 
 ## Phase B — Extend (the genuine frontier)
 
-Stages 5–7 of the staged doc, re-gated against real competitors. Do not start Phase B until the strategic questions below are answered — they determine its ordering.
+Stages 5–7 of the staged doc, re-gated against real competitors. Do not start Phase B until the strategic questions below are answered — they determine its ordering. **(SQ1 + SQ2 answered 2026-06-13 → B1 leads: the product is an accurate first-print nowcast for Bloomberg plus a supersector "why" narrative; SQ3 — does the model beat consensus/ADP — is what A5 measures.)**
 
 - **B1 — Supersector narrative layer** (staged-doc Stage 5). CES supersector vintages into the store; supersector latent states; contributions that explain the national number. Gate: narrative stability across vintages + accuracy vs. QCEW sector anchors vs. share-based allocation.
 - **B2 — Forecasted QCEW + time-varying provider bias** (Stage 6). Fill the 5–6 month QCEW lag with an explicitly-noisier forecast observation; random-walk provider bias with error-correction pullback toward QCEW.
@@ -226,7 +228,9 @@ Stages 5–7 of the staged doc, re-gated against real competitors. Do not start 
 Carried from the planning session; each changes Phase B's shape:
 
 1. **What is the target: the CES first print, or benchmark-informed truth?** These diverged by 818k in 2024 and have different optimal forecasts (one models BLS's measurement process including its B/D errors; the other models reality). Affects every loss function and the value proposition itself. Cheap hedge: the harness already scores both (nowcast backtest vs. first/second/final prints; benchmark backtest vs. revised truth) — keep dual-track scoring through Phase A and decide before B1.
+   > **Answered (2026-06-13): the target is the first print.** A5 scores every competitor against the within-release headline BLS announces (`specs/a5_real_competitors.md`, `specs/ces_growth_convention.md` Option A). Benchmark-informed / revised-truth targeting is deferred to a separate later model — either this model tweaked to target benchmark revisions, or a new one — and is therefore out of A5 scope. Revised truth may still be shown as an *unscored* reference (revision magnitude), but it gates nothing.
 2. **Who consumes the output?** Trading signal → turning points and the BD layer are the product; B2 leads. Research narrative → the supersector story is the product; B1 leads. Personal research edge → A5's consensus comparison decides everything.
+   > **Answered (2026-06-13): the "research narrative" consumer.** The output is (1) the most accurate NFP **first-print** nowcast/forecast, intended for **Bloomberg publication**, and (2) an advanced **narrative** of *why* — the national change decomposed into supersector contributions ("the change is driven by this supersector, that supersector…"). The supersector story is a stated product, so **B1 (supersector narrative layer) leads Phase B**. A5 remains national first-print scoring; supersector-level scoring is B1's extension of the A5 harness.
 3. **Does the banked model actually beat consensus and ADP, and at which horizons?** A5 answers this empirically with the *existing* model before any Phase B investment. If the answer is no at all horizons, the edge most plausibly lives in benchmark-revision prediction — where consensus doesn't compete — and Phase B should be re-planned around that.
 
 ---
