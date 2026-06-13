@@ -7,7 +7,7 @@ license = {text = "MIT"}
 authors = [
     {name = "Lowell Mason", email = "lowell@lowellmason.com"}
 ]
-keywords = ["bayesian", "time-series", "dynamax", "jax", "employment-statistics"]
+keywords = ["bayesian", "time-series", "jax", "employment-statistics"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -91,7 +91,6 @@ testpaths = ["packages"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=packages/nfp-lookups/src/nfp_lookups --cov=packages/nfp-download/src/nfp_download --cov=packages/nfp-ingest/src/nfp_ingest --cov=packages/nfp-vintages/src/nfp_vintages --cov=packages/nfp-model/src/nfp_model --cov-report=term-missing --cov-report=html"
 markers = [
     "network: tests that require network access (deselect with '-m not network')",
     "slow: MCMC/sampling tests measured in tens of seconds, not milliseconds",
