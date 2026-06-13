@@ -47,3 +47,49 @@ def test_predict_none_when_no_history_available():
     hist = _history()
     rw = RandomWalk(hist)
     assert rw.predict(date(2024, 1, 1), as_of=date(2024, 1, 1)) is None
+
+
+def _consensus_file(tmp_path):
+    df = pl.DataFrame(
+        {
+            "ref_month": [date(2024, 5, 1), date(2024, 6, 1)],
+            "consensus_median_change_k": [180.0, 190.0],
+            "survey_date": [date(2024, 6, 5), date(2024, 7, 3)],
+            "release_date": [date(2024, 6, 7), date(2024, 7, 5)],
+            "source": ["bloomberg", "bloomberg"],
+        }
+    )
+    p = tmp_path / "consensus.parquet"
+    df.write_parquet(p)
+    return p
+
+
+def test_load_consensus_absent_returns_none(tmp_path):
+    from nfp_vintages.competitors.consensus import load_consensus
+
+    assert load_consensus(tmp_path / "missing.parquet") is None
+
+
+def test_load_consensus_validates_and_reads(tmp_path):
+    from nfp_vintages.competitors.consensus import load_consensus
+
+    df = load_consensus(_consensus_file(tmp_path))
+    assert df is not None
+    assert df.height == 2
+    assert {"ref_month", "consensus_median_change_k", "survey_date",
+            "release_date", "source"}.issubset(df.columns)
+
+
+def test_consensus_competitor_t1_lookup(tmp_path):
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+
+    c = Consensus(load_consensus(_consensus_file(tmp_path)))
+    # at T-1 (release_date - 1 = 2024-07-04) consensus for 2024-06 is known
+    assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) == pytest.approx(190.0)
+
+
+def test_consensus_none_when_unconfigured():
+    from nfp_vintages.competitors.consensus import Consensus
+
+    c = Consensus(None)
+    assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) is None

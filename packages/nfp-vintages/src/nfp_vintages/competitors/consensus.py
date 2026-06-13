@@ -1,0 +1,69 @@
+"""Consensus survey-median competitor (pluggable, Bloomberg-sourced).
+
+Reads the contract file defined in ``specs/bloomberg_consensus.md`` §1, or
+returns ``None`` when unconfigured (the staged state — the scoreboard then
+renders the consensus column as ``-``). A T-1-only competitor: the street
+median locks ~release-eve.
+"""
+from __future__ import annotations
+
+import os
+from datetime import date
+from pathlib import Path
+
+import polars as pl
+
+_REQUIRED = ("ref_month", "consensus_median_change_k", "survey_date",
+             "release_date", "source")
+
+
+def consensus_path(path: str | Path | None = None) -> Path:
+    """Resolve path -> arg -> ``NFP_CONSENSUS_PATH`` -> default."""
+    if path is not None:
+        return Path(path)
+    env = os.environ.get("NFP_CONSENSUS_PATH")
+    if env:
+        return Path(env)
+    from nfp_lookups.paths import DATA_DIR
+
+    return DATA_DIR / "competitors" / "consensus.parquet"
+
+
+def load_consensus(path: str | Path | None = None) -> pl.DataFrame | None:
+    """Load + validate the consensus file, or ``None`` if it does not exist."""
+    p = consensus_path(path)
+    if not p.exists():
+        return None
+    df = pl.read_parquet(p)
+    missing = set(_REQUIRED) - set(df.columns)
+    if missing:
+        raise ValueError(f"consensus file missing required columns: {sorted(missing)}")
+    if df["ref_month"].n_unique() != df.height:
+        raise ValueError("consensus ref_month must be unique")
+    bad = df.filter(pl.col("survey_date") >= pl.col("release_date"))
+    if bad.height:
+        raise ValueError("consensus survey_date must precede release_date")
+    return df.sort("ref_month")
+
+
+class Consensus:
+    """T-1-only competitor: returns the median once the survey has locked."""
+
+    name = "consensus"
+
+    def __init__(self, table: pl.DataFrame | None) -> None:
+        self.table = table
+
+    def predict(self, ref_month: date, *, as_of: date) -> float | None:
+        if self.table is None:
+            return None
+        row = self.table.filter(pl.col("ref_month") == ref_month)
+        if row.height == 0:
+            return None
+        survey = row["survey_date"][0]
+        if as_of < survey:  # not locked yet (e.g. T-7)
+            return None
+        return float(row["consensus_median_change_k"][0])
+
+
+__all__ = ["consensus_path", "load_consensus", "Consensus"]
