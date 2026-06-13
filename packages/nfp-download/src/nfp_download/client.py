@@ -99,7 +99,13 @@ def get_with_retry(
     timeout: float = DEFAULT_TIMEOUT,
     max_retries: int = MAX_RETRIES,
 ) -> httpx.Response | curl_requests.Response:
-    """GET *url* with exponential back-off on 429 and transient 5xx errors.
+    """GET *url* with exponential back-off on 429, transient 5xx, and transport errors.
+
+    Retries on three failure classes: HTTP 429 (rate-limit), HTTP 5xx
+    (transient server error), and transport-level exceptions
+    (``httpx.RequestError`` / ``curl_cffi.requests.exceptions.RequestException``
+    — e.g. connection refused, timeout, TLS reset).  Non-retryable HTTP
+    errors (4xx other than 429) raise immediately.
 
     If ``BLS_API_KEY`` is set and the URL contains ``bls.gov``, the key is
     appended as a ``registrationkey`` query parameter.
@@ -115,7 +121,7 @@ def get_with_retry(
     timeout : float
         Per-request timeout in seconds.
     max_retries : int
-        Maximum retry attempts.
+        Maximum retry attempts (across all failure classes).
 
     Returns
     -------
@@ -125,7 +131,10 @@ def get_with_retry(
     Raises
     ------
     httpx.HTTPStatusError or curl_cffi.requests.exceptions.HTTPError
-        After exhausting retries or on a non-retryable error.
+        After exhausting retries on HTTP errors, or immediately on a
+        non-retryable status code.
+    httpx.RequestError or curl_cffi.requests.exceptions.RequestException
+        When all retries are exhausted on transport-level failures.
     """
     params: dict[str, str] = {}
     api_key = _bls_api_key()
