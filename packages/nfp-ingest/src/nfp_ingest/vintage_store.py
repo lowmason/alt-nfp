@@ -13,6 +13,7 @@ compact_partition : Merge small files within a single partition.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date
 from pathlib import Path
@@ -648,6 +649,12 @@ def _derive_source_tags(lf: pl.LazyFrame) -> pl.LazyFrame:
 # ---------------------------------------------------------------------------
 
 
+def _content_suffix(df: pl.DataFrame) -> str:
+    """Short, order-insensitive content hash for a partition write batch."""
+    h = df.hash_rows().sort()  # Series[UInt64]; sort → order-insensitive
+    return hashlib.sha1(h.to_numpy().tobytes()).hexdigest()[:12]
+
+
 def append_to_vintage_store(
     new_rows: pl.DataFrame,
     store_path: Path = VINTAGE_STORE_PATH,
@@ -711,7 +718,7 @@ def append_to_vintage_store(
 
         vmin = partition_df["vintage_date"].min()
         vmax = partition_df["vintage_date"].max()
-        fname = f"v_{vmin}_{vmax}.parquet"
+        fname = f"v_{vmin}_{vmax}_{_content_suffix(partition_df)}.parquet"
 
         partition_df.drop(["source", "seasonally_adjusted"]).write_parquet(
             str(partition_dir / fname),

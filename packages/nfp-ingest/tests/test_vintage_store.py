@@ -1009,3 +1009,47 @@ class TestValidateCensoredSelection:
         _validate_censored_selection(
             selected, "CES", _ref(2024, 9), _CES_SERIES_KEY
         )
+
+
+# ---------------------------------------------------------------------------
+# append_to_vintage_store — filename collision (I-1)
+# ---------------------------------------------------------------------------
+
+
+def test_append_two_disjoint_multivintage_batches_conserves_rows(tmp_path):
+    """Two appends spanning the same vintage range but with disjoint rows must
+    not clobber each other.  Old code produced identical filenames → second
+    write silently overwrote the first → height 2 instead of 4."""
+
+    def _batch(emps, refs, vints):
+        n = len(emps)
+        return pl.DataFrame({
+            "geographic_type": ["national"] * n,
+            "geographic_code": ["00"] * n,
+            "industry_type": ["national"] * n,
+            "industry_code": ["00"] * n,
+            "ref_date": refs,
+            "vintage_date": vints,
+            "revision": pl.Series([0] * n, dtype=pl.UInt8),
+            "benchmark_revision": pl.Series([0] * n, dtype=pl.UInt8),
+            "employment": emps,
+            "source": ["ces"] * n,
+            "seasonally_adjusted": [True] * n,
+        })
+
+    # Both batches span vintages [Jan, Apr] but are disjoint (different ref_dates).
+    a = _batch(
+        [100.0, 101.0],
+        [date(2024, 1, 1), date(2024, 2, 1)],
+        [date(2024, 2, 1), date(2024, 4, 1)],
+    )
+    b = _batch(
+        [200.0, 201.0],
+        [date(2024, 3, 1), date(2024, 4, 1)],
+        [date(2024, 2, 1), date(2024, 4, 1)],
+    )
+    assert append_to_vintage_store(a, store_path=tmp_path) == 2
+    assert append_to_vintage_store(b, store_path=tmp_path) == 2
+    part = tmp_path / "source=ces" / "seasonally_adjusted=true"
+    got = pl.read_parquet(str(part / "*.parquet"))
+    assert got.height == 4  # FAILS on old code (B clobbers A → 2)
