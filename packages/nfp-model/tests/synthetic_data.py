@@ -102,9 +102,6 @@ def make_synthetic_data(
                 "births_obs": None,
             }
         ],
-        "birth_rate": np.full(T, np.nan),
-        "bd_proxy": np.full(T, np.nan),
-        "bd_qcew_lagged": np.full(T, np.nan),
         "claims_c": claims_c if with_claims else None,
         "jolts_c": jolts_c if with_jolts else None,
     }

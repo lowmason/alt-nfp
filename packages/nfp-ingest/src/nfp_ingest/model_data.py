@@ -233,7 +233,6 @@ def panel_to_model_data(
         config = ModelDataConfig()
 
     era_breaks = list(config.era_breaks)
-    bd_qcew_lag = config.bd_qcew_lag
     indicators = list(config.indicators)
     publication_lags = {ind.name: ind.pub_lag for ind in indicators}
     provider_pub_lag_weeks = config.provider_pub_lag_weeks
@@ -453,28 +452,6 @@ def panel_to_model_data(
             entry["births_obs"] = None
         pp_data.append(entry)
 
-    # BD covariates — restrict averaging to the provider-covered window so we
-    # don't nanmean over all-NaN slices for months before coverage begins.
-    birth_arrays = [pp["births"] for pp in pp_data if pp["births"] is not None]
-    if birth_arrays:
-        stacked = np.vstack(birth_arrays)
-        any_finite = np.any(np.isfinite(stacked), axis=0)
-        birth_rate = np.full(T, np.nan)
-        birth_rate[any_finite] = np.nanmean(stacked[:, any_finite], axis=0)
-    else:
-        birth_rate = np.full(T, np.nan)
-    if pp_data:
-        g_pp_stack = np.vstack([pp["g_pp"] for pp in pp_data])
-        any_finite = np.any(np.isfinite(g_pp_stack), axis=0)
-        g_pp_avg = np.full(T, np.nan)
-        g_pp_avg[any_finite] = np.nanmean(g_pp_stack[:, any_finite], axis=0)
-    else:
-        g_pp_avg = np.full(T, np.nan)
-    bd_proxy = g_qcew - g_pp_avg
-    bd_qcew_lagged = np.full(T, np.nan)
-    for t in range(bd_qcew_lag, T):
-        if np.isfinite(bd_proxy[t - bd_qcew_lag]):
-            bd_qcew_lagged[t] = bd_proxy[t - bd_qcew_lag]
     cyclical = _load_cyclical_indicators(dates, T, indicators, indicators_dir)
 
     if as_of is not None:
@@ -534,9 +511,6 @@ def panel_to_model_data(
         qcew_noise_mult=qcew_noise_mult,
         pp_data=pp_data,
         n_providers=len(providers),
-        birth_rate=birth_rate,
-        bd_proxy=bd_proxy,
-        bd_qcew_lagged=bd_qcew_lagged,
         **cyclical,
     )
 

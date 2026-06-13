@@ -26,7 +26,7 @@ from nfp_lookups.paths import DATA_DIR, is_remote
 
 from nfp_ingest.model_data import build_model_data
 
-SCHEMA_VERSION = 2  # v2: provider meta carries error_model (model-side need)
+SCHEMA_VERSION = 3  # v3: drops dead BD covariate arrays (birth_rate, bd_proxy, bd_qcew_lagged)
 
 #: model-data keys serialized into every snapshot (global arrays)
 GLOBAL_ARRAY_KEYS = [
@@ -34,7 +34,6 @@ GLOBAL_ARRAY_KEYS = [
     "g_ces_sa", "ces_sa_obs", "ces_sa_vintage_idx",
     "g_ces_nsa", "ces_nsa_obs", "ces_nsa_vintage_idx",
     "g_qcew", "qcew_obs", "qcew_is_m2", "qcew_noise_mult",
-    "birth_rate", "bd_proxy", "bd_qcew_lagged",
 ]
 SCALAR_KEYS = ["T", "n_years", "n_ces_vintages", "n_providers"]
 

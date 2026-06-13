@@ -93,6 +93,61 @@ class TestRoundTrip:
             load_snapshot(bad)
 
 
+class TestSchemaVersionCompat:
+    """H-3: v3 snapshots lack birth_rate/bd_proxy/bd_qcew_lagged; v2 snapshots
+    contain them.  Both must round-trip through load_snapshot without error.
+
+    load_snapshot verifies only the content hash over whatever arrays ARE in
+    the file, so a v2 snapshot (with the 3 extra arrays) loads fine and the
+    extra keys are simply present in the returned dict (the model ignores them).
+    A v3 snapshot (without the 3) also loads fine — no schema_version check is
+    needed; the hash contract is sufficient.
+    """
+
+    def test_v3_snapshot_round_trips_without_dropped_arrays(self, tmp_path):
+        """A snapshot saved without birth_rate/bd_proxy/bd_qcew_lagged loads."""
+        # v3: GLOBAL_ARRAY_KEYS no longer includes the 3 dropped names
+        arrays = {
+            "g_ces_sa": np.array([0.1, np.nan, -0.2], dtype=float),
+            "qcew_obs": np.array([0, 1], dtype=np.int64),
+        }
+        meta = {"schema_version": 3, "scalars": {"T": 3}, "dates": ["2024-01-12"]}
+        p = tmp_path / "v3_snap.npz"
+        digest = save_snapshot(arrays, meta, p)
+
+        loaded, loaded_meta = load_snapshot(p)
+        assert loaded_meta["content_hash"] == digest
+        assert "birth_rate" not in loaded
+        assert "bd_proxy" not in loaded
+        assert "bd_qcew_lagged" not in loaded
+
+    def test_v2_snapshot_with_dropped_arrays_still_loads(self, tmp_path):
+        """A v2 snapshot containing the 3 dead arrays loads without error.
+
+        load_snapshot hashes whatever arrays are in the file, so including the
+        extra keys is transparent — the hash matches and the arrays come back.
+        The model layer (from_snapshot / model_inputs) ignores any extra keys.
+        """
+        arrays = {
+            "g_ces_sa": np.array([0.1, np.nan, -0.2], dtype=float),
+            "qcew_obs": np.array([0, 1], dtype=np.int64),
+            # v2 dead arrays — present in old snapshots, never read by the model
+            "birth_rate": np.full(3, np.nan),
+            "bd_proxy": np.full(3, np.nan),
+            "bd_qcew_lagged": np.full(3, np.nan),
+        }
+        meta = {"schema_version": 2, "scalars": {"T": 3}, "dates": ["2024-01-12"]}
+        p = tmp_path / "v2_snap.npz"
+        digest = save_snapshot(arrays, meta, p)
+
+        loaded, loaded_meta = load_snapshot(p)
+        assert loaded_meta["content_hash"] == digest
+        # Extra keys survive the round-trip (load_snapshot does not strip them)
+        assert "birth_rate" in loaded
+        assert "bd_proxy" in loaded
+        assert "bd_qcew_lagged" in loaded
+
+
 def _store_available() -> bool:
     try:
         from nfp_lookups.paths import DATA_DIR, VINTAGE_STORE_PATH
