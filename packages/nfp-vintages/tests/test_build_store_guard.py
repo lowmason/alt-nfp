@@ -3,6 +3,28 @@ from nfp_vintages.build_store import build_store
 from upath import UPath
 
 
+@pytest.fixture(autouse=True)
+def _no_real_store(monkeypatch):
+    """Fail closed: no test in this module may reach the real MinIO store.
+
+    The guard under test stops canonical-store rebuilds, but the "allows" tests
+    deliberately let ``build_store`` proceed past the guard — they must fail on
+    missing *local* input, NEVER by reaching production S3. Blanking the creds
+    and endpoint redirects any accidental S3 I/O away from the live MinIO so it
+    cannot connect (defense-in-depth behind the missing-input-file failure).
+    This exists because a red-phase run of this test once wiped the canonical
+    store; see plans/8 'Store-write safety'.
+    """
+    for var in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_ENDPOINT_URL",
+        "AWS_SESSION_TOKEN",
+        "NFP_STORE_URI",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
 def test_bare_cli_callback_passes_allow_canonical_false(monkeypatch):
     """Verify bare ``alt-nfp`` (build(None)) does not bypass the guard.
 
