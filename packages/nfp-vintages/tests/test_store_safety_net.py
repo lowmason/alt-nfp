@@ -9,17 +9,19 @@ credentials via ``storage_options_for(path)`` at call time, so blanked env =
 no creds = fail closed. That covers the incident class (a ``build_store``
 write once destroyed a year of irreplaceable data).
 
-KNOWN RESIDUAL (see ``test_object_method_access_residual``): ``VINTAGE_STORE_PATH``
-is an import-time ``upath.UPath`` constructed with ``key=``/``secret=`` baked
-in (``nfp_lookups.paths._store_location``). fsspec binds those creds into the
+The **object-method** path is now closed too (see
+``test_object_method_access_residual``). ``VINTAGE_STORE_PATH`` is an
+import-time ``upath.UPath`` constructed with ``key=``/``secret=`` baked in
+(``nfp_lookups.paths._store_location``); fsspec binds those creds into the
 UPath's filesystem instance, so direct UPath *object methods*
-(``.exists``/``.glob``/``.iterdir``) keep reaching the live store after a
-runtime ``delenv`` — clearing the fsspec instance cache does not help. This is
-read-only metadata access (existence/partition listing), not the data path and
-not writes; it is the surface used by ``_store_available()`` availability
-probes. Closing it requires a design change beyond the delenv fixture (e.g. a
-single s3fs choke point, or re-pointing the constant on every binding module +
-the captured function defaults) and is left as a documented gap.
+(``.exists``/``.glob``/``.iterdir``) reached the live store after a runtime
+``delenv`` — and clearing the fsspec instance cache did not help. The fixture
+now severs that surface at a single class-level choke for unmarked tests:
+``s3fs.S3FileSystem._call_s3`` (the funnel for every S3 API call) is patched
+to raise, and ``_ls_from_cache`` is forced to miss so a dircache entry from a
+prior ``real_store`` test cannot serve a stale hit. ``.exists()`` therefore
+degrades to ``False`` — the read-only metadata surface used by
+``_store_available()`` availability probes no longer touches production.
 """
 
 import os
@@ -63,24 +65,37 @@ def test_unmarked_polars_read_fails_closed():
         read_vintage_store(source="ces", seasonally_adjusted=True).collect()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KNOWN RESIDUAL: UPath object methods use creds baked into the "
-    "import-time constant; delenv does not sever them. Strict-xfail flips to a "
-    "failure the day this is closed, as a built-in reminder.",
-)
 def test_object_method_access_residual():
-    """Documents the residual: unmarked object-method access still reaches the store.
+    """The object-method path is severed: unmarked access cannot reach the store.
 
-    When closed, this should assert ``... .exists() is False`` and the
-    ``strict=True`` xfail will turn the resulting xpass into a failure,
-    prompting removal of the xfail marker.
+    Formerly a documented residual (a strict-xfail tripwire): the creds baked
+    into ``VINTAGE_STORE_PATH`` let UPath object methods reach the live store
+    despite the env-blanking fixture. ``_block_live_store`` now patches
+    ``s3fs.S3FileSystem._call_s3`` (raise) and ``_ls_from_cache`` (force a
+    cache miss) for unmarked tests, so ``.exists()`` degrades to ``False``
+    instead of hitting production. Skips when the store is local in this
+    session (remote-only property).
     """
     from nfp_lookups.paths import VINTAGE_STORE_PATH, is_remote
 
     if not is_remote(VINTAGE_STORE_PATH):
         pytest.skip("store is local in this session; remote-only property")
-    # The secure target is `is False`; today it is True (the residual), so this
-    # assertion fails -> xfail. The day the net severs object access it passes
-    # -> strict xpass -> failure -> remove the marker.
     assert (VINTAGE_STORE_PATH / "source=ces").exists() is False
+
+
+def test_sever_blocks_any_remote_upath():
+    """Session-independent proof the class-level s3fs sever fails closed.
+
+    The two tests above gate on ``is_remote(VINTAGE_STORE_PATH)``, which resolves
+    *local* in the standard pytest run (a ``load_dotenv`` timing effect) and so
+    they skip — vacuous coverage. This test does not depend on the session store:
+    the fixture patches ``s3fs.S3FileSystem`` at the *class* level, so ANY s3
+    UPath an unmarked test touches must fail closed. ``s3fs`` is a declared
+    dependency, so this runs everywhere (incl. CI), giving real regression
+    coverage that the object-method path is severed.
+    """
+    pytest.importorskip("s3fs")
+    from upath import UPath
+
+    # Unmarked test → fixture active → _call_s3 raises → .exists() degrades to False.
+    assert UPath("s3://alt-nfp/store/source=ces").exists() is False
