@@ -1,202 +1,393 @@
-# alt_nfp Technical Debt Audit
+# Repository Hardening Spec
 
-**Date:** 2026-03-15
-**Repository:** `lowmason/alt_nfp`
-**Codebase:** ~15K LOC across 5 packages, ~5.8K LOC tests, ~1.8K LOC scripts
+**Alt-NFP Workspace - Runtime Correctness, Documentation Alignment, and Test Hygiene**
 
----
-
-## Executive Summary
-
-The `alt_nfp` codebase is well-architected as a uv workspace with clean package boundaries (`nfp-lookups` → `nfp-download` → `nfp-ingest` → `nfp-vintages` → `nfp-models`). Configuration has been successfully migrated to Pydantic with TOML support. Type hints are present on all public functions. The primary debt clusters are: **dead code from the pre-package refactor** (2,098 LOC), **swallowed exceptions masking failures**, **print-based observability**, and **missing CI for tests/linting**.
+Version: 1.0 | Date: 2026-03-16 | Author: Lowell Mason
 
 ---
 
-## Prioritized Debt Items
+## 1. Background and Motivation
 
-### Priority scoring
+The 2026-03-16 repository review found a small number of high-impact issues that are now more important than incremental cleanup:
 
-- **Impact** (1–5): How much does it slow development or risk correctness?
-- **Risk** (1–5): What happens if we don't fix it?
-- **Effort** (1–5): How hard is the fix? (inverted: lower effort → higher priority score)
-- **Score** = (Impact + Risk) × (6 − Effort)
+1. Provider signals are being omitted from default panel builds in several application paths.
+2. User-facing docs still describe a monolithic `alt_nfp` package that no longer exists.
+3. The MkDocs reference pipeline still targets `src/alt_nfp/`, so strict docs builds fail.
+4. Default `pytest` execution runs live network tests that depend on external services and secrets.
+5. The BLS flat-file downloader uses a weaker HTTP path than the shared retry-aware client already present in the repo.
+6. Several stale or half-removed code paths continue to create confusion during maintenance.
 
----
+These are not cosmetic issues. They affect model inputs, developer trust in docs, reproducibility of local validation, and the reliability of the download pipeline.
 
-### 1. Dead code: `scripts/_parts/` (2,098 LOC)
-
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 4      | 3    | 1      | **35** |
-
-**What:** The entire `scripts/_parts/` directory contains the pre-refactor monolithic estimation script, split into 8 numbered files (`part01_preamble.py` through `part08_forecast_main.py`). These are **never imported anywhere** — no script, test, or package references them. Every function (`build_model`, `sample_model`, `run_loo_cv`, `print_diagnostics`, `forecast_and_plot`, `plot_residuals`, etc.) has a canonical replacement in the `nfp-models` package.
-
-**Why it matters:** Developers (and Claude Code) can't tell which `build_model` is authoritative. Grep results return two hits for every key function, creating confusion during maintenance. The 2,098 lines inflate the apparent codebase by ~14%.
-
-**Fix:** `rm -rf scripts/_parts/`. Confirm nothing breaks by running the test suite.
+This spec complements the broader audit in `archive/tech_debt_spec.md`. That audit identified general debt themes; this spec is the concrete remediation plan for the correctness and maintenance issues found in the latest review.
 
 ---
 
-### 2. Swallowed exceptions (10 instances)
+## 2. Goals
 
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 4      | 5    | 2      | **36** |
+1. Restore correct runtime behavior so application entry points include configured provider data.
+2. Align all user-facing docs with the actual split-package workspace layout.
+3. Make the docs build pass in strict mode.
+4. Make default local validation deterministic and secret-free.
+5. Harden the BLS download path around shared retry/header behavior.
+6. Remove or quarantine stale code that obscures the source of truth.
 
-**What:** Ten `except Exception:` blocks across the codebase silently discard errors:
+### 2.1 Non-Goals
 
-- `panel_adapter.py:495` — file read failure → silently returns `None`
-- `diagnostics.py:41` — tree depth extraction → `pass`
-- `forecast.py:286` — plotting provider data → `pass`
-- `plots.py:207` — plotting provider data → `pass`
-- `indicators.py:54` — indicator read failure → returns `None` (at least logs)
-- `indicators.py:104` — download failure → prints but continues
-- `panel.py:128` — git hash retrieval → `pass`
-- `sae_states.py:377` — saves checkpoint then re-raises (actually fine)
-- `export_data.py:69` — unknown context
+- No changes to the statistical model itself.
+- No SAE feature re-enablement in this phase.
+- No resurrection of a monolithic runtime `alt_nfp` package in this phase.
 
-**Why it matters:** Silent failures in `panel_adapter.py` mean a corrupt or missing provider parquet silently produces `None`, which propagates into the model data dict and can cause cryptic PyMC errors far downstream. The plotting `pass` blocks mean visual diagnostics silently omit provider series without warning — you could be missing a provider from every plot and never notice.
+### 2.2 Canonical Architecture Decision
 
-**Fix:** Phase 1: Replace `except Exception: pass` in `diagnostics.py`, `forecast.py`, and `plots.py` with `except Exception as e: logger.debug(...)` so failures are traceable. Phase 2: In `panel_adapter.py`, catch `FileNotFoundError` and `pl.exceptions.ComputeError` specifically, and log at `WARNING` level with the file path.
+The canonical Python import surface remains the existing workspace packages:
 
----
+- `nfp_lookups`
+- `nfp_download`
+- `nfp_ingest`
+- `nfp_vintages`
+- `nfp_models`
 
-### 3. No CI for tests or linting
-
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 4      | 4    | 2      | **32** |
-
-**What:** The only GitHub Actions workflow is `deploy-docs.yml` for MkDocs. There is no CI job running `pytest`, `ruff`, `mypy`, or any other checks on PRs or pushes.
-
-**Why it matters:** Regressions can land in `main` uncaught. The repo already has `ruff` and `mypy` configured in `pyproject.toml` but they're only useful if someone runs them locally. Given the model-correctness stakes (this feeds published employment estimates), automated validation is essential.
-
-**Fix:** Add a `ci.yml` workflow: `uv sync` → `uv run pytest` → `uv run ruff check` → `uv run mypy packages/`. Effort is low because the tooling is already configured.
+This spec standardizes docs and tooling around that reality. A future facade package named `alt_nfp` may be added later if desired, but that is explicitly out of scope here.
 
 ---
 
-### 4. Print-based observability (252 `print()` calls in packages)
+## 3. Problem Summary
 
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 3      | 3    | 3      | **18** |
-
-**What:** The package source code contains 252 `print()` calls. Some modules (`nfp-ingest`) properly use `logging.getLogger(__name__)`, but `nfp-models` modules (especially `diagnostics.py`, `forecast.py`, `benchmark.py`, `plots.py`) use `print()` almost exclusively.
-
-**Why it matters:** Print output can't be filtered, leveled, or redirected. During backtesting (which runs the model dozens of times), print spam is noise. When debugging a specific provider's measurement equation, there's no way to bump one module to DEBUG without getting everything.
-
-**Fix:** Incremental migration — when touching a file for other reasons, replace `print()` with `logger.info()` / `logger.debug()`. Priority targets: `diagnostics.py` (716 LOC, heavily print-based), `benchmark.py`, `forecast.py`.
-
----
-
-### 5. Tracked binary artifacts in git (30+ PNGs, parquets)
-
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 3      | 2    | 1      | **25** |
-
-**What:** `output/` and `archive/output/` contain PNGs and parquet files tracked in git. The `archive/` directory alone is 11MB. These are model outputs that change every run — they inflate clone size and create noisy diffs.
-
-**Why it matters:** Every clone downloads ~14MB of binary blobs. The archive exists for reference but should live outside the git history.
-
-**Fix:** Add `output/*.png`, `output/*.parquet`, `archive/output/` to `.gitignore`. Run `git rm --cached` on the tracked files. Consider keeping one `archive/` snapshot as a release artifact on GitHub Releases instead.
+| Area | Current problem | User-visible impact |
+|---|---|---|
+| Panel construction | `build_panel()` defaults to no providers, but app code assumes configured providers are included | Main estimation and backtest paths silently omit provider signals |
+| Public docs | README/docs still use `import alt_nfp` and `src/alt_nfp/` | Quickstart examples fail and API docs mislead users |
+| Docs tooling | `docs/gen_ref_pages.py` and `mkdocs.yml` target a removed source tree | `mkdocs build --strict` aborts |
+| Test defaults | `pytest` includes live network tests by default | Default test runs fail on BLS 403s or missing `FRED_API_KEY` |
+| Downloader | BLS flat-file client uses bare `httpx.Client` without shared retry/header behavior | Live downloads are more brittle than they need to be |
+| Stale code | Dead path hacks and large commented blocks remain in active modules | Engineers cannot easily tell what is authoritative |
 
 ---
 
-### 6. Dual HTTP client libraries (`requests` + `httpx`)
+## 4. Implementation Plan
 
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 2      | 2    | 2      | **16** |
+The work is organized into five phases. Phases 1-3 should land together or in close sequence because they affect the main validation loop. Phases 4-5 can follow immediately after.
 
-**What:** `nfp-download` depends on both `httpx[http2]` and `requests`. The legacy `_http.py` module (ported from `eco-stats`) uses `requests`, while the newer `client.py` and everything in `nfp-vintages` uses `httpx`. This means two HTTP stacks, two retry implementations, two user-agent strings, and two connection pool strategies.
+### 4.1 Phase 1 - Runtime Correctness
 
-**Why it matters:** Maintenance burden is doubled for HTTP concerns (timeouts, retries, rate limiting, API key injection). The `requests`-based `_http.py` doesn't support HTTP/2.
+**Objective:** Ensure configured providers are included wherever the application intends to use them.
 
-**Fix:** Port `_http.py` from `requests` to `httpx`, unifying on the `client.py` retry/header infrastructure. Then remove the `requests` dependency from `nfp-download/pyproject.toml`.
+#### 4.1.1 Design
 
----
+`nfp_ingest.build_panel()` is a low-level ingestion function. It should remain package-pure and should not import `nfp_models.settings` or derive providers implicitly from model config.
 
-### 7. Legacy config shim (`nfp_models/config.py`)
+Instead, application-level code must pass providers explicitly from configuration.
 
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 2      | 2    | 3      | **12** |
+#### 4.1.2 Changes
 
-**What:** `config.py` exists as a backwards-compatibility shim that instantiates a `NowcastConfig()` default and re-exports ~25 module-level constants (`LOG_SIGMA_QCEW_MID_MU`, `N_HARMONICS`, `ERA_BREAKS`, etc.). Callers `from .config import LOG_TAU_MU` instead of accessing `cfg.model.latent.log_tau_mu`.
+1. Add a small application-level helper that resolves config into panel inputs.
+   - Recommended location: `packages/nfp-model-hmc/src/nfp_models/pipeline.py`
+   - Recommended function:
 
-**Why it matters:** The shim works but means two ways to access every constant. New code might use the config object; old code uses the flat imports. The shim also hides the fact that these values can be overridden via TOML — callers using the flat constants always get defaults.
+```python
+def build_panel_from_config(
+    cfg: NowcastConfig,
+    *,
+    start_year: int = 2012,
+    end_year: int | None = None,
+    as_of_ref: date | None = None,
+) -> pl.DataFrame:
+    ...
+```
 
-**Fix:** Migrate callers in `model.py`, `diagnostics.py`, `residuals.py`, `backtest.py`, `benchmark_backtest.py` to accept a `NowcastConfig` parameter (most already do). Then deprecate or remove the flat constants.
+2. Update all application entry points to use this helper or to pass `providers_from_settings(cfg)` directly.
+   - `alt_nfp_estimation_v3.py`
+   - `packages/nfp-model-hmc/src/nfp_models/backtest.py`
+   - `packages/nfp-model-hmc/src/nfp_models/benchmark_backtest.py`
+   - `packages/nfp-model-hmc/src/nfp_models/sensitivity.py`
+   - `scripts/jan_reforecast.py`
+   - any other script currently calling `build_panel()` with no providers
 
----
+3. Correct `build_panel()` docstrings to state the real behavior:
+   - `providers=None` means no provider rows are added
+   - configured providers must be passed explicitly by application code
 
-### 8. Test coverage gaps (14 untested modules)
+4. Remove the dead repo-root `src` path insertion from `alt_nfp_estimation_v3.py`.
 
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 3      | 4    | 4      | **14** |
+#### 4.1.3 Tests
 
-**What:** 14 of 54 source modules have no corresponding test file or test imports:
+Add regression coverage that proves provider rows are present when config-derived providers are used:
 
-- **nfp-models:** `residuals.py`, `plots.py`, `checks.py`, `benchmark_plots.py`
-- **nfp-vintages:** `build_store.py`, `views.py`, `sae_states.py`, `__main__.py`, `evaluation.py`
-- **nfp-lookups:** `revision_schedules.py`, `paths.py`, `provider_config.py`
-- **nfp-download:** `scraper.py`, `client.py`
+- unit test for `build_panel_from_config()`
+- smoke test that asserts provider source `"g"` appears in the panel when local provider data exists
+- regression test for the estimation pipeline input path that ensures the panel is not CES/QCEW-only
 
-**Why it matters:** `sae_states.py` (560 LOC, SAE data processing) and `build_store.py` (vintage store construction) are critical pipeline components. `revision_schedules.py` and `provider_config.py` are configuration modules where a typo could silently change model behavior.
+#### 4.1.4 Acceptance Criteria
 
-**Fix:** Prioritize by risk: (1) `revision_schedules.py` and `provider_config.py` (static data, easy to unit test), (2) `client.py` (HTTP retry logic), (3) `sae_states.py` and `build_store.py` (integration tests with fixture data). Plot/viz modules are lower priority.
-
----
-
-### 9. `pyproject.toml` metadata issues
-
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 1      | 2    | 1      | **15** |
-
-**What:** Three issues in the root `pyproject.toml`:
-
-1. **Placeholder author:** `{name = "Your Name", email = "your.email@example.com"}`
-2. **Duplicate entry point:** Both root and `nfp-vintages` define `alt-nfp` CLI entry point, but the root points to `alt_nfp.vintages.__main__:app` (a non-existent module path) while `nfp-vintages` correctly points to `nfp_vintages.__main__:app`
-3. **`disallow_untyped_defs = false`** in mypy config — the codebase actually has return types on all public functions, so this could be tightened
-
-**Fix:** Update author, remove the broken root entry point, set `disallow_untyped_defs = true` in mypy.
+- `build_panel_from_config(NowcastConfig())` returns a panel containing source `"g"` when local provider data exists.
+- All application paths that expect provider data pass providers explicitly.
+- No active code relies on the nonexistent repo-root `src/` directory.
 
 ---
 
-### 10. Missing type annotations on internal helpers (~108 functions)
+### 4.2 Phase 2 - Documentation and API Alignment
 
-| Impact | Risk | Effort | Score |
-|--------|------|--------|-------|
-| 2      | 1    | 4      | **6** |
+**Objective:** Make docs truthful and make the docs toolchain match the current package layout.
 
-**What:** ~108 of ~286 function definitions across packages lack return type annotations (mostly private helpers, `__init__` methods, and plotting functions).
+#### 4.2.1 Design
 
-**Why it matters:** Low practical impact since public APIs are typed, but blocks enabling `disallow_untyped_defs = true` in mypy.
+User-facing docs will reference the split workspace packages directly instead of the removed `alt_nfp` package.
 
-**Fix:** Low priority. Add annotations incrementally when modifying files. Focus on `model.py` and `panel_adapter.py` first since those are the most-edited modules.
+Examples:
+
+- `from nfp_ingest import build_panel`
+- `from nfp_models.panel_adapter import panel_to_model_data`
+- `from nfp_models import run_backtest` only if that symbol actually exists
+
+The API reference will be generated from `packages/*/src`, not from `src/alt_nfp/`.
+
+#### 4.2.2 Changes
+
+1. Rewrite user-facing examples and structure descriptions in:
+   - `README.md`
+   - `CLAUDE.md`
+   - `docs/getting-started/*.md`
+   - `docs/user-guide/*.md`
+   - `docs/architecture/*.md`
+
+2. Remove or rewrite references to modules that are no longer part of the active package tree.
+   - `alt_nfp.data`
+   - `alt_nfp.lookups.update_schedule`
+   - `src/alt_nfp/...`
+   - any stale `use_legacy=True` examples for `build_panel()`
+
+3. Rework `docs/gen_ref_pages.py` to discover workspace packages under `packages/*/src`.
+   - Generate pages under `docs/reference/<package_name>/...`
+   - Skip private modules as today
+
+4. Update `mkdocs.yml`:
+   - point `mkdocstrings` at all package `src` directories
+   - remove hard-coded `reference/alt_nfp/...` entries
+   - choose one nav strategy for generated API docs and use it consistently
+
+5. Update public docstrings and cross-references in actively documented modules where needed so generated references resolve.
+   - first pass should focus on modules surfaced in API docs, not every historical/internal comment
+
+#### 4.2.3 Tests
+
+- add a docs smoke target in CI/local validation:
+  - `uv run --group docs mkdocs build --strict`
+- add a lightweight import smoke check in docs/examples where appropriate
+
+#### 4.2.4 Acceptance Criteria
+
+- No user-facing docs instruct users to `import alt_nfp`.
+- `uv run --group docs mkdocs build --strict` passes with zero warnings.
+- Generated API docs cover the actual workspace packages.
 
 ---
 
-## Phased Remediation Plan
+### 4.3 Phase 3 - Test and CI Hygiene
 
-### Phase 1 — Quick wins (1 session, alongside feature work)
+**Objective:** Make default validation reliable without network access or credentials.
 
-- [ ] Delete `scripts/_parts/` (item 1)
-- [ ] Fix `pyproject.toml` metadata (item 9)
-- [ ] Add `output/*.png`, `output/*.parquet`, `archive/output/` to `.gitignore` and `git rm --cached` (item 5)
+#### 4.3.1 Design
 
-### Phase 2 — Safety net (1–2 sessions)
+Network tests must be opt-in. Local default test runs and PR CI runs must be green without:
 
-- [ ] Add CI workflow for pytest + ruff + mypy (item 3)
-- [ ] Replace bare `except Exception` blocks with specific catches + logging (item 2)
-- [ ] Write tests for `revision_schedules.py`, `provider_config.py`, `client.py` (item 8, high-value subset)
+- internet access
+- BLS availability
+- `FRED_API_KEY`
 
-### Phase 3 — Consolidation (spread across feature work)
+#### 4.3.2 Changes
 
-- [ ] Port `_http.py` from `requests` to `httpx` (item 6)
-- [ ] Migrate config shim callers to `NowcastConfig` (item 7)
-- [ ] Convert `print()` to `logging` in touched files (item 4)
-- [ ] Add return type annotations incrementally (item 10)
+1. Change default pytest behavior so non-network tests are the default.
+   - preferred approach: add `-m "not network"` to default test command or CI command
+   - acceptable alternative: custom `--run-network` option
+
+2. Harden network tests so they self-skip when prerequisites are absent.
+   - FRED integration test must skip when `FRED_API_KEY` is unset
+   - BLS integration tests should remain marked `network` and should never run in the default suite
+
+3. Split validation into two documented lanes:
+   - default local/CI lane: lint + unit/integration tests without network + docs build
+   - optional live-data lane: network tests only
+
+4. Add CI guardrails if not already present.
+   - `uv run pytest`
+   - `uv run ruff check ...`
+   - `uv run --group docs mkdocs build --strict`
+
+#### 4.3.3 Tests
+
+- verify `uv run pytest` passes in a clean environment without credentials
+- verify `uv run pytest -m network` still collects and runs live tests when explicitly requested
+
+#### 4.3.4 Acceptance Criteria
+
+- Default `pytest` execution succeeds without external secrets.
+- Network tests remain available but are never part of the default validation path.
+- CI blocks regressions in runtime, docs, and lint hygiene.
+
+---
+
+### 4.4 Phase 4 - Downloader Hardening
+
+**Objective:** Route BLS flat-file downloads through the same retry/header discipline already used elsewhere in the repo.
+
+#### 4.4.1 Design
+
+The shared client in `nfp_download.client` is the source of truth for:
+
+- browser-like headers
+- timeout policy
+- exponential backoff on 429 and transient 5xx responses
+- BLS API key query handling
+
+The BLS flat-file client in `nfp_download.bls._http` should reuse that behavior instead of maintaining a separate weaker implementation.
+
+#### 4.4.2 Changes
+
+1. Refactor `packages/nfp-download/src/nfp_download/bls/_http.py` to use the shared client helpers.
+   - use `create_client()` instead of constructing bare `httpx.Client`
+   - use `get_with_retry()` for flat-file and CSV fetches where appropriate
+
+2. Preserve the existing on-disk cache behavior.
+
+3. Add a controlled fallback path for CES flat-file failures where practical.
+   - for CE national data, fall back to the JSON API helper if flat-file access fails
+   - for SM state data, either implement an equivalent API fallback or raise/log a clearer error
+
+4. Normalize logging so retry/fallback behavior is visible but not noisy.
+
+#### 4.4.3 Tests
+
+- unit tests for flat-file retry behavior using mocked 429/5xx responses
+- regression test that flat-file failures trigger the configured fallback path
+- keep live BLS tests behind the `network` marker
+
+#### 4.4.4 Acceptance Criteria
+
+- BLS downloader code no longer constructs its own bare HTTP client for flat-file fetches.
+- Retry/header behavior is centralized.
+- CE national download has a tested fallback path when flat-file fetches fail.
+
+---
+
+### 4.5 Phase 5 - Stale Code and Lint Hygiene
+
+**Objective:** Remove active-code ambiguity and make linting useful as a regression gate.
+
+#### 4.5.1 Changes
+
+1. Remove dead or misleading code in active modules.
+   - delete the `sys.path` hack in `alt_nfp_estimation_v3.py`
+   - remove commented-out SAE branches from active ingest modules where they are not scheduled for near-term reactivation
+   - if SAE notes must remain, move them into a short tracked issue note or dedicated spec section rather than inline commented code
+
+2. Narrow lint scope to maintained code and generated exclusions.
+   - exclude `archive/`, `output/`, `site/`, and any generated docs artifacts from Ruff
+   - migrate deprecated Ruff top-level settings to `[tool.ruff.lint]`
+
+3. Fix active-code Ruff issues in maintained files.
+   - prioritize `packages/*/src`
+   - then tests
+   - leave historical archive scripts out of scope for the enforcement pass
+
+#### 4.5.2 Tests
+
+- `uv run ruff check .` passes on the chosen maintained scope
+- no maintained files contain large commented-out alternative implementations
+
+#### 4.5.3 Acceptance Criteria
+
+- Lint output is actionable rather than dominated by archived code.
+- The active codebase has a clear source of truth.
+
+---
+
+## 5. File Targets
+
+### 5.1 Runtime Correctness
+
+- `alt_nfp_estimation_v3.py`
+- `packages/nfp-ingest/src/nfp_ingest/panel.py`
+- `packages/nfp-model-hmc/src/nfp_models/backtest.py`
+- `packages/nfp-model-hmc/src/nfp_models/benchmark_backtest.py`
+- `packages/nfp-model-hmc/src/nfp_models/sensitivity.py`
+- `scripts/jan_reforecast.py`
+
+### 5.2 Documentation
+
+- `README.md`
+- `CLAUDE.md`
+- `docs/gen_ref_pages.py`
+- `mkdocs.yml`
+- `docs/getting-started/*.md`
+- `docs/user-guide/*.md`
+- `docs/architecture/*.md`
+- `docs/reference/index.md`
+
+### 5.3 Tests and CI
+
+- `pyproject.toml`
+- `tests/ingest/bls/test_downloads.py`
+- `tests/test_fred.py`
+- `.github/workflows/ci.yml` or equivalent workflow file
+
+### 5.4 Downloader
+
+- `packages/nfp-download/src/nfp_download/bls/_http.py`
+- `packages/nfp-download/src/nfp_download/client.py`
+- `packages/nfp-download/src/nfp_download/bls/ces_national.py`
+- `packages/nfp-download/src/nfp_download/bls/ces_state.py`
+- downloader unit tests
+
+### 5.5 Cleanup
+
+- `packages/nfp-ingest/src/nfp_ingest/vintage_store.py`
+- `packages/nfp-ingest/src/nfp_ingest/release_dates/vintage_dates.py`
+- `tests/test_release_dates.py`
+- `pyproject.toml`
+
+---
+
+## 6. Validation Matrix
+
+After all phases are complete, the following commands should pass:
+
+```bash
+# Default validation lane
+uv run pytest
+uv run ruff check .
+uv run --group docs mkdocs build --strict
+
+# Optional live-data lane
+uv run pytest -m network
+```
+
+If the network lane requires credentials, its tests must self-skip with clear messages when the required environment variables are not present.
+
+---
+
+## 7. Rollout Order
+
+Recommended merge order:
+
+1. Phase 1 - runtime correctness
+2. Phase 3 - test defaults and CI guardrails
+3. Phase 2 - docs and API alignment
+4. Phase 4 - downloader hardening
+5. Phase 5 - stale code and lint cleanup
+
+Phase 1 should land first because it changes the actual model inputs. Phase 3 should land immediately after so the corrected behavior is protected by default validation. Phase 2 can then rewrite docs against the corrected runtime behavior.
+
+---
+
+## 8. Definition of Done
+
+This spec is complete when all of the following are true:
+
+1. Main application paths include configured provider rows by default through config-aware call sites.
+2. No public docs instruct users to import a nonexistent `alt_nfp` package.
+3. The docs site builds in strict mode with zero warnings.
+4. Default `pytest` execution succeeds without network access or secrets.
+5. BLS flat-file downloads use the shared retry/header infrastructure.
+6. Active-code linting is enforceable and no longer dominated by stale paths or archived files.
+
