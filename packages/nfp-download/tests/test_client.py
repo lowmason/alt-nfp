@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from curl_cffi import requests as curl_requests
 from nfp_download.client import (
     DEFAULT_HEADERS,
     DEFAULT_TIMEOUT,
@@ -139,6 +140,111 @@ class TestGetWithRetry:
         get_with_retry(client, "https://example.com/data")
         _, kwargs = client.get.call_args
         assert "registrationkey" not in kwargs["params"]
+
+
+class TestGetWithRetryTransportExceptions:
+    """get_with_retry() retries on transport-level exceptions, not just HTTP status codes."""
+
+    def _make_200(self):
+        """Build a mock 200 response."""
+        r = MagicMock(spec=httpx.Response)
+        r.status_code = 200
+        r.text = "ok"
+        r.raise_for_status.return_value = None
+        return r
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            httpx.ConnectError("connection refused"),
+            httpx.ConnectTimeout("timed out"),
+            httpx.ReadTimeout("read timed out"),
+            httpx.RemoteProtocolError("connection reset"),
+            curl_requests.exceptions.ConnectionError("curl connect failed"),
+            curl_requests.exceptions.Timeout("curl timed out"),
+        ],
+        ids=[
+            "httpx_ConnectError",
+            "httpx_ConnectTimeout",
+            "httpx_ReadTimeout",
+            "httpx_RemoteProtocolError",
+            "curl_ConnectionError",
+            "curl_Timeout",
+        ],
+    )
+    @patch("nfp_download.client.time.sleep")
+    def test_transport_exception_retries_on_first_failure(self, mock_sleep, exc):
+        """Transport exception on attempt 0 is retried; 200 on attempt 1 is returned."""
+        client = MagicMock(spec=httpx.Client)
+        ok = self._make_200()
+        client.get.side_effect = [exc, ok]
+
+        r = get_with_retry(client, "https://example.com/data", max_retries=3)
+
+        assert r.status_code == 200
+        assert client.get.call_count == 2
+        mock_sleep.assert_called_once_with(1)  # 2^0 = 1
+
+    @pytest.mark.parametrize(
+        "exc_factory",
+        [
+            lambda: httpx.ConnectError("connection refused"),
+            lambda: curl_requests.exceptions.ConnectionError("curl connect failed"),
+        ],
+        ids=["httpx", "curl_cffi"],
+    )
+    @patch("nfp_download.client.time.sleep")
+    def test_transport_exception_gives_up_after_max_retries(self, mock_sleep, exc_factory):
+        """After max_retries consecutive transport failures, the last exception is re-raised."""
+        max_retries = 3
+        client = MagicMock(spec=httpx.Client)
+        exc = exc_factory()
+        client.get.side_effect = [exc_factory() for _ in range(max_retries)]
+
+        with pytest.raises(type(exc)):
+            get_with_retry(client, "https://example.com/data", max_retries=max_retries)
+
+        assert client.get.call_count == max_retries
+        # Back-off on all attempts except the last (which raises immediately)
+        assert mock_sleep.call_count == max_retries - 1
+
+    @patch("nfp_download.client.time.sleep")
+    def test_transport_exception_backoff_uses_exponential_wait(self, mock_sleep):
+        """Back-off on transport exceptions uses the same 2^attempt formula as HTTP errors."""
+        client = MagicMock(spec=httpx.Client)
+        ok = self._make_200()
+        client.get.side_effect = [
+            httpx.ConnectError("refused"),
+            httpx.ConnectError("refused"),
+            httpx.ConnectError("refused"),
+            ok,
+        ]
+
+        r = get_with_retry(client, "https://example.com/data", max_retries=5)
+
+        assert r.status_code == 200
+        waits = [call.args[0] for call in mock_sleep.call_args_list]
+        assert waits == [1, 2, 4]  # 2^0, 2^1, 2^2
+
+    @patch("nfp_download.client.time.sleep")
+    def test_httpstatus_error_not_swallowed_by_transport_catch(self, mock_sleep):
+        """A curl_cffi HTTPError from raise_for_status() is NOT swallowed by the transport catch.
+
+        curl_cffi.requests.exceptions.HTTPError is a subclass of RequestException.
+        This test guards against the try/except being too wide (wrapping raise_for_status).
+        """
+        client = MagicMock(spec=curl_requests.Session)
+        r = MagicMock()
+        r.status_code = 403
+        r.raise_for_status.side_effect = curl_requests.exceptions.HTTPError("403 Forbidden")
+        client.get.return_value = r
+
+        with pytest.raises(curl_requests.exceptions.HTTPError):
+            get_with_retry(client, "https://www.bls.gov/data", max_retries=3)
+
+        # Must NOT retry — 403 is not a transport error or a retryable status code
+        assert client.get.call_count == 1
+        mock_sleep.assert_not_called()
 
 
 class TestConstants:

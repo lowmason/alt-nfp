@@ -132,8 +132,21 @@ def get_with_retry(
     if api_key and 'bls.gov' in url:
         params['registrationkey'] = api_key
 
+    _transport_errors = (
+        httpx.RequestError,
+        curl_requests.exceptions.RequestException,
+    )
+
     for attempt in range(max_retries):
-        r = client.get(url, timeout=timeout, params=params)
+        try:
+            r = client.get(url, timeout=timeout, params=params)
+        except _transport_errors as exc:
+            wait = min(2**attempt, 120)
+            if attempt < max_retries - 1:
+                logger.warning("    [transport error] retrying in %ss ... (%s)", wait, exc)
+                time.sleep(wait)
+                continue
+            raise
         if r.status_code == 429 or r.status_code >= 500:
             wait = min(2**attempt, 120)
             logger.warning("    [%s] retrying in %ss ...", r.status_code, wait)
