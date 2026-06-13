@@ -32,10 +32,13 @@ def _store_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _store_available(),
-    reason="Vintage store not available (no local data/store/ and no reachable NFP_STORE_URI)",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _store_available(),
+        reason="Vintage store not available (no local data/store/ and no reachable NFP_STORE_URI)",
+    ),
+    pytest.mark.real_store,  # reads the real vintage store via read_vintage_store(); exempt from cred blanking
+]
 
 VINTAGE_CUTOFF = date(2022, 1, 1)
 

@@ -56,10 +56,13 @@ def _golden_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _golden_available(),
-    reason="golden fixtures unavailable (need NFP_STORE_URI env + s3 golden/a1 prefix)",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _golden_available(),
+        reason="golden fixtures unavailable (need NFP_STORE_URI env + s3 golden/a1 prefix)",
+    ),
+    pytest.mark.real_store,  # reads s3://.../golden/a1 + real store; exempt from cred blanking
+]
 
 
 def _read_fixture(fname: str) -> pl.DataFrame:

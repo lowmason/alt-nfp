@@ -166,6 +166,7 @@ class TestValidatePanel:
         with pytest.raises(ValueError, match='payroll'):
             validate_panel(df)
 
+    @pytest.mark.real_store  # build_panel() reads the real vintage store; exempt from cred blanking
     def test_panel_builds_from_vintage_store(self):
         """build_panel() produces a valid panel from the vintage store."""
         from nfp_ingest.vintage_store import VINTAGE_STORE_PATH

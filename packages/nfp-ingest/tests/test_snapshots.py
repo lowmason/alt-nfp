@@ -106,6 +106,7 @@ def _store_available() -> bool:
         return False
 
 
+@pytest.mark.real_store  # build_model_data reads the real vintage store; exempt from cred blanking
 @pytest.mark.skipif(not _store_available(), reason="store/providers/indicators unavailable")
 class TestHashStability:
     AS_OF = date(2023, 7, 12)

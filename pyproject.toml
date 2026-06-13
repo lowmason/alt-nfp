@@ -95,6 +95,7 @@ addopts = "--cov=packages/nfp-lookups/src/nfp_lookups --cov=packages/nfp-downloa
 markers = [
     "network: tests that require network access (deselect with '-m not network')",
     "slow: MCMC/sampling tests measured in tens of seconds, not milliseconds",
+    "real_store: test legitimately accesses the real (read-only) vintage store; exempt from the credential-blanking safety net.",
 ]
 
 [tool.mypy]

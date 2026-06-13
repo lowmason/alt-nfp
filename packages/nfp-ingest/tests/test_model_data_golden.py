@@ -59,10 +59,13 @@ def _available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _available(),
-    reason="A2 golden fixtures unavailable (need store env + s3 golden/a2 + local providers/indicators)",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _available(),
+        reason="A2 golden fixtures unavailable (need store env + s3 golden/a2 + local providers/indicators)",
+    ),
+    pytest.mark.real_store,  # reads s3://.../golden/a2 + real store; exempt from cred blanking
+]
 
 
 def _arrays_equal(name: str, got: np.ndarray, want: np.ndarray) -> None:

@@ -20,7 +20,7 @@ import pytest
 
 SPOT_STEM = "asof_2026-01-12_light"
 
-pytestmark = [pytest.mark.slow]
+pytestmark = [pytest.mark.slow, pytest.mark.real_store]  # reads s3://.../golden/a3 + real store
 
 
 def _golden_root():

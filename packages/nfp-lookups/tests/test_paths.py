@@ -38,6 +38,13 @@ class TestDerivedLayout:
         assert paths.INDICATORS_DIR == paths.DATA_DIR / "indicators"
         assert paths.OUTPUT_DIR == paths.BASE_DIR / "output"
 
+    # real_store here is the escape hatch, not a store read: VINTAGE_STORE_PATH is
+    # an import-time constant derived from session env. The safety net blanks
+    # NFP_STORE_URI at runtime, but the constant is already remote — so without
+    # this exemption the skip would not fire and the assertion would fail on the
+    # stale remote UPath. Keep the session's NFP_STORE_URI so the skip behaves as
+    # designed.
+    @pytest.mark.real_store
     def test_vintage_store_path_is_store_dir(self):
         if os.environ.get("NFP_STORE_URI"):
             pytest.skip("NFP_STORE_URI set; store is remote in this session")
