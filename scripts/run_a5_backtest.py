@@ -35,7 +35,6 @@ def _write_json(p: Path, obj: dict) -> None:
 
 
 def cmd_snapshot(root: Path) -> None:
-    import polars as pl  # noqa: F401
     from nfp_ingest.first_print import first_print_changes
     from nfp_ingest.model_data import PROVIDERS_DEFAULT, panel_to_model_data
     from nfp_ingest.panel import build_panel
@@ -155,8 +154,7 @@ def cmd_batched(root: Path) -> None:
 def cmd_score(root: Path) -> int:
     import polars as pl
     from nfp_ingest.first_print import first_print_changes
-    from nfp_lookups.paths import VINTAGE_STORE_PATH  # noqa: F401
-    from nfp_vintages.a5 import near_release_asof, score  # noqa: F401
+    from nfp_vintages.a5 import score
     from nfp_vintages.competitors.consensus import Consensus, load_consensus
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
 
@@ -194,6 +192,14 @@ def cmd_score(root: Path) -> int:
                     "actual_first_print_k": actual,
                     "error_k": None if pred is None else actual - pred,
                 })
+
+    if not rows:
+        (root / "a5_report.md").write_text(
+            "# A5 backtest report\n\nNo scoreable targets "
+            "(all unbuildable or missing first prints).\n"
+        )
+        print("No scoreable targets — wrote empty a5_report.md")
+        return 0
 
     df = pl.DataFrame(rows)
     # Exclude COVID (2020–2021) from headline metrics (decided-questions rule)
