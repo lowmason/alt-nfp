@@ -148,10 +148,39 @@ def panel_to_model_data(
 ) -> dict:
     """Convert an observation panel to the model data dict.
 
+    **Precondition — censored panel required.**  The ``panel`` argument MUST
+    be the output of :func:`build_panel` or
+    :func:`~nfp_ingest.vintage_store.transform_to_panel`, both of which apply
+    layer-1 rank-based horizon censoring and map benchmark-revised CES rows to
+    ``revision_number = -1``.
+
+    CES path protection:
+        :func:`_ces_best_available` filters ``revision_number.is_in([0, 1, 2])``
+        before selecting any observation, so benchmark-revised rows
+        (``revision_number == -1``) are excluded even if they somehow survive
+        into the frame.  This guard is defence-in-depth only; it is not a
+        substitute for passing a properly censored panel.
+
+    QCEW and provider paths:
+        These paths do **not** apply an equivalent revision-number guard.
+        They assume the panel was already censored by layer-1 so that no
+        future-vintage or benchmark-lookahead rows are present.
+
+    Preferred usage:
+        Call :func:`build_model_data` (``as_of=D``) unless you have
+        independently applied both censoring layers.  Direct calls to this
+        function are appropriate only when ``panel`` is already the output of
+        ``build_panel(as_of_ref=D)`` **and** the same *as_of* cutoff is passed
+        here for layer-2 (vintage-date, provider pub-lag, and cyclical-lag
+        censoring).
+
     Parameters
     ----------
     panel : pl.DataFrame
-        Validated observation panel (PANEL_SCHEMA).
+        Horizon-censored observation panel (PANEL_SCHEMA columns; produced by
+        ``build_panel()`` / ``transform_to_panel()``).  Must not contain
+        benchmark-revised rows with future growth values; see precondition
+        above.
     providers : list[ProviderConfig]
         Provider list (e.g. ``PROVIDERS_DEFAULT``).
     censor_ces_from : date, optional
@@ -180,6 +209,26 @@ def panel_to_model_data(
         Dict of finished arrays + metadata consumed by the model layer and
         downstream diagnostics.
     """
+    # Defensive check: PANEL_SCHEMA has no benchmark_revision column, so this
+    # guard is a no-op for any properly constructed panel.  It fires only if a
+    # caller accidentally passes a raw vintage-store frame (VINTAGE_STORE_SCHEMA
+    # does carry benchmark_revision) that has not been processed by
+    # transform_to_panel().
+    if "benchmark_revision" in panel.columns:
+        try:
+            has_benchmark = panel["benchmark_revision"].drop_nulls().cast(pl.Int32).max()
+        except Exception:
+            has_benchmark = None
+        if has_benchmark is not None and int(has_benchmark) > 0:
+            warnings.warn(
+                "panel passed to panel_to_model_data contains a 'benchmark_revision' column "
+                "with values > 0.  This indicates the frame has not been processed by "
+                "build_panel() / transform_to_panel(), which maps benchmark-revised rows to "
+                "revision_number = -1 and applies horizon censoring.  Pass the output of "
+                "build_panel(as_of_ref=D) or use build_model_data(as_of=D) to ensure "
+                "correct censoring.",
+                stacklevel=2,
+            )
     if config is None:
         config = ModelDataConfig()
 
