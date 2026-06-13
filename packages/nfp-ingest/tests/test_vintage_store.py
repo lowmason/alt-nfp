@@ -581,7 +581,7 @@ class TestCompactPartition:
         assert len(compacted) == 6
 
     def test_compact_deduplicates(self, tmp_path):
-        """Compaction deduplicates on the uniqueness key, keeping latest vintage."""
+        """Compaction deduplicates on the uniqueness key, keeping earliest vintage."""
         df1 = _make_vintage_df(
             n_months=3, source="ces", sa=True, vintage_offset_months=1
         )
@@ -615,6 +615,36 @@ class TestCompactPartition:
     def test_compact_missing_partition(self, tmp_path):
         """Non-existent partition logs warning, no error."""
         compact_partition(tmp_path, "nonexistent", True)
+
+    def test_compact_keeps_earliest_vintage_on_key_collision(self, tmp_path):
+        """On a uniqueness-key collision, compact keeps the earliest vintage_date (matches append)."""
+        from datetime import date
+
+        import polars as pl
+        from nfp_ingest.vintage_store import compact_partition
+
+        part = tmp_path / "source=ces" / "seasonally_adjusted=true"
+        part.mkdir(parents=True)
+
+        def _row(emp, vint):
+            return pl.DataFrame({
+                "geographic_type": ["national"], "geographic_code": ["00"],
+                "industry_type": ["national"], "industry_code": ["00"],
+                "ref_date": [date(2024, 1, 1)], "vintage_date": [vint],
+                "revision": pl.Series([0], dtype=pl.UInt8),
+                "benchmark_revision": pl.Series([0], dtype=pl.UInt8),
+                "employment": [emp],
+            })
+
+        # Same uniqueness key, two vintage_dates, two fragment files.
+        _row(100.0, date(2024, 2, 1)).write_parquet(str(part / "v_a.parquet"))
+        _row(999.0, date(2024, 5, 1)).write_parquet(str(part / "v_b.parquet"))
+
+        compact_partition(tmp_path, "ces", True)
+        got = pl.read_parquet(str(part / "*.parquet"))
+        assert got.height == 1
+        assert got["employment"][0] == 100.0  # earliest vintage wins
+        assert got["vintage_date"][0] == date(2024, 2, 1)
 
 
 # ---------------------------------------------------------------------------
