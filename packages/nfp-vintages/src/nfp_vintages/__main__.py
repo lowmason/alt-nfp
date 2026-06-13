@@ -192,11 +192,16 @@ def build(
         path_type=Path,
         help="Path to releases.parquet (default: use built-in location).",
     ),
+    allow_canonical: bool = typer.Option(
+        False,
+        "--allow-canonical",
+        help="Permit rebuilding the canonical store in place (DANGEROUS — destroys live-captured vintage rows).",
+    ),
 ) -> None:
     """Build the Hive-partitioned vintage store."""
     from nfp_vintages.build_store import build_store
 
-    build_store(releases_path=releases_path)
+    build_store(releases_path=releases_path, allow_canonical=allow_canonical)
 
 
 @app.command()

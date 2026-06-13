@@ -31,6 +31,7 @@ def build_store(
     revisions_path: Path | None = None,
     releases_path: Path | None = None,
     store_path: Path | None = None,
+    allow_canonical: bool = False,
 ) -> None:
     """Build the vintage store from revisions and current releases.
 
@@ -43,10 +44,21 @@ def build_store(
         Defaults to ``DATA_DIR/releases.parquet``.
     store_path : Path or None
         Output vintage store root. Defaults to ``VINTAGE_STORE_PATH``.
+    allow_canonical : bool
+        Permit rebuilding the canonical remote store in place. Defaults to ``False``.
+        See root ``CLAUDE.md`` "Never rebuild the canonical store in place".
     """
     rev_path = revisions_path or REVISIONS_PATH
     rel_path = releases_path or RELEASES_PATH
     out_path = store_path or VINTAGE_STORE_PATH
+
+    if is_remote(out_path) and str(out_path).rstrip('/').endswith('/store') and not allow_canonical:
+        raise RuntimeError(
+            'refusing to rebuild the canonical store in place '
+            f'({out_path}); write to a scratch prefix (e.g. .../store-rebuild) '
+            "or pass allow_canonical=True. See CLAUDE.md 'Never rebuild the "
+            "canonical store in place'."
+        )
 
     revisions = pl.read_parquet(rev_path).with_columns(
         current=pl.lit(0, pl.UInt8),

@@ -22,8 +22,11 @@ lives in `nfp_download.bls.bulk` since the A2 seam fix). Provides:
 ## Key Commands
 
 ```bash
-# Run all vintage pipeline steps
+# Run all vintage pipeline steps (download → download-indicators → process → current → build)
 uv run alt-nfp
+# NOTE: bare alt-nfp calls build(None), which runs build_store without allow_canonical=True.
+# Against the canonical store (NFP_STORE_URI=s3://alt-nfp/store) this raises RuntimeError.
+# To rebuild the canonical store use: uv run alt-nfp build --allow-canonical (DANGEROUS).
 
 # Individual steps
 uv run alt-nfp download            # Download CES triangular + QCEW bulk
