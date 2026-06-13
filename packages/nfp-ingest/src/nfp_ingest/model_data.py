@@ -203,8 +203,8 @@ def panel_to_model_data(
             stacklevel=2,
         )
 
-    # Restrict to national scope and chosen industry (no fallback 05→00 so we
-    # stay private-only when matching legacy; vintage store often has '00' only)
+    # Restrict to national scope and chosen industry.  No industry fallback —
+    # exact match on industry_code (default '00' = total nonfarm).
     geo_filter = pl.col("geographic_code").is_in([geographic_code, "00", "US"])
     national = panel.filter(
         (pl.col("geographic_type") == "national")
@@ -254,20 +254,19 @@ def panel_to_model_data(
     def _qcew_series_with_meta(
         nat: pl.DataFrame, date_list: list, length: int
     ) -> tuple[np.ndarray, dict]:
-        """QCEW growth array and period -> revision_number for selected rows."""
+        """QCEW growth array and period -> revision_number for selected rows.
+
+        Note: revision_number == -1 (benchmark marker) is only assigned to
+        CES rows in transform_to_panel; it cannot occur here after filtering
+        to source == 'qcew'.  No -1 sentinel needed.
+        """
         out = np.full(length, np.nan, dtype=float)
         sub = nat.filter(pl.col("source") == "qcew")
         period_to_rev: dict = {}
         if len(sub) == 0:
             return out, period_to_rev
         by_period = (
-            sub.with_columns(
-                pl.when(pl.col("revision_number") == -1)
-                .then(999)
-                .otherwise(pl.col("revision_number"))
-                .alias("_rev_sort")
-            )
-            .sort(pl.col("is_final").fill_null(False), "_rev_sort", descending=[True, True])
+            sub.sort(pl.col("is_final").fill_null(False), "revision_number", descending=[True, True])
             .unique(subset=["period"], keep="first")
         )
         for row in by_period.iter_rows(named=True):

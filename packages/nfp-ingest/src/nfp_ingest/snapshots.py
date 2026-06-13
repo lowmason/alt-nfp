@@ -86,6 +86,10 @@ def collect_snapshot(data: dict) -> tuple[dict[str, np.ndarray], dict]:
     providers_meta = []
     for pp in data["pp_data"]:
         name = pp["name"]
+        if "__" in name:
+            raise ValueError(
+                f"provider names must not contain '__' (used as key separator): {name!r}"
+            )
         arrays[f"{name}__g_pp"] = np.asarray(pp["g_pp"])
         arrays[f"{name}__pp_obs"] = np.asarray(pp["pp_obs"])
         has_births = pp["births"] is not None
@@ -131,13 +135,23 @@ def content_hash(arrays: dict[str, np.ndarray], meta: dict) -> str:
     return h.hexdigest()
 
 
-def save_snapshot(arrays: dict[str, np.ndarray], meta: dict, path) -> str:
+def save_snapshot(
+    arrays: dict[str, np.ndarray], meta: dict, path, *, digest: str | None = None
+) -> str:
     """Write a snapshot npz (arrays + embedded metadata JSON) to *path*.
 
     *path* may be a local ``Path`` or a ``UPath``. Returns the content hash
     (also embedded in the metadata as ``content_hash``).
+
+    Parameters
+    ----------
+    digest : str or None
+        Pre-computed content hash (from :func:`content_hash`).  When provided,
+        the recompute is skipped.  Pass only when the arrays and meta are
+        identical to those used to compute the digest.
     """
-    digest = content_hash(arrays, meta)
+    if digest is None:
+        digest = content_hash(arrays, meta)
     meta_out = {**meta, "content_hash": digest}
     buf = io.BytesIO()
     np.savez(buf, __meta__=np.frombuffer(
@@ -189,7 +203,8 @@ def snapshot_model_data(
     meta["as_of"] = as_of.isoformat()
     digest = content_hash(arrays, meta)
     path = out_root / f"asof={as_of.isoformat()}" / f"model_data_{digest[:12]}.npz"
-    save_snapshot(arrays, meta, path)
+    # Pass the already-computed digest so save_snapshot skips the recompute.
+    save_snapshot(arrays, meta, path, digest=digest)
     return path, digest
 
 
