@@ -71,6 +71,7 @@ def _build_release_calendar() -> None:
     from nfp_download.release_dates.parser import collect_release_dates
     from nfp_download.release_dates.scraper import (
         FetchError,
+        ParseError,
         create_session,
         download_all,
         fetch_index,
@@ -101,9 +102,19 @@ def _build_release_calendar() -> None:
                         f'using cached release pages only'
                     )
                     continue
-                entries = parse_index_page(
-                    html, pub.name, pub.series, pub.frequency,
-                )
+                try:
+                    entries = parse_index_page(
+                        html, pub.name, pub.series, pub.frequency,
+                    )
+                except ParseError as e:
+                    # Page structure may have drifted; fall back to cached
+                    # release pages already on disk so the rest of the calendar
+                    # build can proceed. Only newly-published pages are missed.
+                    print(
+                        f'  WARNING: index parse failed for {pub.name} ({e}); '
+                        f'using cached release pages only'
+                    )
+                    continue
                 print(f'  Found {len(entries)} releases for {pub.name}')
                 try:
                     paths = await download_all(entries, pub.name)

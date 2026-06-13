@@ -163,7 +163,24 @@ def parse_index_page(
                 ref_year=ref_year, ref_month=ref_month, url=url,
             ))
 
+    if not entries:
+        raise ParseError(
+            f"parse_index_page: '{publication_name}' yielded 0 release entries — "
+            f"the page structure may have drifted. "
+            f"Check the archive index for series '{series}'."
+        )
+
     return entries
+
+
+class ParseError(Exception):
+    """Raised when an archive index page yields zero release entries.
+
+    Indicates that the page structure may have drifted (e.g. BLS redesigned
+    the archive layout) rather than a transient network failure. Callers
+    should log a warning and fall back to cached release pages rather than
+    silently propagating an empty/partial calendar.
+    """
 
 
 # Transport errors (HTTP status, timeout, connection) raised by this module;
@@ -285,6 +302,4 @@ async def scrape_publication(publication_name: str | None = None) -> None:
         for pub in pubs:
             html = await fetch_index(session, pub.index_url)
             entries = parse_index_page(html, pub.name, pub.series, pub.frequency)
-            if not entries:
-                continue
             await download_all(entries, pub.name)
