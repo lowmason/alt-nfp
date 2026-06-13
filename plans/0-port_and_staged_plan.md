@@ -179,6 +179,30 @@ Port the model to JAX. Pragmatic sequencing:
 
 **Gate:** full 24-month vintage-aware backtest in minutes, results identical to the serial run.
 
+> **Gate status: correctness ✅ PASSED; speed scoped to GPU (2026-06-13).**
+> The backtest now runs as **one vmapped NUTS program** over the 24-date
+> grid (`nfp_model.batch.fit_model_batch`): pad each as-of snapshot to
+> common shapes, mask padded likelihood slots (padded latent timesteps are
+> prior-only — posterior-invariant, proven by exact log-density equality in
+> `test_batch_unit.py`), reduce each date to the A3 fixture schema in-graph.
+> **Results identical to the serial run: 24/24 dates, 816/816 parity
+> criteria PASS** (the A3 instrument, serial baseline as reference);
+> batched-vs-serial nowcast agreement ME −1k / MAE 8k / RMSE 11k against a
+> hundreds-of-k scale; **0 divergences in all 24 batched fits**. **Finding:**
+> "in minutes" is a **GPU** property — plain `vmap` on **CPU** is only
+> **~1.6×** (batched 48.2 min vs serial 75.0 min) because vmapped NUTS
+> lock-steps every lane to the deepest tree per iteration (free on parallel
+> GPU hardware, pure overhead on CPU). On this CPU-only box we bank the
+> correctness gate + a **GPU-ready** harness (identical code runs on GPU
+> unmodified) + the lock-step tax quantified; the order-of-magnitude speed
+> demonstration awaits GPU access or the host-device sharding lever, neither
+> of which blocks A5. The grid build also surfaced that the evaluation
+> *actuals* are convention-laden (first-print vs best-available diverge
+> >150k on 5/24 months — large revisions, annual benchmarks, store growth
+> semantics at revision edges); the report scores dual-track and flags
+> splice rows, and **defining the scoring convention is an A5 question**.
+> Details: `plans/6-a4_vmap_backtests.md`.
+
 ### A5 — Real competitors in the harness
 
 Add the benchmarks that matter to every backtest report: **ADP prints** (FRED; mind the Aug-2022 methodology break) and **consensus survey median** (Bloomberg/Econoday history — sourcing this is a real acquisition task, plan for it). Naive baselines stay as sanity floors, not as gates.

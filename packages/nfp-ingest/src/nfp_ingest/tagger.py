@@ -20,7 +20,29 @@ def latest_vintage_lookup(
     vintage_df: pl.DataFrame,
     publication: str,
 ) -> pl.DataFrame:
-    """Per ref_date, take max revision, max benchmark_revision, max vintage_date.
+    """Per ref_date, the latest *coherent* calendar row in each benchmark track.
+
+    For every ``(ref_date, benchmark_revision)`` track, return the most
+    recently published calendar row, keeping its ``(vintage_date, revision)``
+    as a coherent triple drawn from a single actual row.
+
+    This replaces an earlier implementation that took *independent* maxes of
+    ``vintage_date``, ``revision``, and ``benchmark_revision`` per ref_date.
+    On an annual-benchmark release day (the CES benchmark lands with the
+    January first print each February) the calendar carries two same-day rows
+    for the prior December: the ordinary second print
+    ``(revision=1, benchmark_revision=0)`` and the benchmark reprint
+    ``(revision=2, benchmark_revision=1)``. The column-wise max fused them
+    into one incoherent ``(revision=2, benchmark_revision=1)`` tag, so the
+    rev-1 level row was never appended to the vintage store — and it is
+    unrecoverable from later captures, because the append anti-joins on the
+    ``(revision, benchmark_revision)`` uniqueness key.
+
+    By treating each ``benchmark_revision`` track separately, a ref_date that
+    is republished both as an ordinary print and as a benchmark reprint now
+    yields **both** rows, so both level rows reach the store. Tagging only
+    changes which rows *future* captures emit; it never reinterprets rows
+    already written to the append-only store.
 
     Parameters
     ----------
@@ -33,21 +55,23 @@ def latest_vintage_lookup(
     Returns
     -------
     pl.DataFrame
-        One row per ref_date with: ref_date, vintage_date, revision,
-        benchmark_revision.
+        One row per ``(ref_date, benchmark_revision)`` track with columns:
+        ref_date, vintage_date, revision, benchmark_revision. Benchmarked
+        ref_dates therefore appear on more than one row.
     """
     return (
         vintage_df.filter(pl.col('publication') == publication)
-        .group_by('ref_date')
-        .agg(
-            pl.col('vintage_date').max().alias('vintage_date'),
-            pl.col('revision').max().alias('revision'),
-            pl.col('benchmark_revision').max().alias('benchmark_revision'),
-        )
-        .with_columns(
+        # Latest published row wins within each track; break vintage_date ties
+        # by revision so the kept row stays a coherent (vintage, revision) pair.
+        .sort(['vintage_date', 'revision'], descending=True)
+        .unique(subset=['ref_date', 'benchmark_revision'], keep='first')
+        .select(
+            'ref_date',
+            'vintage_date',
             pl.col('revision').cast(pl.UInt8),
             pl.col('benchmark_revision').cast(pl.UInt8),
         )
+        .sort(['ref_date', 'benchmark_revision'])
     )
 
 

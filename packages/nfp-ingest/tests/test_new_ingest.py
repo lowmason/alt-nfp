@@ -5,6 +5,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from nfp_ingest import releases
 from nfp_ingest.aggregate import aggregate_geo
 from nfp_ingest.releases import COMBINED_COLUMNS, combine_estimates
 from nfp_ingest.tagger import latest_vintage_lookup, tag_estimates
@@ -113,6 +114,175 @@ class TestLatestVintageLookup:
         result = latest_vintage_lookup(vintage_df, 'ces')
         assert result.height == 1
         assert result['vintage_date'][0] == date(2020, 2, 7)
+
+    def test_benchmark_day_emits_both_prints(self):
+        """On a benchmark release day a December ref_date carries both an
+        ordinary second print (rev-1, bmr-0) and a benchmark reprint
+        (rev-2, bmr-1). Both rows must survive — the rev-1 level is never
+        republished, so a lost capture is unrecoverable (the store append
+        anti-joins on (revision, benchmark_revision)).
+
+        Regression for the column-wise-max shadowing documented in
+        specs/ces_growth_convention.md §4(c): independent maxes fused these
+        into a single (rev-2, bmr-1) tag, dropping the rev-1 row entirely.
+        """
+        # Dec-2025 as the CES calendar holds it on the 2026-02-11 benchmark
+        # release: rev-0 first print, rev-1 ordinary second print (one month
+        # later by the scheduled offset), and the benchmark reprint stamped at
+        # the Jan-2026 release. Jan-2026's own first print rides along.
+        vintage_df = pl.DataFrame({
+            'publication': ['ces'] * 4,
+            'ref_date': [date(2025, 12, 12)] * 3 + [date(2026, 1, 12)],
+            'vintage_date': [
+                date(2026, 1, 9),   # Dec rev-0 first print
+                date(2026, 2, 9),   # Dec rev-1 ordinary second print
+                date(2026, 2, 11),  # Dec benchmark reprint
+                date(2026, 2, 11),  # Jan rev-0 first print
+            ],
+            'revision': [0, 1, 2, 0],
+            'benchmark_revision': [0, 0, 1, 0],
+        })
+        result = latest_vintage_lookup(vintage_df, 'ces')
+
+        dec = result.filter(pl.col('ref_date') == date(2025, 12, 12)).sort(
+            'benchmark_revision'
+        )
+        # Both the ordinary print and the benchmark reprint survive.
+        assert dec.height == 2
+        # ...as coherent (vintage_date, revision, benchmark_revision) pairs,
+        # not a column-wise (max vintage, max rev, max bmr) fusion.
+        ordinary = dec.row(0, named=True)
+        benchmark = dec.row(1, named=True)
+        assert (ordinary['revision'], ordinary['benchmark_revision']) == (1, 0)
+        assert ordinary['vintage_date'] == date(2026, 2, 9)
+        assert (benchmark['revision'], benchmark['benchmark_revision']) == (2, 1)
+        assert benchmark['vintage_date'] == date(2026, 2, 11)
+        # The fused (max vintage, max rev) = (2026-02-11, rev-1) pair the old
+        # code could synthesize never appears.
+        assert (
+            result.filter(
+                (pl.col('ref_date') == date(2025, 12, 12))
+                & (pl.col('revision') == 1)
+                & (pl.col('vintage_date') == date(2026, 2, 11))
+            ).height
+            == 0
+        )
+
+        # Jan-2026 (no benchmark in its own year yet) stays a single row.
+        jan = result.filter(pl.col('ref_date') == date(2026, 1, 12))
+        assert jan.height == 1
+        assert (jan['revision'][0], jan['benchmark_revision'][0]) == (0, 0)
+
+
+class TestLatestCesVintageDates:
+    """Tests for ``releases._latest_ces_vintage_dates`` (the build_releases path).
+
+    Same per-benchmark-track contract as ``latest_vintage_lookup``: keyed only
+    on ``ref_date`` it drops the rev-1 ordinary print on benchmark day. This
+    feeds the live-capture ``alt-nfp current`` path, which has no triangular
+    coverage, so the loss is unrecoverable there.
+    """
+
+    def _write_vintage_dates(self, tmp_path: Path, df: pl.DataFrame, monkeypatch) -> None:
+        path = tmp_path / 'vintage_dates.parquet'
+        df.write_parquet(path)
+        monkeypatch.setattr(releases, 'VINTAGE_DATES_PATH', path)
+
+    def test_max_per_ref_date(self, tmp_path: Path, monkeypatch):
+        self._write_vintage_dates(
+            tmp_path,
+            pl.DataFrame({
+                'publication': ['ces', 'ces', 'ces'],
+                'ref_date': [date(2020, 1, 12)] * 3,
+                'vintage_date': [date(2020, 2, 7), date(2020, 3, 6), date(2020, 4, 3)],
+                'revision': [0, 1, 2],
+                'benchmark_revision': [0, 0, 0],
+            }),
+            monkeypatch,
+        )
+        result = releases._latest_ces_vintage_dates()
+        assert result.height == 1
+        assert result['revision'][0] == 2
+        assert result['vintage_date'][0] == date(2020, 4, 3)
+
+    def test_filters_by_publication(self, tmp_path: Path, monkeypatch):
+        self._write_vintage_dates(
+            tmp_path,
+            pl.DataFrame({
+                'publication': ['ces', 'qcew'],
+                'ref_date': [date(2020, 1, 12)] * 2,
+                'vintage_date': [date(2020, 2, 7), date(2020, 8, 19)],
+                'revision': [0, 0],
+                'benchmark_revision': [0, 0],
+            }),
+            monkeypatch,
+        )
+        result = releases._latest_ces_vintage_dates()
+        assert result.height == 1
+        assert result['vintage_date'][0] == date(2020, 2, 7)
+
+    def test_missing_file_returns_empty(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(releases, 'VINTAGE_DATES_PATH', tmp_path / 'nonexistent.parquet')
+        result = releases._latest_ces_vintage_dates()
+        assert result.is_empty()
+        assert result.schema['benchmark_revision'] == pl.UInt8
+
+    def test_benchmark_day_emits_both_prints(self, tmp_path: Path, monkeypatch):
+        """On a benchmark release day a December ref_date carries both an
+        ordinary second print (rev-1, bmr-0) and a benchmark reprint
+        (rev-2, bmr-1). Both rows must survive so both ``(revision,
+        benchmark_revision)`` keys reach the store via the build_releases path.
+
+        Regression for the same column-wise shadowing fixed in
+        ``tagger.latest_vintage_lookup`` and documented in
+        ``specs/ces_growth_convention.md`` §4(c): keying only on ``ref_date``
+        let the later-stamped benchmark row drop the rev-1 print.
+        """
+        self._write_vintage_dates(
+            tmp_path,
+            pl.DataFrame({
+                'publication': ['ces'] * 4,
+                'ref_date': [date(2025, 12, 12)] * 3 + [date(2026, 1, 12)],
+                'vintage_date': [
+                    date(2026, 1, 9),   # Dec rev-0 first print
+                    date(2026, 2, 9),   # Dec rev-1 ordinary second print
+                    date(2026, 2, 11),  # Dec benchmark reprint
+                    date(2026, 2, 11),  # Jan rev-0 first print
+                ],
+                'revision': [0, 1, 2, 0],
+                'benchmark_revision': [0, 0, 1, 0],
+            }),
+            monkeypatch,
+        )
+        result = releases._latest_ces_vintage_dates()
+
+        dec = result.filter(pl.col('ref_date') == date(2025, 12, 12)).sort(
+            'benchmark_revision'
+        )
+        # Both the ordinary print and the benchmark reprint survive...
+        assert dec.height == 2
+        # ...as coherent (vintage_date, revision, benchmark_revision) triples.
+        ordinary = dec.row(0, named=True)
+        benchmark = dec.row(1, named=True)
+        assert (ordinary['revision'], ordinary['benchmark_revision']) == (1, 0)
+        assert ordinary['vintage_date'] == date(2026, 2, 9)
+        assert (benchmark['revision'], benchmark['benchmark_revision']) == (2, 1)
+        assert benchmark['vintage_date'] == date(2026, 2, 11)
+        # The fused (max vintage, max rev) = (2026-02-11, rev-1) pair the old
+        # ref_date-only keying could synthesize never appears.
+        assert (
+            result.filter(
+                (pl.col('ref_date') == date(2025, 12, 12))
+                & (pl.col('revision') == 1)
+                & (pl.col('vintage_date') == date(2026, 2, 11))
+            ).height
+            == 0
+        )
+
+        # Jan-2026 (no benchmark in its own year yet) stays a single row.
+        jan = result.filter(pl.col('ref_date') == date(2026, 1, 12))
+        assert jan.height == 1
+        assert (jan['revision'][0], jan['benchmark_revision'][0]) == (0, 0)
 
 
 class TestTagEstimates:

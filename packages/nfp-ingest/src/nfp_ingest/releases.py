@@ -53,11 +53,23 @@ _DOMAIN_CODES = frozenset({'05', '06', '07', '08'})
 
 
 def _latest_ces_vintage_dates() -> pl.DataFrame:
-    """Return the latest (vintage_date, revision, benchmark_revision) per ref_date.
+    """Per ref_date, the latest *coherent* calendar row in each benchmark track.
 
-    Reads ``vintage_dates.parquet``, filters to CES, and for each
-    ``ref_date`` keeps the row with the maximum ``vintage_date`` — i.e.
-    the most recent revision that has actually been published.
+    Reads ``vintage_dates.parquet``, filters to CES, and for every
+    ``(ref_date, benchmark_revision)`` track keeps the most recently published
+    calendar row, holding its ``(vintage_date, revision)`` as a coherent pair
+    drawn from a single actual row.
+
+    This mirrors :func:`nfp_ingest.tagger.latest_vintage_lookup`. Keying only
+    on ``ref_date`` (the prior behavior) drops a row on annual-benchmark
+    release days: the CES benchmark lands with the January first print each
+    February, so the prior December carries two near-same-day rows — the
+    ordinary second print ``(revision=1, benchmark_revision=0)`` and the
+    benchmark reprint ``(revision=2, benchmark_revision=1)``. The benchmark
+    row has the later ``vintage_date`` and shadows the rev-1 print, the data
+    loss documented in ``specs/ces_growth_convention.md`` §4(c). Treating each
+    ``benchmark_revision`` track separately emits **both** rows, so a
+    benchmarked ref_date appears on more than one row.
     """
     if not VINTAGE_DATES_PATH.exists():
         return pl.DataFrame(
@@ -72,14 +84,17 @@ def _latest_ces_vintage_dates() -> pl.DataFrame:
     return (
         pl.read_parquet(VINTAGE_DATES_PATH)
         .filter(pl.col('publication') == 'ces')
-        .sort('vintage_date', descending=True)
-        .unique(subset=['ref_date'], keep='first')
+        # Latest published row wins within each track; break vintage_date ties
+        # by revision so the kept row stays a coherent (vintage, revision) pair.
+        .sort(['vintage_date', 'revision'], descending=True)
+        .unique(subset=['ref_date', 'benchmark_revision'], keep='first')
         .select(
             'ref_date',
             'vintage_date',
             pl.col('revision').cast(pl.UInt8),
             pl.col('benchmark_revision').cast(pl.UInt8),
         )
+        .sort(['ref_date', 'benchmark_revision'])
     )
 
 
