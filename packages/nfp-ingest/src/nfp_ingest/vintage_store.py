@@ -76,12 +76,23 @@ def _select_ces_at_horizon(ces_df: pl.DataFrame, D: date) -> pl.DataFrame:
     * Rank 2 → ``(revision=1, benchmark_revision=0)``
     * Rank 3+ → ``(revision=2, benchmark_revision=0)`` (actual 3rd print)
 
-    Benchmark-revised rows ``(revision=2, benchmark_revision>0)`` are
-    never selected.  Benchmark-quality information enters the model
-    through QCEW observations instead.
+    The rank rules above never select a benchmark-revised row; benchmark-
+    quality information is designed to enter the model through QCEW
+    observations instead.  The fallback is the one in-principle exception:
+    for any ``(series, ref_date)`` not matched by the prescribed rules it
+    keeps ``max(revision), max(benchmark_revision)``, which *can* be a
+    ``benchmark_revision > 0`` row when that key has no ``bmr=0`` sibling
+    (e.g. the store's oldest months, backfilled from benchmark-revised data
+    only).
 
-    A fallback picks ``max(revision), max(benchmark_revision)`` for any
-    ``(series, ref_date)`` not matched by the prescribed rules.
+    In the real pipeline this does not leak benchmark CES into the panel:
+    :func:`transform_to_panel` computes per-cohort log-growth and drops
+    null/non-finite growth *before* this selection (removing the first
+    ``ref_date`` of each benchmark cohort), and where a ``bmr=0`` triangle
+    exists it out-ranks the ``bmr>0`` row.  Empirically, zero benchmark-
+    revised CES rows reach ``build_panel`` output across all monthly
+    horizons 2022-2026 (audit finding I-2).  The fallback is kept verbatim
+    with the frozen reference, so the behaviour is intentionally unchanged.
     """
     if ces_df.is_empty():
         return ces_df
