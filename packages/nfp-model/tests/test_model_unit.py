@@ -132,6 +132,101 @@ class TestStructuralBranches:
         assert np.asarray(tr["g_cont"]["value"]).dtype == np.float64
 
 
+def _is_exempt_nfp_module(name: str) -> bool:
+    """Return True if *name* is nfp_model itself or one of its sub-modules."""
+    return name == "nfp_model" or name.startswith("nfp_model.")
+
+
+def _find_nfp_boundary_violations(source: str) -> list[str]:
+    """AST-scan *source* and return descriptions of any forbidden nfp_* imports.
+
+    Catches:
+    - ``import nfp_foo`` / ``import numpy, nfp_foo`` (ast.Import, per alias)
+    - ``from nfp_foo import x`` (ast.ImportFrom)
+    - ``importlib.import_module("nfp_foo")`` / ``__import__("nfp_foo")``
+      with a constant string first argument (ast.Call)
+
+    nfp_model and nfp_model.* sub-modules are treated as allowed.
+    """
+    import ast
+
+    tree = ast.parse(source)
+    violations: list[str] = []
+
+    for node in ast.walk(tree):
+        # --- plain imports: import foo, bar ---
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.name
+                if name.startswith("nfp_") and not _is_exempt_nfp_module(name):
+                    violations.append(f"import {name}")
+
+        # --- from-imports: from foo import ... ---
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module  # may be None for relative imports
+            if mod is not None and mod.startswith("nfp_") and not _is_exempt_nfp_module(mod):
+                violations.append(f"from {mod} import ...")
+
+        # --- dynamic imports: importlib.import_module("nfp_...") / __import__("nfp_...") ---
+        elif isinstance(node, ast.Call):
+            func = node.func
+            is_dynamic = (
+                # importlib.import_module(...)
+                (isinstance(func, ast.Attribute) and func.attr == "import_module")
+                # bare import_module(...) or __import__(...)
+                or (isinstance(func, ast.Name) and func.id in ("import_module", "__import__"))
+            )
+            if is_dynamic and node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    mod = first.value
+                    if mod.startswith("nfp_") and not _is_exempt_nfp_module(mod):
+                        violations.append(f"dynamic import of {mod!r}")
+
+    return violations
+
+
+class TestBoundaryChecker:
+    """Self-tests: verify _find_nfp_boundary_violations catches what it must."""
+
+    def test_plain_import_flagged(self):
+        assert _find_nfp_boundary_violations("import nfp_ingest")
+
+    def test_from_import_flagged(self):
+        assert _find_nfp_boundary_violations("from nfp_ingest import x")
+
+    def test_multi_import_flagged(self):
+        # Single ast.Import node with two aliases — only nfp_ingest is forbidden.
+        violations = _find_nfp_boundary_violations("import numpy, nfp_ingest")
+        assert any("nfp_ingest" in v for v in violations)
+
+    def test_dynamic_import_module_flagged(self):
+        assert _find_nfp_boundary_violations('import importlib\nimportlib.import_module("nfp_ingest")')
+
+    def test_dunder_import_flagged(self):
+        assert _find_nfp_boundary_violations('__import__("nfp_ingest")')
+
+    def test_nfp_model_self_import_allowed(self):
+        # nfp_model importing its own sub-modules must not be flagged.
+        assert not _find_nfp_boundary_violations("import nfp_model\nfrom nfp_model.config import ModelPriors")
+
+    def test_nfp_model_submodule_import_allowed(self):
+        assert not _find_nfp_boundary_violations("from nfp_model.data import model_inputs")
+
+    def test_clean_source_allowed(self):
+        src = "import jax\nimport numpy as np\nfrom numpyro import handlers"
+        assert not _find_nfp_boundary_violations(src)
+
+    def test_relative_import_not_flagged(self):
+        # Relative imports have module=None; must not raise.
+        assert not _find_nfp_boundary_violations("from . import utils")
+
+    def test_dynamic_import_with_variable_not_flagged(self):
+        # Dynamic import of a variable is statically undetectable; must not crash.
+        violations = _find_nfp_boundary_violations("importlib.import_module(mod_name)")
+        assert not violations  # can't flag non-constant args
+
+
 class TestBoundary:
     def test_no_data_package_imports(self):
         """The inference layer must not import any nfp_* data package."""
@@ -142,10 +237,7 @@ class TestBoundary:
         src = pathlib.Path(nfp_model.__file__).parent
         offenders = []
         for py in src.rglob("*.py"):
-            for line in py.read_text().splitlines():
-                stripped = line.strip()
-                if stripped.startswith(("import nfp_", "from nfp_")) and not stripped.startswith(
-                    ("import nfp_model", "from nfp_model")
-                ):
-                    offenders.append(f"{py.name}: {stripped}")
+            source = py.read_text()
+            for violation in _find_nfp_boundary_violations(source):
+                offenders.append(f"{py.name}: {violation}")
         assert not offenders, offenders
