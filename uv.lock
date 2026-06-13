@@ -2235,7 +2235,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "jax", specifier = ">=0.4.38" },
-    { name = "numpy", specifier = ">=1.24.0" },
+    { name = "numpy", specifier = ">=1.24.0,<2.4" },
     { name = "numpyro", specifier = ">=0.16.1" },
 ]
 

@@ -12,7 +12,7 @@ Generic download layer — no data transformation, just fetching. Provides:
 
 ## Tech Stack
 
-- **Language**: Python 3.12 (requires >= 3.10)
+- **Language**: Python 3.12 (requires >= 3.12)
 - **HTTP**: httpx (async, HTTP/2); curl_cffi (Chrome impersonation) for www.bls.gov pages only
 - **Parsing**: BeautifulSoup4 + lxml
 - **Build**: hatchling

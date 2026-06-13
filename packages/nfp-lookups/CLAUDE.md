@@ -15,7 +15,7 @@ This is the foundation package with no internal dependencies. It provides:
 
 ## Tech Stack
 
-- **Language**: Python 3.12 (requires >= 3.10)
+- **Language**: Python 3.12 (requires >= 3.12)
 - **Dependencies**: numpy, polars, universal-pathlib + s3fs (S3-backed store paths)
 - **Build**: hatchling
 

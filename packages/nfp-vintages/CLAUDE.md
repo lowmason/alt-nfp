@@ -14,7 +14,7 @@ lives in `nfp_download.bls.bulk` since the A2 seam fix). Provides:
 
 ## Tech Stack
 
-- **Language**: Python 3.12 (requires >= 3.10)
+- **Language**: Python 3.12 (requires >= 3.12)
 - **Dependencies**: httpx (SAE fetches), polars, typer (CLI)
 - **Build**: hatchling
 - **Internal deps**: `nfp-lookups` (industry, geography, revision schedules), `nfp-download` (HTTP client), `nfp-ingest` (vintage store read/write)

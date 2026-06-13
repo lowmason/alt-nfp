@@ -2,7 +2,7 @@
 name = "nfp-lookups"
 version = "0.1.0"
 description = "Schemas, industry/geography hierarchies, revision schedules, and path config for NFP"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 dependencies = [
     "numpy>=1.24.0,<2.4",

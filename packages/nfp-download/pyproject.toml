@@ -2,7 +2,7 @@
 name = "nfp-download"
 version = "0.1.0"
 description = "HTTP clients and scrapers for downloading BLS and FRED data"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 dependencies = [
     "nfp-lookups",

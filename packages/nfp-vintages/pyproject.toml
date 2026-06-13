@@ -2,7 +2,7 @@
 name = "nfp-vintages"
 version = "0.1.0"
 description = "Vintage data pipeline for CES, QCEW, and SAE employment data"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 dependencies = [
     "nfp-lookups",

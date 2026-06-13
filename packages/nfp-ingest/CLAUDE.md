@@ -17,7 +17,7 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 
 ## Tech Stack
 
-- **Language**: Python 3.12 (requires >= 3.10)
+- **Language**: Python 3.12 (requires >= 3.12)
 - **Dependencies**: numpy, polars
 - **Build**: hatchling
 - **Internal deps**: `nfp-lookups` (schemas, industry, geography, revision schedules, provider config), `nfp-download` (BLS/FRED clients)
