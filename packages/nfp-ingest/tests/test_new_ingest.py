@@ -125,6 +125,11 @@ class TestLatestVintageLookup:
         Regression for the column-wise-max shadowing documented in
         specs/ces_growth_convention.md §4(c): independent maxes fused these
         into a single (rev-2, bmr-1) tag, dropping the rev-1 row entirely.
+
+        Note: this is about the vintage-DATES rows, which both survive here.
+        Separately, ``releases._fetch_ces_releases`` intentionally does NOT
+        attach the flat-file level to the (rev-1, bmr-0) row at a benchmark
+        month (IND-IMD-1 / §5) — it emits the reprint track only.
         """
         # Dec-2025 as the CES calendar holds it on the 2026-02-11 benchmark
         # release: rev-0 first print, rev-1 ordinary second print (one month
@@ -237,6 +242,11 @@ class TestLatestCesVintageDates:
         ``tagger.latest_vintage_lookup`` and documented in
         ``specs/ces_growth_convention.md`` §4(c): keying only on ``ref_date``
         let the later-stamped benchmark row drop the rev-1 print.
+
+        Note: this is about the vintage-DATES rows, which both survive here.
+        Separately, ``_fetch_ces_releases`` intentionally does NOT attach the
+        flat-file level to the (rev-1, bmr-0) row at a benchmark month
+        (IND-IMD-1 / §5) — it emits the reprint track only.
         """
         self._write_vintage_dates(
             tmp_path,
@@ -283,6 +293,162 @@ class TestLatestCesVintageDates:
         jan = result.filter(pl.col('ref_date') == date(2026, 1, 12))
         assert jan.height == 1
         assert (jan['revision'][0], jan['benchmark_revision'][0]) == (0, 0)
+
+
+class TestFetchCesReleasesBenchmark:
+    """Tests for ``releases._fetch_ces_releases`` benchmark-day level fanning.
+
+    Regression for IND-IMD-1. The BLS flat file carries ONE post-benchmark
+    ``employment`` level per ``ref_date``. ``_fetch_ces_releases`` joins it to
+    ``_latest_ces_vintage_dates()`` on ``ref_date`` only, so on a benchmark
+    release day — where the December ref_date emits two vintage-date rows, the
+    ordinary second print ``(revision=1, benchmark_revision=0)`` and the
+    benchmark reprint ``(revision=2, benchmark_revision=1)`` — the single
+    post-benchmark level was fanned onto BOTH rows. The rev1/bmr0 row then
+    carried the post-benchmark level (~899k wrong); the pre-benchmark
+    second-print level is not in the flat file.
+
+    Fix: drop the ``(rev=1, bmr=0)`` row for any ref_date that also has a
+    ``bmr>=1`` reprint, emitting the reprint track only (per
+    ``specs/ces_growth_convention.md`` §5 that slot is empty-with-fallback at
+    benchmark months). The fix must NOT over-reach onto ``(rev=2, bmr=0)``
+    finals carried by older benchmarked months.
+    """
+
+    def _patch_network(self, monkeypatch, raw: pl.DataFrame) -> None:
+        """Inject fake ``nfp_ingest.bls`` modules so the deferred imports in
+        ``_fetch_ces_releases`` resolve without any network or store access.
+
+        ``from .bls import BLSHttpClient`` and
+        ``from .bls.ces_national import CES_SERIES_MAP, fetch_ces_national,
+        fetch_ces_national_via_api`` bind all four names at call time, so each
+        must exist on the injected fakes or the import raises.
+        """
+        import sys
+        import types
+
+        fake_cn = types.ModuleType('nfp_ingest.bls.ces_national')
+        fake_cn.fetch_ces_national = lambda client=None: raw
+        fake_cn.fetch_ces_national_via_api = lambda *a, **k: raw
+        fake_cn.CES_SERIES_MAP = {}
+
+        class _DummyClient:
+            def __init__(self, *a, **k):
+                pass
+
+            def close(self):
+                pass
+
+        fake_bls = types.ModuleType('nfp_ingest.bls')
+        fake_bls.BLSHttpClient = _DummyClient
+        fake_bls.ces_national = fake_cn
+
+        monkeypatch.setitem(sys.modules, 'nfp_ingest.bls', fake_bls)
+        monkeypatch.setitem(sys.modules, 'nfp_ingest.bls.ces_national', fake_cn)
+
+    def _write_vintage_dates(self, tmp_path: Path, df: pl.DataFrame, monkeypatch) -> None:
+        path = tmp_path / 'vintage_dates.parquet'
+        df.write_parquet(path)
+        monkeypatch.setattr(releases, 'VINTAGE_DATES_PATH', path)
+
+    def _raw_flat_file(self) -> pl.DataFrame:
+        """One national post-benchmark level per ref_date (the BLS flat file).
+
+        Three ref_dates: a fresh benchmark December, an old benchmarked month,
+        and an ordinary non-benchmark month.
+        """
+        return pl.DataFrame({
+            'supersector_code': ['00', '00', '00'],
+            'is_seasonally_adjusted': [True, True, True],
+            'date': [date(2025, 12, 12), date(2010, 12, 12), date(2026, 1, 12)],
+            'value': [899000.0, 800000.0, 901000.0],
+        })
+
+    def _vintage_dates(self) -> pl.DataFrame:
+        """Synthetic ``vintage_dates.parquet`` covering the three cases.
+
+        - Fresh benchmark Dec-2025: rev0/bmr0, rev1/bmr0, rev2/bmr1.
+        - Old benchmarked Dec-2010: rev0/bmr0, rev1/bmr0, rev2/bmr0 (final,
+          latest vintage in the bmr=0 track) AND a rev2/bmr1 reprint. The
+          rev2/bmr0 final must survive (the trap).
+        - Ordinary Jan-2026: rev0/bmr0 only, no reprint.
+        """
+        return pl.DataFrame({
+            'publication': ['ces'] * 8,
+            'ref_date': (
+                [date(2025, 12, 12)] * 3
+                + [date(2010, 12, 12)] * 4
+                + [date(2026, 1, 12)]
+            ),
+            'vintage_date': [
+                # Dec-2025
+                date(2026, 1, 9),    # rev0/bmr0 first print
+                date(2026, 2, 9),    # rev1/bmr0 ordinary second print
+                date(2026, 2, 11),   # rev2/bmr1 benchmark reprint
+                # Dec-2010 (old benchmarked month)
+                date(2011, 1, 7),    # rev0/bmr0 first print
+                date(2011, 2, 4),    # rev1/bmr0 second print
+                date(2011, 3, 4),    # rev2/bmr0 final (latest in bmr=0 track)
+                date(2012, 2, 3),    # rev2/bmr1 later-year benchmark reprint
+                # Jan-2026 (ordinary, no benchmark)
+                date(2026, 2, 11),   # rev0/bmr0 first print
+            ],
+            'revision': [0, 1, 2, 0, 1, 2, 2, 0],
+            'benchmark_revision': [0, 0, 1, 0, 0, 0, 1, 0],
+        })
+
+    def test_fresh_benchmark_month_drops_rev1_bmr0(self, tmp_path: Path, monkeypatch):
+        """Case 1 (the bug fix): the fresh benchmark December emits NO
+        (rev=1, bmr=0) row, and DOES emit the (rev=2, bmr=1) reprint carrying
+        the flat-file level."""
+        self._patch_network(monkeypatch, self._raw_flat_file())
+        self._write_vintage_dates(tmp_path, self._vintage_dates(), monkeypatch)
+
+        out = releases._fetch_ces_releases()
+        dec = out.filter(pl.col('ref_date') == date(2025, 12, 12))
+
+        # The (rev=1, bmr=0) ordinary second print is dropped — no wrong level.
+        assert dec.filter(
+            (pl.col('revision') == 1) & (pl.col('benchmark_revision') == 0)
+        ).height == 0
+        # The (rev=2, bmr=1) reprint survives, carrying the flat-file level.
+        reprint = dec.filter(
+            (pl.col('revision') == 2) & (pl.col('benchmark_revision') == 1)
+        )
+        assert reprint.height == 1
+        assert reprint['employment'][0] == 899000.0
+
+    def test_old_benchmarked_month_keeps_rev2_bmr0_final(self, tmp_path: Path, monkeypatch):
+        """Case 2 (the trap): an old benchmarked month carrying a (rev=2, bmr=0)
+        final AND a bmr>=1 reprint keeps its (rev=2, bmr=0) final — the fix must
+        not over-reach by dropping all bmr=0 rows."""
+        self._patch_network(monkeypatch, self._raw_flat_file())
+        self._write_vintage_dates(tmp_path, self._vintage_dates(), monkeypatch)
+
+        out = releases._fetch_ces_releases()
+        old = out.filter(pl.col('ref_date') == date(2010, 12, 12))
+
+        # The (rev=2, bmr=0) final is preserved, with its flat-file level.
+        final = old.filter(
+            (pl.col('revision') == 2) & (pl.col('benchmark_revision') == 0)
+        )
+        assert final.height == 1
+        assert final['employment'][0] == 800000.0
+
+    def test_ordinary_month_unchanged(self, tmp_path: Path, monkeypatch):
+        """Case 3 (the parity guard, 99% path): an ordinary non-benchmark month
+        with only a (rev=0, bmr=0) row is unchanged and present with its
+        level."""
+        self._patch_network(monkeypatch, self._raw_flat_file())
+        self._write_vintage_dates(tmp_path, self._vintage_dates(), monkeypatch)
+
+        out = releases._fetch_ces_releases()
+        jan = out.filter(pl.col('ref_date') == date(2026, 1, 12))
+
+        assert jan.height == 1
+        row = jan.row(0, named=True)
+        assert (row['revision'], row['benchmark_revision']) == (0, 0)
+        assert row['employment'] == 901000.0
 
 
 class TestTagEstimates:

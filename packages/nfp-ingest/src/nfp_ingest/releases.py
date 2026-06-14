@@ -152,6 +152,34 @@ def _fetch_ces_releases() -> pl.DataFrame:
 
     latest_vdates = _latest_ces_vintage_dates()
 
+    # IND-IMD-1 / specs/ces_growth_convention.md §5: the flat file carries ONE
+    # post-benchmark level per ref_date, and the join below keys on ref_date
+    # only. On a benchmark release day a December ref_date emits two vintage
+    # rows — the ordinary second print (revision=1, benchmark_revision=0) and
+    # the benchmark reprint (revision=2, benchmark_revision=1) — so the single
+    # post-benchmark level would be fanned onto both, stamping the rev1/bmr0 row
+    # with the post-benchmark level (~899k wrong; the pre-benchmark second print
+    # is not in the flat file). Drop the rev1/bmr0 row for any ref_date that
+    # also has a bmr>=1 reprint, emitting the reprint track only — §5 treats that
+    # slot as empty-with-fallback at benchmark months. Scoped to (rev=1, bmr=0):
+    # older benchmarked months legitimately keep a (rev=2, bmr=0) final. This is
+    # forward-only (future live captures); existing append-only store rows are
+    # untouched.
+    latest_vdates = (
+        latest_vdates
+        .with_columns(
+            _has_reprint=(pl.col('benchmark_revision') >= 1).max().over('ref_date')
+        )
+        .filter(
+            ~(
+                (pl.col('revision') == 1)
+                & (pl.col('benchmark_revision') == 0)
+                & pl.col('_has_reprint').fill_null(False)
+            )
+        )
+        .drop('_has_reprint')
+    )
+
     return (
         raw.select(
             source=pl.lit('ces'),
