@@ -156,8 +156,12 @@ Layer-1 + `panel_adapter` Layer-2) works unchanged.
 - **CES:** each store row's **vintage identity** is `(revision ∈ {0,1,2},
   benchmark_revision ∈ {0,1}, vintage_date)`, populated per §4.1. This is the
   row-identity key, **not** the growth-cohort key: per-cohort log-growth is
-  computed downstream by grouping on `(geo, industry, ownership, revision,
-  benchmark_revision)` and sorting by `ref_date` — **never** on `vintage_date`
+  computed downstream by grouping on `(geo, industry_type, industry_code,
+  ownership, revision, benchmark_revision)` and sorting by `ref_date` —
+  `industry_type` is **load-bearing** in the group, not optional, because code
+  `55` exists at two levels (supersector `55` Financial activities vs sector `55`
+  Management of companies); dropping it would collapse them into one cohort and
+  difference the two series together. **Never** group on `vintage_date`
   (stamps misalign across the months being differenced,
   `ces_growth_convention.md` §4c). The store commits to neither growth form (§6);
   it stores levels.
@@ -261,11 +265,15 @@ The **provider store** (separate repo/object-store) bins its microdata to the
    series `ownership='total'`.
 3. **QCEW** → per `(rev, vintage_date)`: apply the `ces_qcew_industry` crosswalk
    (`own_code=='5'` → `ownership='private'`), explode `month1/2/3_emplvl` to
-   monthly, ÷1000, write the CES-coded private aggregates. For Q1 ref_dates,
-   ingest the size-class file at **native `size_code`** (`'1'`–`'9'` = the `large`
-   scheme), then **derive** `small`/`medium` by the `size_class_members` rollup
-   (`size_classes.md`) and `total` (`'0'`) by summing all native codes — never
-   source or join `small`/`medium` codes directly from raw QCEW.
+   monthly, ÷1000, write the CES-coded private aggregates. For **Q2/Q3/Q4** the
+   all-sizes industry level is written as a **null-size** row (per §7). For **Q1**
+   ref_dates, ingest the size-class file at **native `size_code`** (`'1'`–`'9'` =
+   the `large` scheme), then **derive** `small`/`medium` by the `size_class_members`
+   rollup (`size_classes.md`) and `total` (`'0'`) by summing all native codes —
+   never source or join `small`/`medium` codes directly from raw QCEW. On Q1 the
+   all-sizes level is the `total`/`'0'` row **only** — emit **no** null-size row
+   for Q1 (else it double-counts under §7's `IS NULL OR size_class_code='0'`
+   selector).
 4. **Write** both to `NFP_STORE_URI=s3://alt-nfp/store-rebuild` (the canonical guard
    refuses `…/store`; `is_canonical_store` from the audit branch).
 
@@ -273,8 +281,13 @@ The **provider store** (separate repo/object-store) bins its microdata to the
 
 ## 10. Validation & promotion
 
-**Acceptance gates** (replace frozen-reference parity; key on `industry_code +
-ownership + (rev, bmr) + values`, **not** on the retagged `industry_type`):
+**Acceptance gates** (replace frozen-reference parity; key on `industry_type +
+industry_code + ownership + (rev, bmr) + values`, applying an explicit old→new
+`industry_type` remap for the ≤2023 history join — `national/00`→`(total, total)`,
+`domain/05`→`(total, private)`, supersectors/sectors unchanged. `industry_type`
+stays in the key because code `55` is the lone cross-level collision —
+supersector `55` (Financial activities) vs sector `55` (Management of companies)
+— that `industry_code + ownership` alone cannot disambiguate):
 
 - **History consistency:** rebuilt `source=ces` prints match the current store's
   rows where both exist (≤2023, the known-good core) — for the private hierarchy
