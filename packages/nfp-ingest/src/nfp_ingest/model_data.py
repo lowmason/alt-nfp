@@ -602,6 +602,26 @@ def _load_cyclical_indicators(
         else:
             result[key] = None
 
+    # H-4a: warn when a CONFIGURED indicator loads as None or all-zero.
+    # Detection point is here — before the censoring loop in panel_to_model_data
+    # sets the tail to 0.0 — so any None/all-zero is genuinely missing or
+    # degenerate, never a legitimate censored tail.
+    # Condition: val is None (file missing/unreadable/empty) OR not np.any(val)
+    # (all-zero after centering, e.g. constant raw series with std==0).
+    # Both cases mean the indicator contributes nothing and phi_3 will silently
+    # exclude it from the model without any other signal to the caller.
+    for spec in indicators:
+        val = result.get(f"{spec.name}_c")
+        if val is None or not np.any(val):
+            warnings.warn(
+                f"Cyclical indicator '{spec.name}' loaded as all-zero or missing "
+                f"(key '{spec.name}_c'). phi_3 will silently drop this indicator. "
+                f"Check that '{spec.name}.parquet' exists in indicators_dir "
+                f"and contains non-constant data.",
+                UserWarning,
+                stacklevel=2,
+            )
+
     return result
 
 
