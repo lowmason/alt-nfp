@@ -27,3 +27,6 @@ wheels/
 htmlcov/
 .ruff_cache/
 .mypy_cache/
+
+# Local scratch notebooks
+scratch.ipynb
