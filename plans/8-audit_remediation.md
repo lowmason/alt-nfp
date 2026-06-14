@@ -709,6 +709,49 @@ the remaining piece.
 
 ---
 
+## Phase 3 — DEFERRED items (execute alongside the next golden-master / MCMC run)
+
+*Status 2026-06-13: H-3 (T13) and H-4a's all-zero warning (T14) were implemented
+and verified now (A2 goldens 9/9). The two items below change a model input or
+need a frozen-reference MCMC, so they wait for the run the user deferred. Do them
+together — both regenerate/extend the same golden surface.*
+
+### Deferred-A — H-4a NaN sentinel for censored cyclicals
+The censoring loop in `panel_to_model_data` writes `0.0` into the post-horizon
+tail of each cyclical array (`model_data.py` ~line 466), which is
+indistinguishable from a legitimately-zero centred value. Births already use
+`np.nan`. To switch cyclicals to a NaN sentinel:
+1. **Classify vs the frozen reference** (`~/Projects/alt_nfp`, READ-ONLY): does
+   the reference censor cyclicals with `0.0` or `np.nan`? If `0.0` (likely),
+   this is a v2 divergence → Parity Policy case (a)/(c).
+2. **Model-side masking is required first.** `model.py`'s `phi_3·X_cycle` block
+   must treat a NaN cyclical as *absent* (masked out of the likelihood), not
+   propagate NaN. Without this, NaN breaks the model. This is a `nfp-model`
+   change → re-run the A3 parity + the MCMC smoke.
+3. **A2 goldens change** (the cyclical arrays' tail values change `0.0`→NaN), so
+   the A2 golden fixtures must be regenerated (and the `_DROPPED`-style exclusion
+   does NOT apply — these are real value changes). Confirm posterior parity via
+   the A3/backtest run.
+Why deferred: it's a model-input change whose parity verification is the MCMC run
+itself. Do not land it on a green fast-suite alone.
+
+### Deferred-B — H-2b model-level parity-in-CI smoke
+Task 9 closed the *data-transform* CI gap (credential-free). The *model-level*
+gap remains: a credential-free `fit_model(light) → collect_parity_arrays` smoke
+vs a committed golden reduction. The golden must be produced by the **frozen
+reference** (`~/Projects/alt_nfp`, READ-ONLY) on a shared tiny `ModelData`
+fixture; an MCMC even at `light` is a `slow` test.
+1. Build a tiny credential-free `ModelData` fixture (a few periods, 1–2
+   providers, 1 cyclical) that both repos can consume.
+2. Run it through the frozen reference's model to produce a golden posterior
+   reduction (means/SDs of a few sites); commit fixture + golden.
+3. Add a `slow`-marked test: v2 `fit_model(light)` → `collect_parity_arrays` →
+   assert vs the golden at a generous (MCSE-aware) tolerance.
+Do **not** fake a self-referential v2-vs-v2 test — it proves nothing about
+parity. Why deferred: needs the reference MCMC to mint the golden.
+
+---
+
 ## Sequencing & gates
 
 1. **Phase 1 (Tasks 1–9)** runs start-to-finish via subagent-driven-development
