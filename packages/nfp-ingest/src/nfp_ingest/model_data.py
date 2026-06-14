@@ -54,7 +54,6 @@ class ModelDataConfig:
     """
 
     era_breaks: tuple[date, ...] = (date(2020, 1, 1),)
-    bd_qcew_lag: int = 6
     provider_pub_lag_weeks: int = 3
     qcew_post_covid_boundary_mult: dict[int, float] = field(
         default_factory=lambda: {0: 5.0, 1: 3.5, 2: 2.0}
