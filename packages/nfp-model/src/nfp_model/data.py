@@ -85,8 +85,6 @@ def from_snapshot(arrays: dict[str, np.ndarray], meta: dict) -> dict:
             "emp_col": pm["emp_col"],
             "g_pp": arrays[f"{name}__g_pp"],
             "pp_obs": arrays[f"{name}__pp_obs"],
-            "births": arrays.get(f"{name}__births"),
-            "births_obs": arrays.get(f"{name}__births_obs"),
         }
         pp_data.append(entry)
     data["pp_data"] = pp_data
