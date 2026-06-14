@@ -29,6 +29,9 @@ from nfp_lookups.paths import (
 )
 from nfp_lookups.provider_config import PROVIDERS_DEFAULT
 
+# H-3: v2 fixtures carry these BD arrays; v3 build_model_data omits them.
+_DROPPED = {"birth_rate", "bd_proxy", "bd_qcew_lagged"}
+
 MANIFEST = json.loads(
     (Path(__file__).parent / "golden" / "a2_manifest.json").read_text()
 )
@@ -99,6 +102,10 @@ def test_model_data_matches_master(stem):
         end_year=END_YEAR,
     )
 
+    assert not (_DROPPED & set(data)), (
+        f"build_model_data re-emitted dropped BD arrays: {_DROPPED & set(data)}"
+    )
+
     # Scalars + calendar
     for k, v in meta["scalars"].items():
         assert int(data[k]) == v, f"{k}: {data[k]} vs {v}"
@@ -118,7 +125,6 @@ def test_model_data_matches_master(stem):
     # H-3: fixtures (schema v2) contain birth_rate/bd_proxy/bd_qcew_lagged; v3
     # build_model_data intentionally omits them (posterior-neutral).  Exclude
     # them from comparison — the fixtures remain frozen and unmodified.
-    _DROPPED = {"birth_rate", "bd_proxy", "bd_qcew_lagged"}
     with (root / f"model_data_{stem}.npz").open("rb") as f:
         fixture = np.load(f)
         want = {k: fixture[k] for k in fixture.files if k not in _DROPPED}
