@@ -19,6 +19,7 @@ from nfp_lookups.paths import (
     DATA_DIR,
     INTERMEDIATE_DIR,
     VINTAGE_STORE_PATH,
+    is_canonical_store,
     is_remote,
     storage_options_for,
 )
@@ -52,7 +53,7 @@ def build_store(
     rel_path = releases_path or RELEASES_PATH
     out_path = store_path or VINTAGE_STORE_PATH
 
-    if is_remote(out_path) and str(out_path).rstrip('/').endswith('/store') and not allow_canonical:
+    if is_canonical_store(out_path) and not allow_canonical:
         raise RuntimeError(
             'refusing to rebuild the canonical store in place '
             f'({out_path}); write to a scratch prefix (e.g. .../store-rebuild) '

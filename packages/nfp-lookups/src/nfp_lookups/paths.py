@@ -71,6 +71,30 @@ def is_remote(path: Any) -> bool:
     return str(getattr(path, "protocol", "")) in ("s3", "s3a")
 
 
+def is_canonical_store(path: Any) -> bool:
+    """True if *path* is the canonical, append-only vintage store.
+
+    The canonical store (``s3://alt-nfp/store``) holds live-captured,
+    release-day vintage rows that exist in no raw input and are therefore
+    irreplaceable — it only ever takes appends and must never be rebuilt in
+    place (see root ``CLAUDE.md``). This predicate gates the write doors that
+    could clobber it (``build_store``, ``mirror_store``).
+
+    A value is treated as the canonical store when it is a *remote* path
+    whose URI ends in ``/store``. Remoteness is detected for both ``UPath``
+    objects (via :func:`is_remote`, duck-typed on ``.protocol``) and plain
+    ``str`` URIs beginning with ``s3://`` / ``s3a://`` — the latter matters
+    because callers like ``mirror_store`` build the destination as a string.
+
+    A scratch rebuild prefix (e.g. ``s3://alt-nfp/store-rebuild``) and any
+    local path return ``False``; rebuilds target a scratch prefix.
+    """
+    text = str(path)
+    if not (is_remote(path) or text.startswith(("s3://", "s3a://"))):
+        return False
+    return text.rstrip("/").endswith("/store")
+
+
 def _store_location() -> Any:
     """Resolve the vintage store root.
 

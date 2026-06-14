@@ -5,7 +5,22 @@ from pathlib import Path
 
 import pytest
 from nfp_lookups import paths
-from nfp_lookups.paths import _find_base_dir, _store_location
+from nfp_lookups.paths import _find_base_dir, _store_location, is_canonical_store
+
+
+def test_is_canonical_store_matches_canonical_uri():
+    assert is_canonical_store("s3://alt-nfp/store") is True
+    assert is_canonical_store("s3://alt-nfp/store/") is True
+    assert is_canonical_store("s3://alt-nfp/store-rebuild") is False
+    assert is_canonical_store("s3://alt-nfp/store-rebuild/") is False
+    # s3a:// scheme is handled identically (docstring claims it)
+    assert is_canonical_store("s3a://alt-nfp/store") is True
+    assert is_canonical_store("s3a://alt-nfp/store-rebuild") is False
+
+
+def test_is_canonical_store_false_for_local_paths(tmp_path):
+    assert is_canonical_store(tmp_path) is False
+    assert is_canonical_store(str(tmp_path / "store")) is False
 
 
 class TestFindBaseDir:

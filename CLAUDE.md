@@ -49,7 +49,9 @@ to `main`.
   (loaded by the root `conftest.py` for tests and by the CLI). Unset ⇒ local
   `data/store/` fallback (what CI uses). Store code accepts both `Path` and
   `UPath`; Polars I/O gets options via `nfp_lookups.paths.storage_options_for`.
-  Re-sync from a local store with `uv run python scripts/mirror_store.py`.
+  Re-sync from a local store with `uv run python scripts/mirror_store.py`
+  (targets `NFP_STORE_URI`; it refuses the canonical `…/store` unless you pass
+  `--allow-canonical`).
 - **Boundaries**: no upward imports (e.g. lookups must not import download);
   no cross-package imports of underscore-private names.
 - **`data/` is proprietary and gitignored** — this repo is public. Tests that
