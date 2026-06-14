@@ -693,7 +693,11 @@ def append_to_vintage_store(
         if col not in new_rows.columns:
             raise ValueError(f"Missing required column: {col}")
 
-    # vintage_date excluded from key; earliest-observed vintage wins on collision
+    # vintage_date is excluded from the key, so on collision the FIRST-WRITTEN row
+    # per ukey is kept: a later-arriving row with a matching ukey is anti-joined out
+    # below, regardless of its vintage_date. (compact_partition instead keeps
+    # min(vintage_date) deterministically; the two rules coincide only when appends
+    # arrived in chronological — ascending vintage_date — order.)
     ukey = [
         "ref_date",
         "industry_type",
@@ -751,8 +755,9 @@ def compact_partition(
     """Merge all parquet files within a single partition into one file.
 
     Reads every file in the partition, deduplicates on the store uniqueness
-    key (keeping the earliest vintage, matching append), and writes a single
-    consolidated file.  Original fragment files are then removed.
+    key — keeping the row with the minimum ``vintage_date`` (deterministic by
+    value), unlike append which keeps the first-written row — and writes a
+    single consolidated file.  Original fragment files are then removed.
 
     Parameters
     ----------
@@ -777,7 +782,10 @@ def compact_partition(
         )
         return
 
-    # vintage_date excluded from key; earliest-observed vintage wins on collision
+    # vintage_date is excluded from the key; compact deterministically keeps the row
+    # with the minimum vintage_date per ukey (the sort+unique below). This differs
+    # from append_to_vintage_store, which keeps the FIRST-WRITTEN row per ukey — the
+    # two rules coincide only when rows were appended in chronological order.
     ukey = [
         "ref_date",
         "industry_type",
@@ -793,7 +801,7 @@ def compact_partition(
             str(partition_dir / "*.parquet"),
             storage_options=storage_options_for(store_path),
         )
-        .sort("vintage_date", descending=False)  # earliest-observed vintage wins (matches append)
+        .sort("vintage_date", descending=False)  # min(vintage_date) per ukey wins
         .unique(subset=ukey, keep="first")
         .sort("ref_date", "industry_code", "revision")
     )
