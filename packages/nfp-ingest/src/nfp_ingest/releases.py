@@ -110,8 +110,12 @@ def _fetch_ces_releases() -> pl.DataFrame:
     """
     import os
 
-    from .bls import BLSHttpClient
-    from .bls.ces_national import CES_SERIES_MAP, fetch_ces_national, fetch_ces_national_via_api
+    from nfp_download.bls import BLSHttpClient
+    from nfp_download.bls.ces_national import (
+        CES_SERIES_MAP,
+        fetch_ces_national,
+        fetch_ces_national_via_api,
+    )
 
     api_key = os.environ.get('BLS_API_KEY')
     client = BLSHttpClient(api_key=api_key)

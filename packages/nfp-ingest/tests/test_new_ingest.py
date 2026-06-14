@@ -316,21 +316,18 @@ class TestFetchCesReleasesBenchmark:
     """
 
     def _patch_network(self, monkeypatch, raw: pl.DataFrame) -> None:
-        """Inject fake ``nfp_ingest.bls`` modules so the deferred imports in
-        ``_fetch_ces_releases`` resolve without any network or store access.
+        """Patch the BLS fetch + client so ``_fetch_ces_releases`` runs fully
+        in-memory — no network, no store.
 
-        ``from .bls import BLSHttpClient`` and
-        ``from .bls.ces_national import CES_SERIES_MAP, fetch_ces_national,
-        fetch_ces_national_via_api`` bind all four names at call time, so each
-        must exist on the injected fakes or the import raises.
+        ``_fetch_ces_releases`` does ``from nfp_download.bls import BLSHttpClient``
+        and ``from nfp_download.bls.ces_national import ... fetch_ces_national,
+        fetch_ces_national_via_api, CES_SERIES_MAP`` at call time, so patching the
+        attributes on those real modules is picked up by the deferred imports.
+        ``fetch_ces_national`` returns the synthetic flat file; the client is a
+        no-op stub so construction/close touch no network.
         """
-        import sys
-        import types
-
-        fake_cn = types.ModuleType('nfp_ingest.bls.ces_national')
-        fake_cn.fetch_ces_national = lambda client=None: raw
-        fake_cn.fetch_ces_national_via_api = lambda *a, **k: raw
-        fake_cn.CES_SERIES_MAP = {}
+        from nfp_download import bls as _bls
+        from nfp_download.bls import ces_national as _cn
 
         class _DummyClient:
             def __init__(self, *a, **k):
@@ -339,12 +336,10 @@ class TestFetchCesReleasesBenchmark:
             def close(self):
                 pass
 
-        fake_bls = types.ModuleType('nfp_ingest.bls')
-        fake_bls.BLSHttpClient = _DummyClient
-        fake_bls.ces_national = fake_cn
-
-        monkeypatch.setitem(sys.modules, 'nfp_ingest.bls', fake_bls)
-        monkeypatch.setitem(sys.modules, 'nfp_ingest.bls.ces_national', fake_cn)
+        monkeypatch.setattr(_bls, 'BLSHttpClient', _DummyClient)
+        monkeypatch.setattr(_cn, 'fetch_ces_national', lambda client=None: raw)
+        monkeypatch.setattr(_cn, 'fetch_ces_national_via_api', lambda *a, **k: raw)
+        monkeypatch.setattr(_cn, 'CES_SERIES_MAP', {})
 
     def _write_vintage_dates(self, tmp_path: Path, df: pl.DataFrame, monkeypatch) -> None:
         path = tmp_path / 'vintage_dates.parquet'
@@ -354,14 +349,17 @@ class TestFetchCesReleasesBenchmark:
     def _raw_flat_file(self) -> pl.DataFrame:
         """One national post-benchmark level per ref_date (the BLS flat file).
 
-        Three ref_dates: a fresh benchmark December, an old benchmarked month,
-        and an ordinary non-benchmark month.
+        Four ref_dates: a fresh benchmark December, an old benchmarked month,
+        an ordinary first-print month, and an ordinary second-print month.
         """
         return pl.DataFrame({
-            'supersector_code': ['00', '00', '00'],
-            'is_seasonally_adjusted': [True, True, True],
-            'date': [date(2025, 12, 12), date(2010, 12, 12), date(2026, 1, 12)],
-            'value': [899000.0, 800000.0, 901000.0],
+            'supersector_code': ['00', '00', '00', '00'],
+            'is_seasonally_adjusted': [True, True, True, True],
+            'date': [
+                date(2025, 12, 12), date(2010, 12, 12),
+                date(2026, 1, 12), date(2025, 6, 12),
+            ],
+            'value': [899000.0, 800000.0, 901000.0, 990000.0],
         })
 
     def _vintage_dates(self) -> pl.DataFrame:
@@ -372,13 +370,17 @@ class TestFetchCesReleasesBenchmark:
           latest vintage in the bmr=0 track) AND a rev2/bmr1 reprint. The
           rev2/bmr0 final must survive (the trap).
         - Ordinary Jan-2026: rev0/bmr0 only, no reprint.
+        - Ordinary Jun-2025: rev0/bmr0 + rev1/bmr0, no reprint — the rev1/bmr0
+          ordinary second print MUST survive (the filter only drops rev1/bmr0
+          when the same ref_date also has a bmr>=1 row).
         """
         return pl.DataFrame({
-            'publication': ['ces'] * 8,
+            'publication': ['ces'] * 10,
             'ref_date': (
                 [date(2025, 12, 12)] * 3
                 + [date(2010, 12, 12)] * 4
                 + [date(2026, 1, 12)]
+                + [date(2025, 6, 12)] * 2
             ),
             'vintage_date': [
                 # Dec-2025
@@ -392,9 +394,12 @@ class TestFetchCesReleasesBenchmark:
                 date(2012, 2, 3),    # rev2/bmr1 later-year benchmark reprint
                 # Jan-2026 (ordinary, no benchmark)
                 date(2026, 2, 11),   # rev0/bmr0 first print
+                # Jun-2025 (ordinary second print, no reprint)
+                date(2025, 7, 3),    # rev0/bmr0 first print
+                date(2025, 8, 5),    # rev1/bmr0 second print (must survive)
             ],
-            'revision': [0, 1, 2, 0, 1, 2, 2, 0],
-            'benchmark_revision': [0, 0, 1, 0, 0, 0, 1, 0],
+            'revision': [0, 1, 2, 0, 1, 2, 2, 0, 0, 1],
+            'benchmark_revision': [0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
         })
 
     def test_fresh_benchmark_month_drops_rev1_bmr0(self, tmp_path: Path, monkeypatch):
@@ -449,6 +454,22 @@ class TestFetchCesReleasesBenchmark:
         row = jan.row(0, named=True)
         assert (row['revision'], row['benchmark_revision']) == (0, 0)
         assert row['employment'] == 901000.0
+
+    def test_ordinary_rev1_bmr0_second_print_survives(self, tmp_path: Path, monkeypatch):
+        """Case 4 (the 99% parity guard): an ordinary month's (rev=1, bmr=0)
+        second print with NO benchmark reprint is NOT dropped — the filter only
+        removes rev1/bmr0 when the same ref_date also has a bmr>=1 row."""
+        self._patch_network(monkeypatch, self._raw_flat_file())
+        self._write_vintage_dates(tmp_path, self._vintage_dates(), monkeypatch)
+
+        out = releases._fetch_ces_releases()
+        jun = out.filter(pl.col('ref_date') == date(2025, 6, 12))
+
+        second = jun.filter(
+            (pl.col('revision') == 1) & (pl.col('benchmark_revision') == 0)
+        )
+        assert second.height == 1
+        assert second['employment'][0] == 990000.0
 
 
 class TestTagEstimates:
