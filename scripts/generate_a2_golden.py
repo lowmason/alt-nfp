@@ -43,6 +43,13 @@ GLOBAL_ARRAYS = [
     "g_ces_sa", "ces_sa_obs", "ces_sa_vintage_idx",
     "g_ces_nsa", "ces_nsa_obs", "ces_nsa_vintage_idx",
     "g_qcew", "qcew_obs", "qcew_is_m2", "qcew_noise_mult",
+    # H-3 note: birth_rate, bd_proxy, bd_qcew_lagged appear here because this
+    # script reads the OLD repo's panel_to_model_data output (which produced
+    # them).  The frozen golden fixtures legitimately contain these arrays.
+    # v3 build_model_data (new repo) intentionally omits them (posterior-
+    # neutral); the A2 test in test_model_data_golden.py excludes them via
+    # _DROPPED.  Do NOT remove them here — this list documents what the old
+    # repo returned, not what the new repo produces.
     "birth_rate", "bd_proxy", "bd_qcew_lagged",
 ]
 SCALARS = ["T", "n_years", "n_ces_vintages", "n_providers"]
