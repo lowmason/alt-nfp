@@ -5,9 +5,7 @@ with current estimates (``releases.parquet`` from ``bls-estimates``), normalizes
 ``industry_type``, deduplicates, and writes the vintage store partitioned by
 ``(source, seasonally_adjusted)``.
 
-Can be run as a module::
-
-    python -m nfp_vintages.build_store [--releases PATH]
+Invoked via the ``alt-nfp build`` CLI (see :mod:`nfp_vintages.__main__`).
 """
 
 from __future__ import annotations
@@ -126,21 +124,3 @@ def build_store(
         print(f'  {partition_dir.name}: {write_df.height:,} rows -> {fname}')
 
     print(f'Wrote vintage store to {out_path}')
-
-
-def main() -> None:
-    """CLI entry point for building the vintage store."""
-    import sys
-
-    releases_path = None
-    args = sys.argv[1:]
-    if '--releases' in args:
-        idx = args.index('--releases')
-        if idx + 1 < len(args):
-            releases_path = Path(args[idx + 1])
-
-    build_store(releases_path=releases_path)
-
-
-if __name__ == '__main__':
-    main()
