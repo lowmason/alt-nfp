@@ -232,6 +232,10 @@ def snapshot(
     from nfp_ingest.snapshots import snapshot_model_data
 
     start = _date.fromisoformat(as_of)
+    if grid_end is None and start.day != 12:
+        raise typer.BadParameter(
+            "--as-of must fall on the 12th (day-12 convention)", param_hint="--as-of"
+        )
     if grid_end is None:
         dates = [start]
     else:
