@@ -115,6 +115,29 @@ class TestComposeNone:
                 f"column {col!r}: expected {dtype}, got {result[col].dtype}"
             )
 
+    def test_drifted_input_dtype_is_corrected(self):
+        """A builder emitting a wrong dtype must not leak through diagonal_relaxed.
+
+        The relaxed concat coerces to a common supertype; without the explicit
+        schema cast in compose, an i64 ``revision``/``employment`` in any input
+        frame would widen the composed column away from VINTAGE_STORE_SCHEMA and
+        silently corrupt the store write. The aligned-input happy path
+        (``test_schema_conformant``) cannot catch this — only a drifted input can.
+        """
+        ces = _make_ces([_ces_row()])
+        schema_drift = {
+            k: v
+            for k, v in VINTAGE_STORE_SCHEMA.items()
+            if k not in ("size_class_type", "size_class_code")
+        }
+        schema_drift["revision"] = pl.Int64
+        schema_drift["employment"] = pl.Int64
+        qcew = pl.DataFrame([_qcew_level_row(industry_code="21", employment=100)], schema=schema_drift)
+        result = compose_rebuild_panel(ces, qcew)
+        assert result["revision"].dtype == pl.UInt8
+        assert result["employment"].dtype == pl.Float64
+        assert dict(result.schema) == dict(VINTAGE_STORE_SCHEMA)
+
     def test_qcew_levels_size_cols_become_null(self):
         # Use distinct industry_codes so the filter is unambiguous.
         ces = _make_ces([_ces_row(industry_code="00", size_class_type=None, size_class_code=None)])

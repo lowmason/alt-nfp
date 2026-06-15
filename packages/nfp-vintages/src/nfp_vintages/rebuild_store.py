@@ -165,14 +165,15 @@ def compose_rebuild_panel(
 
     combined = pl.concat(parts, how="diagonal_relaxed")
 
-    # Ensure size columns have the schema dtype (Utf8, nullable).
-    combined = combined.with_columns(
-        pl.col("size_class_type").cast(pl.Utf8),
-        pl.col("size_class_code").cast(pl.Utf8),
+    # Pin canonical column order AND every dtype. ``diagonal_relaxed`` is the
+    # *relaxed* concat: when the three input frames disagree on a column's dtype
+    # it coerces to a common supertype (e.g. a builder emitting ``revision`` as
+    # i64, or the all-null ``size_class_*`` columns landing as Null instead of
+    # Utf8). The explicit cast makes the "VINTAGE_STORE_SCHEMA-conformant"
+    # contract enforced here, not dependent on the builders happening to agree.
+    combined = combined.select(list(VINTAGE_STORE_SCHEMA.keys())).cast(
+        dict(VINTAGE_STORE_SCHEMA)
     )
-
-    # Select into canonical VINTAGE_STORE_SCHEMA column order.
-    combined = combined.select(list(VINTAGE_STORE_SCHEMA.keys()))
 
     return combined.sort(
         "source",
