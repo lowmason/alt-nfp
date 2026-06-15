@@ -18,12 +18,13 @@ Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network 
 
 | Task | State | Notes |
 |---|---|---|
-| **T0** Acquisition spike | ⏳ **maintainer** | Needs BLS egress (blocked in the cloud env). Walkthrough handed off; surfaced two acquire gaps (below). |
+| **T0** Acquisition spike | ✅ **resolved** (local, 2026-06-15) | 3 unknowns resolved — [`store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md). `cesvinall` reconstructs `(rev,bmr)` (verified vs store); QCEW size + levels via API slices. |
+| **T0.5** QCEW vintaging | ⏳ **new gate** | Per-industry QCEW rev-0..4 history is **not** re-downloadable from the current API; pick a source (reuse / reconstruct / capture-forward / old-repo) before T5's QCEW path. |
 | **T1** Schema & grammar | ✅ **done** (`bc932ba`) | ownership axis, `national` retired, taxonomy + remap, `55` two-level, schema dedup (IND-XC-3), tolerant reader. |
-| **T2** CES builder | ⛔ **blocked on T0** | `(2,1)`-source question (bulk flat file vs triangular) is a T0 unknown. |
+| **T2** CES builder | 🟢 **unblocked** | T0 resolved: `cesvinall` reconstructs all `(rev,bmr)`; build `(2,1)` **per benchmark** (one row per Feb re-basing), not the old store's collapsed single row. |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
 | **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
-| **T5** Build orchestration | ⛔ **blocked on T2** | Canonical guard already exists (`build_store.is_canonical_store`). Acquire fix owed (below). |
+| **T5** Build orchestration | ⛔ **blocked on T2 + T0.5** | Canonical guard exists. Acquire simplified to targeted API slices (area per-qtr + size per-Q1) — see T0 findings; QCEW vintaging (T0.5) gates the QCEW path. |
 | **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
 | **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
 | **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
@@ -46,14 +47,20 @@ Full non-network suite green (513 passed; only the 2 pre-existing `claims`/`jolt
 
 ------------------------------------------------------------------------
 
-## T0 — Acquisition spike (resolve unknowns before building) `[blocking, read-only]`
+## T0 — Acquisition spike — ✅ DONE (2026-06-15) → [`specs/store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md)
 
-Three unknowns can invalidate later tasks; resolve them first, read-only.
+All three unknowns resolved (read-only: cached `cesvinall` + live QCEW API slices, cross-checked vs the store):
 
--   [ ] **CES triangular coverage.** Confirm `cesvinall` carries (a) the sub-supersector private codes (`06`/`08`/all sectors) and (b) the per-ref-month benchmark `(2,1)` rows for 2017+, i.e. that the bulk benchmarked file (not triangular) is the right source for `(2,1)` per spec §4.1. Sample-verify against the known anchors (Dec-25 `(2,1)`=158,497; Sep-25 `(2,1)`=158,548 — national `00` from `ces_growth_convention.md`).
--   [ ] **QCEW size-class file coverage.** Confirm the QCEW Q1 size-class files carry native `size_code` 1–9 for the private CES codes the crosswalk targets, national, 2017+.
--   [ ] **NAICS vintage.** Confirm the NAICS-2022 crosswalk is acceptable for all of 2017+ (spec defers vintage-aware crosswalks; flag if any year breaks).
--   [ ] **Acceptance:** a short findings note (append to `store_audit_findings.md` or a T0 scratch doc) answering all three, with go/no-go for each downstream task.
+-   [x] **CES triangular coverage** — GO. 113 NSA codes (full hierarchy). `cesvinall` reconstructs `(0,0)/(1,0)/(2,0)/(2,1)` by itself; verified vs store to the unit (Jun-2023 `00` NSA = 156963/156945/156905/156701). `(2,1)` is **per-benchmark** (each Feb re-basing); the "bulk benchmarked file" is just the triangle's latest vintage row.
+-   [x] **QCEW size-class coverage** — GO. Size endpoint `/{year}/1/size/{1-9}.csv` (Q1 only), national = private (`own_code=5`), `size_code` 1–9, agglvls `{21–28}`, includes supersector pulls + sectors.
+-   [x] **NAICS vintage** — GO (low risk). NAICS-2022-for-all OK at supersector/sector aggregation; spot-check 3-digit durable/nondurable.
+-   [x] **Acceptance note** written: `specs/store_rebuild_acquire.md`, with go/no-go per task.
+
+**Bonus:** the QCEW acquire can use targeted API slices (US000 area per-qtr carries agglvl 13/16; size per-Q1) instead of the 280 MB singlefiles.
+
+## T0.5 — QCEW historical vintaging (new gate, surfaced by T0) `[blocking for QCEW build]`
+
+-   [ ] Decide how to source per-industry QCEW rev-0..4 vintages (the live API is current-only; `qcew-revisions.csv` is total-level only): **(a)** reuse the existing store's QCEW captures (re-crosswalk, don't rebuild history); **(b)** reconstruct via total-level revision ratios × current per-industry levels; **(c)** capture-forward only; **(d)** recover per-release captures from `~/Projects/alt_nfp`. Short spike; see `store_rebuild_acquire.md` "OPEN RISK".
 
 ------------------------------------------------------------------------
 
