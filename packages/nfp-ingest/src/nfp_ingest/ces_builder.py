@@ -58,6 +58,7 @@ import polars as pl
 from nfp_lookups.industry import (
     CES_SECTOR_TO_NAICS,
     INDUSTRY_MAP,
+    IndustryEntry,
     ownership_for,
 )
 from nfp_lookups.paths import DOWNLOADS_DIR
@@ -98,7 +99,7 @@ _MONTH_NAMES = (
 _MONTH_TO_NUM = {name: i + 1 for i, name in enumerate(_MONTH_NAMES)}
 
 
-def _taxonomy_for(entry) -> tuple[str, str, str]:
+def _taxonomy_for(entry: IndustryEntry) -> tuple[str, str, str]:
     """Map an :class:`IndustryEntry` to ``(industry_type, ownership, code)``.
 
     Recodes sector CES codes to NAICS (41→42, 42→44, 43→48) and resolves the
@@ -295,7 +296,7 @@ def build_ces_panel(
     if as_of is None:
         as_of = date.today()
 
-    path = cesvinall_dir or CESVINALL_DIR
+    path = Path(cesvinall_dir) if cesvinall_dir is not None else CESVINALL_DIR
     if not path.exists():
         raise FileNotFoundError(f"cesvinall directory not found: {path}")
 
