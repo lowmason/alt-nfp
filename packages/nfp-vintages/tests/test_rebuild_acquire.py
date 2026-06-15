@@ -554,22 +554,32 @@ class TestSizeRawToNative:
 
     # --- fail-loud on zero rows ---
 
-    def test_empty_size_code_raises(self):
-        """If a size_code yields zero build_qcew_panel rows, must raise RuntimeError."""
-        # Pass only agglvl 61 rows (duplicate family — all filtered out before crosswalk)
+    def test_no_size_codes_after_filter_raises(self):
+        """Only agglvl 61–64 (duplicate family) → all filtered → 'no size_codes' guard."""
+        # agglvl 61 is dropped by the 21–28 filter, so no rows (and no size_codes)
+        # survive → the aggregate guard fires (NOT the per-size_code guard).
         bad_rows = [
-            _size_csv_row(
-                industry_code="1013",
-                agglvl_code="61",   # kept agglvl would be 51 after -10: not in pull tables
-                size_code="1",
-                month1=1_000,
-            )
+            _size_csv_row(industry_code="1013", agglvl_code="61", size_code="1", month1=1_000)
         ]
-        # The filter drops agglvl 61 → 0 rows survive → size_codes list is empty
-        # → RuntimeError "no size_codes found" (not the per-code guard)
         from nfp_vintages.rebuild_store import _size_raw_to_native
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="no size_codes found"):
+            _size_raw_to_native(_make_size_raw(bad_rows))
+
+    def test_per_size_code_zero_rows_raises(self):
+        """A size_code that survives filtering but yields no crosswalk rows must raise.
+
+        agglvl 27 passes the 21–28 filter but remaps to 17, which
+        build_qcew_panel does not pull → 0 output rows for that size_code → the
+        *per-size_code* guard fires (distinct from the aggregate guard above).
+        """
+        # 5-digit code at agglvl 27 (→17 after −10); a real size_code survives.
+        bad_rows = [
+            _size_csv_row(industry_code="11111", agglvl_code="27", size_code="1", month1=1_000)
+        ]
+        from nfp_vintages.rebuild_store import _size_raw_to_native
+
+        with pytest.raises(RuntimeError, match="0 rows for size_code"):
             _size_raw_to_native(_make_size_raw(bad_rows))
 
 

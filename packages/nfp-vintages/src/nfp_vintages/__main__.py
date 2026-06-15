@@ -260,9 +260,10 @@ def build_rebuild(
     print(f"  QCEW levels: {qcew_levels.height:,} rows")
 
     # Fetch QCEW Q1 size-endpoint slices (2017-present, size_code 1-9) → crosswalk.
+    # _acquire_qcew_size_native already crosswalks to CES codes (it is NOT raw CSV).
     print("Acquiring QCEW size native rows (BLS size API slices)...")
-    raw_size = _acquire_qcew_size_native()
-    size = build_size_class_panel(raw_size)
+    size_native = _acquire_qcew_size_native()
+    size = build_size_class_panel(size_native)
     print(f"  QCEW size: {size.height:,} rows")
 
     print("Composing panels...")

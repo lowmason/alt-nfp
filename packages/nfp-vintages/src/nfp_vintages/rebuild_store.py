@@ -5,8 +5,9 @@ Composes the three source panels (CES, QCEW levels, QCEW size) into one
 refusing the canonical ``s3://alt-nfp/store``.
 
 The acquire layer (QCEW API-slice fetchers + size NAICS→CES crosswalk) fetches
-public BLS API slices via the Chrome-impersonating client (Akamai bot defence)
-and transforms them into frames ready for :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`
+public BLS API slices over plain httpx (``data.bls.gov`` needs no impersonation;
+only www.bls.gov is Akamai-fingerprinted) and transforms them into frames ready
+for :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`
 and :func:`~nfp_ingest.size_class.build_size_class_panel`.
 
 Usage::
@@ -21,6 +22,7 @@ import logging
 from datetime import date
 from typing import Any
 
+import httpx
 import polars as pl
 from nfp_lookups.industry import QCEW_AREA_NATIONAL
 from nfp_lookups.paths import (
@@ -68,9 +70,12 @@ _QCEW_LEVELS_REQUIRED = (
     "revision",
 )
 
-# agglvl codes present in the size-endpoint files; the duplicate family
-# (61–64) carries the same industry_codes as 21–24 and would double-count.
-# Filter to 21–28 only.
+# agglvl codes kept from the size-endpoint files. The duplicate family (61–64)
+# carries the same industry_codes as 21–24 and would double-count, so keep only
+# the 21–28 by-industry-detail tree. We keep the *full* 21–28 (not just the
+# 23–26 that build_qcew_panel pulls): after the −10 remap, 21/22/27/28 → 11/12/
+# 17/18, which build_qcew_panel simply ignores — harmless, and robust if BLS
+# ever shifts which detail level a CES pull reads.
 _SIZE_AGGLVL_KEEP: frozenset[str] = frozenset(str(a) for a in range(21, 29))
 
 # The +10 shift that maps size agglvl to the equivalent area agglvl understood
@@ -94,8 +99,10 @@ def _fetch_qcew_csv(session: Any, url: str) -> pl.DataFrame | None:
     Parameters
     ----------
     session :
-        An open :class:`curl_cffi.requests.Session` from
-        :func:`~nfp_download.client.create_impersonating_session`.
+        An open :class:`httpx.Client` from
+        :func:`~nfp_download.client.create_client`. ``data.bls.gov`` is a plain
+        host (no Akamai TLS fingerprinting — that's www.bls.gov only), so it
+        stays on httpx per the nfp-download transport convention.
     url : str
         Absolute BLS API URL.
 
@@ -105,12 +112,11 @@ def _fetch_qcew_csv(session: Any, url: str) -> pl.DataFrame | None:
         All columns as ``Utf8`` (``infer_schema_length=0``); caller is
         responsible for casting numeric fields.  ``None`` on HTTP 404.
     """
-    from curl_cffi.requests.exceptions import HTTPError as CurlHTTPError
     from nfp_download.client import get_with_retry
 
     try:
         r = get_with_retry(session, url)
-    except CurlHTTPError as exc:
+    except httpx.HTTPStatusError as exc:
         if exc.response is not None and exc.response.status_code == 404:
             logger.debug("404 — skipping %s", url)
             return None
@@ -145,6 +151,10 @@ def _prep_area_raw(df: pl.DataFrame) -> pl.DataFrame:
         Frame with exactly :data:`_QCEW_LEVELS_REQUIRED` columns, private rows
         only, ``month*_emplvl`` as ``Int64``, ``revision`` as ``Int64``.
     """
+    # No disclosure filter here (unlike the size path): the area endpoint's
+    # all-sizes national aggregates at agglvl 13–16 are large cells BLS does not
+    # suppress. Suppression only bites the finer size×industry cells (see
+    # _size_raw_to_native step 2).
     return (
         df.filter(pl.col("own_code") == "5")
         .select(
@@ -164,8 +174,8 @@ def _acquire_qcew_levels() -> pl.DataFrame:
     """Acquire raw QCEW area-endpoint rows for crosswalk → :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`.
 
     Fetches ``/api/{year}/{qtr}/area/US000.csv`` for every ``(year, quarter)``
-    in the rebuild scope (2017–current year, all 4 quarters) using the
-    Chrome-impersonating HTTP client required by BLS's Akamai bot defence.
+    in the rebuild scope (2017–current year, all 4 quarters) over plain httpx
+    (``data.bls.gov`` is not Akamai-fingerprinted, unlike www.bls.gov).
     Per-slice 404s are skipped (the current year may lack later quarters).
 
     All rows are tagged ``revision=0`` (decision A: per-industry QCEW data on
@@ -179,12 +189,12 @@ def _acquire_qcew_levels() -> pl.DataFrame:
         ``area_fips``, ``own_code``, ``industry_code``, ``agglvl_code``,
         ``year``, ``qtr``, ``month{1,2,3}_emplvl`` (``Int64``), ``revision=0``.
     """
-    from nfp_download.client import create_impersonating_session
+    from nfp_download.client import create_client
 
     current_year = date.today().year
     slices: list[pl.DataFrame] = []
 
-    with create_impersonating_session() as session:
+    with create_client() as session:
         for year in range(_REBUILD_START_YEAR, current_year + 1):
             for qtr in range(1, 5):
                 url = f"https://data.bls.gov/cew/data/api/{year}/{qtr}/area/US000.csv"
@@ -352,8 +362,8 @@ def _acquire_qcew_size_native() -> pl.DataFrame:
     """Acquire raw QCEW Q1 size-endpoint rows for :func:`~nfp_ingest.size_class.build_size_class_panel`.
 
     Fetches ``/api/{year}/1/size/{size_code}.csv`` for every ``(year, size_code)``
-    in the rebuild scope (2017–current year, size codes 1–9) using the
-    Chrome-impersonating HTTP client.  The Q1-only endpoint is implicit in the
+    in the rebuild scope (2017–current year, size codes 1–9) over plain httpx
+    (``data.bls.gov`` needs no impersonation).  The Q1-only endpoint is implicit in the
     URL path (``/1/`` is quarter 1).  Per-slice 404s are skipped.
 
     The raw frames are concatenated and passed to :func:`_size_raw_to_native`,
@@ -368,12 +378,12 @@ def _acquire_qcew_size_native() -> pl.DataFrame:
         :data:`~nfp_ingest.size_class._REQUIRED_COLUMNS` — ready for
         :func:`~nfp_ingest.size_class.build_size_class_panel`.
     """
-    from nfp_download.client import create_impersonating_session
+    from nfp_download.client import create_client
 
     current_year = date.today().year
     slices: list[pl.DataFrame] = []
 
-    with create_impersonating_session() as session:
+    with create_client() as session:
         for year in range(_REBUILD_START_YEAR, current_year + 1):
             for size_code in range(1, 10):
                 url = (
