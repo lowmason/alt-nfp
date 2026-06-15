@@ -49,6 +49,39 @@ acquire risk (QCEW vintaging) that gates the QCEW build.
   with `month{1,2,3}_emplvl` → ÷1000. Small targeted slices, **not** the ~280 MB
   singlefile.
 
+### CONFIRMED via live probe (2026-06-15) — informs the T5 size crosswalk
+
+- **The size tree is the area tree shifted `+10`.** Verified against
+  `2024/1/size/*.csv` (`own_code=5`): size agglvl `21`=national-total,
+  `22`=domain, `23`=supersector, `24`=2-digit sector, `25`=3-digit, `26`=4-digit
+  (incl. `1133` Logging), `27`/`28`=5/6-digit — i.e. `size_agglvl = area_agglvl
+  + 10` for the by-industry levels. Every code T3's crosswalk pulls is present:
+  `321`/`311` (3-digit mfg, for durable `31`/nondurable `32`) at agglvl `25`;
+  `1133` (Logging→sector `11`) at agglvl `26`; 2-digit sectors at `24`;
+  supersectors at `23`.
+- **Design unlocked — reuse `build_qcew_panel`, don't reimplement.** Remap size
+  agglvl `−10` and feed straight through the T3-tested `build_qcew_panel`, run
+  **per `size_code`** (a correctness requirement — its `_VINTAGE_GROUP` has no
+  `size_code`, so one combined call would sum across size classes), then attach
+  `size_code` → that is the `native` frame `build_size_class_panel` consumes. No
+  new pull-maps. The size hierarchy is then *identical by construction* to the
+  levels hierarchy.
+- **Duplicate family at agglvl `61`–`64`** carries the same industry codes as
+  `21`–`24` (e.g. `1012` at both `23` and `63`) — including both would
+  double-count. The `−10` remap drops it for free (`61`–`64`→`51`–`54`, never
+  pulled by `build_qcew_panel`), but the fetch should filter to `21`–`28`
+  explicitly.
+- **Disclosure suppression — contained, policy = drop `'N'`.** `disclosure_code`
+  is `''` (disclosed) or `'N'` (withheld, value zeroed in the open API).
+  Suppression is **zero at agglvl `23`/`24`** (supersectors, 2-digit sectors,
+  hence domains/`05`) and appears only at `25`/`26` (3-digit/4-digit) — affecting
+  only sectors `31`/`32`/`11`, the §10 best-effort tier (`1133` is even absent in
+  the largest size bucket). **Policy:** keep only disclosed cells
+  (`disclosure_code ∈ {'', null}`) before crosswalking — never sum a withheld
+  cell as a real zero. Hard-gate levels stay exact; `31`/`32`/`11` size
+  breakdowns are disclosed-only (a small, flagged undercount). Log the disclosure
+  distribution + dropped-row counts per year during the real fetch.
+
 ## Acquire source — API slices beat the singlefiles (informs T5)
 
 - **US000 area slice** `data.bls.gov/cew/data/api/{year}/{qtr}/area/US000.csv`
