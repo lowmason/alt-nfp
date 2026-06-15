@@ -28,5 +28,8 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 
+# BLS download cache (BLSHttpClient default cache_dir = .cache/bls)
+.cache/
+
 # Local scratch notebooks
 scratch.ipynb

@@ -25,11 +25,39 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
-_USER_AGENT = (
-    'alt-nfp/0.1.0 '
-    '(Python; +https://github.com/lowmason/alt-nfp) '
-    f'httpx/{httpx.__version__}'
-)
+_UA_PRODUCT = 'alt-nfp/0.1.0'
+# Non-personal placeholder (this repo is public); set BLS_CONTACT_EMAIL in a
+# gitignored .env for real acquisition so BLS has a live contact.  Must not
+# contain 'github.com' — Akamai bot management on download.bls.gov 403s any
+# User-Agent carrying that token (URL or email domain alike).
+_DEFAULT_CONTACT_EMAIL = 'alt-nfp@example.com'
+
+
+def _build_user_agent() -> str:
+    '''Build the User-Agent for ``download.bls.gov`` LABSTAT flat-file fetches.
+
+    ``download.bls.gov`` sits behind Akamai bot management with two rules that
+    a self-identifying UA trips (both verified empirically against the live
+    endpoint):
+
+    1. A User-Agent containing the ``github.com`` token — whether as a URL
+       (``+https://github.com/...``) or an email domain
+       (``foo@users.noreply.github.com``) — is 403'd on every file.  Other
+       domains (``mac.com``, ``example.com``) pass.
+    2. The heavy bulk-data files (``ce.data.0.AllCESSeries``, ~47 MB) require a
+       contact email; a bare product token gets a 403 on those even though it
+       succeeds on small overview files.
+
+    So the UA is ``"alt-nfp/0.1.0 (<email>)"`` — product token plus a contact
+    email, no ``github.com``.  The email defaults to a non-personal placeholder
+    and can be overridden with the ``BLS_CONTACT_EMAIL`` environment variable.
+
+    (This is unrelated to ``www.bls.gov``, which defends with TLS-handshake
+    fingerprinting and is handled by
+    :func:`nfp_download.client.create_impersonating_session`.)
+    '''
+    email = os.environ.get('BLS_CONTACT_EMAIL', '').strip() or _DEFAULT_CONTACT_EMAIL
+    return f'{_UA_PRODUCT} ({email})'
 
 # Programs whose survey reference period is the pay period including
 # the 12th of the month.  Dates for these programs use day=12;
@@ -115,7 +143,7 @@ class BLSHttpClient:
         self.api_key = api_key
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl
-        self.session = httpx.Client(headers={'User-Agent': _USER_AGENT}, timeout=60.0)
+        self.session = httpx.Client(headers={'User-Agent': _build_user_agent()}, timeout=60.0)
         self.base_url = self.API_BASE_V2 if api_key else self.API_BASE_V1
 
     # ------------------------------------------------------------------

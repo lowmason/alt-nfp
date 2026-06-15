@@ -3,6 +3,7 @@
 import pytest
 from nfp_download.bls._http import (
     BLSHttpClient,
+    _build_user_agent,
     _period_to_month,
     _reference_day,
 )
@@ -175,6 +176,43 @@ class TestParseApiResponse:
         }
         df = BLSHttpClient._parse_api_response(raw)
         assert len(df) == 0
+
+
+class TestUserAgent:
+    """Tests for _build_user_agent.
+
+    download.bls.gov's Akamai bot management 403s any User-Agent carrying the
+    ``github.com`` token (URL or email domain alike), and the heavy bulk-data
+    files additionally require a contact email — a bare product token gets a
+    403 on them.  The UA must therefore carry an email and no ``github.com``.
+    The contact defaults to a non-personal placeholder (public repo) and is
+    overridable via ``BLS_CONTACT_EMAIL``.
+    """
+
+    def test_default_carries_email_and_no_blocked_token(self, monkeypatch):
+        monkeypatch.delenv('BLS_CONTACT_EMAIL', raising=False)
+        ua = _build_user_agent()
+        assert 'alt-nfp' in ua
+        assert '@' in ua  # a contact email is present
+        assert 'http' not in ua.lower()  # no URL
+        assert 'github' not in ua.lower()  # Akamai 403s the github.com token
+        assert ua == 'alt-nfp/0.1.0 (alt-nfp@example.com)'  # exact shipped default
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv('BLS_CONTACT_EMAIL', 'me@example.org')
+        ua = _build_user_agent()
+        assert 'me@example.org' in ua
+        assert 'http' not in ua.lower()
+
+    def test_blank_env_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv('BLS_CONTACT_EMAIL', '   ')
+        ua = _build_user_agent()
+        assert ua == 'alt-nfp/0.1.0 (alt-nfp@example.com)'
+
+    def test_client_session_uses_built_ua(self, monkeypatch):
+        monkeypatch.setenv('BLS_CONTACT_EMAIL', 'me@example.org')
+        with BLSHttpClient() as client:
+            assert client.session.headers.get('user-agent') == _build_user_agent()
 
 
 class TestContextManager:
