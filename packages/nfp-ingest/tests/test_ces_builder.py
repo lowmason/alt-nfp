@@ -15,7 +15,7 @@ Three layers, all offline:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import polars as pl
 import pytest
@@ -76,20 +76,27 @@ def _write_triangle(
 
 
 def test_synthetic_diagonals_and_schema(tmp_path):
-    """Hand-built triangle: verify the four emitted (revision, bmr) values."""
-    # Vintages (release rows) 2017-01 .. 2017-05; one ref-month column 2017-01.
+    """Hand-built triangle: verify the emitted (revision, bmr) values.
+
+    Two annual-benchmark vintage rows ``(Y, 1)`` re-state the 2017-01 ref-month,
+    so the column yields the three prints **plus two** ``(2,1)`` rows, one per
+    distinct benchmark basis.
+    """
+    # Vintages (release rows) 2017-01 .. 2019-01; one ref-month column 2017-01.
     # Down the 2017-01 column the print history is:
     #   rev0 (released 2017-01) = 100.0
     #   rev1 (released 2017-02) = 101.0
     #   rev2 (released 2017-03) = 102.0
-    #   later                   = 103.0
-    #   latest (released 2017-05) = 104.0   <- (2,1) takes this
-    vintages = [(2017, m) for m in range(1, 6)]
+    # then two annual benchmarks re-state it:
+    #   (2018,1) — the 2017 benchmark — = 103.0  -> (2,1) @ Jan-2018 release
+    #   (2019,1) — the 2018 benchmark — = 105.0  -> (2,1) @ Jan-2019 release
+    vintages = [(2017, m) for m in range(1, 13)] + [(2018, 1), (2019, 1)]
     ref_months = [(2017, 1)]
-    cells = {(2017, 1): [100.0, 101.0, 102.0, 103.0, 104.0]}
+    col = [100.0, 101.0, 102.0] + [None] * 9 + [103.0, 105.0]
+    cells = {(2017, 1): col}
     _write_triangle(tmp_path, "000000", vintages=vintages, ref_months=ref_months, cells=cells)
 
-    out = build_ces_panel(tmp_path)
+    out = build_ces_panel(tmp_path, as_of=date(2026, 1, 1))
 
     # Schema conformance (partition cols carried as plain columns).
     assert set(out.columns) == set(VINTAGE_STORE_SCHEMA)
@@ -111,23 +118,95 @@ def test_synthetic_diagonals_and_schema(tmp_path):
     # ref_date is day-12 of the reference month.
     assert (out["ref_date"] == date(2017, 1, 12)).all()
 
-    keyed = {
+    # The three first-basis prints are unique-keyed; check them directly.
+    prints = {
         (r["revision"], r["benchmark_revision"]): r["employment"]
         for r in out.iter_rows(named=True)
+        if r["benchmark_revision"] == 0
     }
-    assert keyed[(0, 0)] == 100.0
-    assert keyed[(1, 0)] == 101.0
-    assert keyed[(2, 0)] == 102.0
-    assert keyed[(2, 1)] == 104.0  # latest value down the column
+    assert prints[(0, 0)] == 100.0
+    assert prints[(1, 0)] == 101.0
+    assert prints[(2, 0)] == 102.0
 
-    # Exactly four rows for one ref-month.
-    assert out.height == 4
+    # Per-benchmark (2,1) rows: value ↔ date pairs, one per distinct basis.
+    pairs = {
+        (r["employment"], r["vintage_date"])
+        for r in out.iter_rows(named=True)
+        if (r["revision"], r["benchmark_revision"]) == (2, 1)
+    }
+    assert pairs == {
+        (103.0, get_ces_vintage_date(date(2018, 1, 12), 0)),  # 2017 benchmark
+        (105.0, get_ces_vintage_date(date(2019, 1, 12), 0)),  # 2018 benchmark
+    }
 
-    # Vintage dates match the lookups helper (day-12 keys + Jan-Y+1 benchmark).
+    # Three prints + two per-benchmark (2,1) rows.
+    assert out.height == 5
+
+    # First-basis vintage dates match the lookups helper (day-12 keys).
     assert keyed_vintage(out, 0, 0) == get_ces_vintage_date(date(2017, 1, 12), 0)
     assert keyed_vintage(out, 1, 0) == get_ces_vintage_date(date(2017, 1, 12), 1)
     assert keyed_vintage(out, 2, 0) == get_ces_vintage_date(date(2017, 1, 12), 2)
-    assert keyed_vintage(out, 2, 1) == get_ces_vintage_date(date(2018, 1, 12), 0)
+
+
+def test_synthetic_unchanged_benchmark_not_duplicated(tmp_path):
+    """A later benchmark that leaves the value unchanged emits no extra (2,1)."""
+    # Three benchmarks: 2017→103.0, 2018→103.0 (unchanged), 2019→106.0.
+    vintages = [(2017, m) for m in range(1, 13)] + [(2018, 1), (2019, 1), (2020, 1)]
+    ref_months = [(2017, 1)]
+    col = [100.0, 101.0, 102.0] + [None] * 9 + [103.0, 103.0, 106.0]
+    cells = {(2017, 1): col}
+    _write_triangle(tmp_path, "000000", vintages=vintages, ref_months=ref_months, cells=cells)
+
+    out = build_ces_panel(tmp_path, as_of=date(2026, 1, 1))
+
+    pairs = {
+        (r["employment"], r["vintage_date"])
+        for r in out.iter_rows(named=True)
+        if (r["revision"], r["benchmark_revision"]) == (2, 1)
+    }
+    # The unchanged 2018 benchmark (Jan-2019 release) is NOT emitted.
+    assert pairs == {
+        (103.0, get_ces_vintage_date(date(2018, 1, 12), 0)),  # 2017 benchmark
+        (106.0, get_ces_vintage_date(date(2020, 1, 12), 0)),  # 2019 benchmark
+    }
+
+
+def test_as_of_excludes_then_includes_benchmark(tmp_path):
+    """A fixed ``as_of`` gates (2,1) rows by their benchmark release date.
+
+    Deterministic — no ``date.today()``: before the Jan-2019 release excludes
+    the 2018-benchmark (2,1); after it includes it. Prints always retained.
+    """
+    vintages = [(2017, m) for m in range(1, 13)] + [(2018, 1), (2019, 1)]
+    ref_months = [(2017, 1)]
+    col = [100.0, 101.0, 102.0] + [None] * 9 + [103.0, 105.0]
+    cells = {(2017, 1): col}
+    _write_triangle(tmp_path, "000000", vintages=vintages, ref_months=ref_months, cells=cells)
+
+    jan2019_release = get_ces_vintage_date(date(2019, 1, 12), 0)
+
+    # as_of strictly before the Jan-2019 release: only the 2017-benchmark (2,1).
+    before = build_ces_panel(tmp_path, as_of=jan2019_release - timedelta(days=1))
+    before_pairs = {
+        (r["employment"], r["vintage_date"])
+        for r in before.iter_rows(named=True)
+        if (r["revision"], r["benchmark_revision"]) == (2, 1)
+    }
+    assert before_pairs == {(103.0, get_ces_vintage_date(date(2018, 1, 12), 0))}
+    # Prints survive the as_of gate.
+    assert before.filter(pl.col("benchmark_revision") == 0).height == 3
+
+    # as_of on the Jan-2019 release date: both (2,1) rows present.
+    after = build_ces_panel(tmp_path, as_of=jan2019_release)
+    after_pairs = {
+        (r["employment"], r["vintage_date"])
+        for r in after.iter_rows(named=True)
+        if (r["revision"], r["benchmark_revision"]) == (2, 1)
+    }
+    assert after_pairs == {
+        (103.0, get_ces_vintage_date(date(2018, 1, 12), 0)),
+        (105.0, jan2019_release),
+    }
 
 
 def keyed_vintage(df: pl.DataFrame, rev: int, bmr: int) -> date:
@@ -140,45 +219,60 @@ def keyed_vintage(df: pl.DataFrame, rev: int, bmr: int) -> date:
 
 def test_synthetic_ignores_sa_and_pre_2017(tmp_path):
     """SA files are ignored; ref_date < 2017-01-12 is dropped."""
-    vintages = [(2016, m) for m in range(11, 13)] + [(2017, m) for m in range(1, 6)]
+    # 2016-12 prints + the 2017 benchmark vintage (2018,1) re-stating both.
+    vintages = (
+        [(2016, m) for m in range(11, 13)]
+        + [(2017, m) for m in range(1, 13)]
+        + [(2018, 1)]
+    )
+    n = len(vintages)
     ref_months = [(2016, 12), (2017, 1)]
-    cells = {
-        (2016, 12): [50.0, 51.0, 52.0, 53.0, 54.0, 55.0, 56.0],
-        (2017, 1): [None, None, 100.0, 101.0, 102.0, 103.0, 104.0],
-    }
+    # 2016-12 column: rev0/1/2 start at the (2016,12) vintage row (index 1).
+    col_2016_12 = [None, 50.0, 51.0, 52.0] + [None] * (n - 5) + [54.0]
+    # 2017-01 column: rev0/1/2 start at the (2017,1) vintage row (index 2).
+    col_2017_01 = [None, None, 100.0, 101.0, 102.0] + [None] * (n - 6) + [104.0]
+    cells = {(2016, 12): col_2016_12, (2017, 1): col_2017_01}
     _write_triangle(tmp_path, "000000", vintages=vintages, ref_months=ref_months, cells=cells)
     # An SA file for the same code must be ignored entirely.
     _write_triangle(
         tmp_path, "000000", vintages=vintages, ref_months=ref_months, cells=cells, sa=True
     )
 
-    out = build_ces_panel(tmp_path)
+    out = build_ces_panel(tmp_path, as_of=date(2026, 1, 1))
 
     # Only the 2017-01 ref-month survives the 2017+ coverage filter.
     assert set(out["ref_date"].unique().to_list()) == {date(2017, 1, 12)}
-    keyed = {
+    prints = {
         (r["revision"], r["benchmark_revision"]): r["employment"]
         for r in out.iter_rows(named=True)
+        if r["benchmark_revision"] == 0
     }
-    assert keyed[(0, 0)] == 100.0
-    assert keyed[(1, 0)] == 101.0
-    assert keyed[(2, 0)] == 102.0
-    assert keyed[(2, 1)] == 104.0
+    assert prints[(0, 0)] == 100.0
+    assert prints[(1, 0)] == 101.0
+    assert prints[(2, 0)] == 102.0
+    pairs = {
+        (r["employment"], r["vintage_date"])
+        for r in out.iter_rows(named=True)
+        if (r["revision"], r["benchmark_revision"]) == (2, 1)
+    }
+    assert pairs == {(104.0, get_ces_vintage_date(date(2018, 1, 12), 0))}
 
 
 def test_frontier_benchmark_with_future_vintage_dropped(tmp_path):
-    """A (2,1) row whose Jan-Y+1 benchmark has not published is dropped.
+    """A (2,1) row whose benchmark release post-dates ``as_of`` is dropped.
 
     The first-basis (0,0)/(1,0)/(2,0) prints for that ref-month survive.
     """
-    # A 2099 ref-month: its annual benchmark (Jan-2100) is far in the future,
-    # so the (2,1) date is a lag approximation and must be filtered out.
-    vintages = [(2099, m) for m in range(1, 6)]
+    # A 2099 ref-month: its annual benchmark (Jan-2100) post-dates the fixed
+    # as_of, so the (2,1) row must be filtered out while the prints survive.
+    vintages = [(2099, m) for m in range(1, 13)] + [(2100, 1)]
+    n = len(vintages)
     ref_months = [(2099, 1)]
-    cells = {(2099, 1): [100.0, 101.0, 102.0, 103.0, 104.0]}
+    col = [100.0, 101.0, 102.0] + [None] * (n - 4) + [104.0]
+    cells = {(2099, 1): col}
     _write_triangle(tmp_path, "000000", vintages=vintages, ref_months=ref_months, cells=cells)
 
-    out = build_ces_panel(tmp_path)
+    out = build_ces_panel(tmp_path, as_of=date(2026, 1, 1))
 
     keys = {
         (r["revision"], r["benchmark_revision"]) for r in out.iter_rows(named=True)
@@ -186,7 +280,7 @@ def test_frontier_benchmark_with_future_vintage_dropped(tmp_path):
     assert (0, 0) in keys
     assert (1, 0) in keys
     assert (2, 0) in keys
-    assert (2, 1) not in keys  # future benchmark publication → dropped
+    assert (2, 1) not in keys  # benchmark release after as_of → dropped
 
 
 # --- 2. Taxonomy mapping --------------------------------------------------
@@ -250,24 +344,36 @@ def test_taxonomy_drops_government_and_total_services(tmp_path):
 )
 def test_local_cesvinall_total_nonfarm_anchors():
     """Known ``00`` NSA anchors for ref_date 2023-06-12 from the real triangle."""
-    out = build_ces_panel(_CESVINALL)
+    # Fixed as_of past both benchmark releases so the (2,1) set is deterministic.
+    out = build_ces_panel(_CESVINALL, as_of=date(2026, 1, 1))
 
     jun23 = out.filter(
         (pl.col("industry_code") == "00") & (pl.col("ref_date") == date(2023, 6, 12))
     )
-    keyed = {
+    prints = {
         (r["revision"], r["benchmark_revision"]): r["employment"]
         for r in jun23.iter_rows(named=True)
+        if r["benchmark_revision"] == 0
     }
-    assert keyed[(0, 0)] == 156963.0
-    assert keyed[(1, 0)] == 156945.0
-    assert keyed[(2, 0)] == 156905.0
-    assert keyed[(2, 1)] == 156701.0
+    assert prints[(0, 0)] == 156963.0
+    assert prints[(1, 0)] == 156945.0
+    assert prints[(2, 0)] == 156905.0
 
-    # Vintage dates are real (fixed, past) BLS calendar dates — regression-guard
-    # the day-12 calendar hit and the Jan-Y+1 (2,1) benchmark derivation.
+    # Per-benchmark (2,1) rows: value ↔ benchmark-release date pairs.
+    #   2023 benchmark (Jan-2024 release, 2024-02-02): 156842
+    #   2024 benchmark (Jan-2025 release, 2025-02-07): 156701
+    pairs = {
+        (r["employment"], r["vintage_date"])
+        for r in jun23.iter_rows(named=True)
+        if (r["revision"], r["benchmark_revision"]) == (2, 1)
+    }
+    assert pairs == {
+        (156842.0, date(2024, 2, 2)),
+        (156701.0, date(2025, 2, 7)),
+    }
+
+    # First-print vintage date is a real (fixed, past) BLS calendar date.
     assert keyed_vintage(jun23, 0, 0) == date(2023, 7, 7)  # real Friday, not lag-approx
-    assert keyed_vintage(jun23, 2, 1) == date(2024, 2, 2)  # Jan-2024 first-print date
 
     # Anchor taxonomy + null size class on the real data too.
     assert (jun23["industry_type"] == "total").all()

@@ -17,18 +17,25 @@ Emitted ``(revision, benchmark_revision)`` per ref-month
 - ``(0,0)`` / ``(1,0)`` / ``(2,0)`` — the first three non-null values down the
   column (first print, second, third), all on the current annual-benchmark
   basis at the time (``benchmark_revision=0``). These are the k=0,1,2 diagonals.
-- ``(2,1)`` — the **latest** value in the column: one row per (industry,
-  ref-month), the current annual-benchmark basis. Only this single latest value
-  is emitted (no per-benchmark history, by design).
+- ``(2,1)`` — **one row per distinct annual-benchmark basis**. Walking the
+  ``(Y, 1)`` January-data vintage rows (``Y = ref_year+1, ref_year+2, …`` up to
+  the latest release in the triangle), a ``(2,1)`` row is emitted for each ``Y``
+  whose restated cell differs from the previously emitted benchmark value (the
+  first non-null one is always emitted; later benchmarks that leave the month
+  unchanged are skipped). Both the value and the date come from the **same**
+  ``(Y, 1)`` benchmark release, so each row is internally consistent and
+  lookahead-free.
 
 Vintage dates come from
 :func:`nfp_lookups.revision_schedules.get_ces_vintage_date`, keyed on the day-12
-``ref_date`` so the exact BLS calendar is hit. The ``(2,1)`` benchmark date uses
-the package convention that the annual benchmark for ref-year ``Y`` publishes
-with the January-``Y+1`` first print, i.e.
-``get_ces_vintage_date(date(ref_year + 1, 1, 12), 0)`` — identical to the
+``ref_date`` so the exact BLS calendar is hit. Each ``(2,1)`` benchmark date
+uses the package convention that the annual benchmark for ref-year ``Y-1``
+publishes with the January-``Y`` first print, i.e.
+``get_ces_vintage_date(date(Y, 1, 12), 0)`` — the same convention as the
 ``benchmark_revision=1`` rows produced by
-:func:`nfp_ingest.release_dates.vintage_dates.build_vintage_dates`.
+:func:`nfp_ingest.release_dates.vintage_dates.build_vintage_dates`. A frontier
+``as_of`` cutoff drops ``(2,1)`` rows whose benchmark release has not yet
+happened.
 
 Industry taxonomy
 -----------------
@@ -124,10 +131,19 @@ def _diagonals(tri: pl.DataFrame) -> pl.DataFrame:
     Returns
     -------
     pl.DataFrame
-        One row per ``(ref_date, revision, benchmark_revision)`` carrying
-        ``employment`` (thousands). For each ref-month column it yields the
-        first three non-null values as ``(0,0)``/``(1,0)``/``(2,0)`` and the
-        last non-null value as ``(2,1)``.
+        One row per emitted ``(ref_date, revision, benchmark_revision,
+        bench_year)`` carrying ``employment`` (thousands). For each ref-month
+        column it yields the first three non-null values as
+        ``(0,0)``/``(1,0)``/``(2,0)`` (``bench_year=0``, a join-key sentinel —
+        these prints don't depend on a benchmark year), plus one ``(2,1)`` row
+        **per distinct annual-benchmark basis**: walking the ``(Y, 1)``
+        January-data vintage rows for ``Y = ref_year+1, …``, a row is emitted
+        for each ``Y`` whose cell differs from the previously emitted benchmark
+        value (always the first such ``Y``). ``bench_year`` carries ``Y`` so
+        each ``(2,1)`` row gets its own benchmark ``vintage_date`` downstream.
+        ``bench_year`` is a non-null ``Int32`` throughout (``0`` for bmr=0) so
+        it can serve as a join key — Polars left-joins treat null keys as
+        non-matching, which would null out the print vintage dates.
     """
     vintage_year = tri["year"].to_list()
     vintage_month = tri["month"].to_list()
@@ -136,11 +152,14 @@ def _diagonals(tri: pl.DataFrame) -> pl.DataFrame:
         (y, m): i
         for i, (y, m) in enumerate(zip(vintage_year, vintage_month, strict=True))
     }
+    # Latest release year present in the triangle bounds the benchmark walk.
+    max_vintage_year = max(vintage_year)
 
     ref_dates: list[date] = []
     revisions: list[int] = []
     bmrs: list[int] = []
     values: list[float] = []
+    bench_years: list[int] = []
 
     for col in tri.columns:
         if col in ("year", "month"):
@@ -175,17 +194,29 @@ def _diagonals(tri: pl.DataFrame) -> pl.DataFrame:
             revisions.append(k)
             bmrs.append(0)
             values.append(float(v))
+            bench_years.append(0)  # sentinel: prints carry no benchmark year
 
-        # Latest non-null value in the column → (revision=2, benchmark_revision=1).
-        latest: float | None = None
-        for v in column[start:]:
-            if v is not None:
-                latest = float(v)
-        if latest is not None:
+        # One (2,1) row per distinct benchmark basis: walk the (Y, 1)
+        # January-data vintage rows for Y = ref_year+1, …, emitting whenever
+        # the restated value differs from the previously emitted benchmark
+        # value (always emitting the first non-null one).
+        prev_bench: float | None = None
+        for y in range(ref_year + 1, max_vintage_year + 1):
+            row = vintage_idx.get((y, 1))
+            if row is None:
+                continue
+            v = column[row]
+            if v is None:
+                continue
+            v = float(v)
+            if prev_bench is not None and v == prev_bench:
+                continue
             ref_dates.append(ref_date)
             revisions.append(2)
             bmrs.append(1)
-            values.append(latest)
+            values.append(v)
+            bench_years.append(y)
+            prev_bench = v
 
     return pl.DataFrame(
         {
@@ -193,38 +224,45 @@ def _diagonals(tri: pl.DataFrame) -> pl.DataFrame:
             "revision": revisions,
             "benchmark_revision": bmrs,
             "employment": values,
+            "bench_year": bench_years,
         },
         schema={
             "ref_date": pl.Date,
             "revision": pl.UInt8,
             "benchmark_revision": pl.UInt8,
             "employment": pl.Float64,
+            "bench_year": pl.Int32,
         },
     )
 
 
 def _vintage_dates(combos: pl.DataFrame) -> pl.DataFrame:
-    """Map distinct ``(ref_date, revision, benchmark_revision)`` to vintage dates.
+    """Map distinct ``(ref_date, revision, benchmark_revision, bench_year)`` to dates.
 
     ``benchmark_revision=0`` uses ``get_ces_vintage_date(ref_date, revision)``;
-    ``benchmark_revision=1`` uses the January-``Y+1`` first-print date (the
-    annual-benchmark publication convention).
+    ``benchmark_revision=1`` uses the January-``bench_year`` first-print date —
+    the release that published the ``bench_year-1`` annual benchmark. Keying on
+    ``bench_year`` (rather than a single ``ref.year + 1``) is what gives each
+    per-benchmark ``(2,1)`` row of one ref-month its own, consistent vintage
+    date instead of collapsing them to a lookahead-prone first-benchmark date.
     """
 
     def _resolve(s: dict) -> date:
         ref: date = s["ref_date"]
         if s["benchmark_revision"] == 1:
-            return get_ces_vintage_date(date(ref.year + 1, 1, 12), 0)
+            return get_ces_vintage_date(date(int(s["bench_year"]), 1, 12), 0)
         return get_ces_vintage_date(ref, int(s["revision"]))
 
     return combos.with_columns(
-        vintage_date=pl.struct("ref_date", "revision", "benchmark_revision").map_elements(
-            _resolve, return_dtype=pl.Date
-        )
+        vintage_date=pl.struct(
+            "ref_date", "revision", "benchmark_revision", "bench_year"
+        ).map_elements(_resolve, return_dtype=pl.Date)
     )
 
 
-def build_ces_panel(cesvinall_dir: Path | None = None) -> pl.DataFrame:
+def build_ces_panel(
+    cesvinall_dir: Path | None = None, *, as_of: date | None = None
+) -> pl.DataFrame:
     """Build CES NSA vintage-store rows from the triangular ``cesvinall`` CSVs.
 
     Parameters
@@ -232,6 +270,12 @@ def build_ces_panel(cesvinall_dir: Path | None = None) -> pl.DataFrame:
     cesvinall_dir : Path or None
         Directory holding ``tri_{code6}_NSA.csv`` files. Defaults to
         :data:`CESVINALL_DIR` (``DOWNLOADS_DIR/ces/cesvinall``).
+    as_of : datetime.date or None
+        Frontier cutoff for benchmark ``(2,1)`` rows: only those whose
+        benchmark ``vintage_date`` is ``<= as_of`` are retained (the first-basis
+        ``(0,0)``/``(1,0)``/``(2,0)`` prints are always kept). Defaults to
+        ``date.today()`` evaluated once at entry; passing an explicit ``as_of``
+        makes the result deterministic and unit-testable.
 
     Returns
     -------
@@ -239,14 +283,18 @@ def build_ces_panel(cesvinall_dir: Path | None = None) -> pl.DataFrame:
         ``VINTAGE_STORE_SCHEMA``-conformant rows (partition cols carried as
         plain ``source``/``seasonally_adjusted`` columns): NSA, ``source='ces'``,
         national geography, null size class, for ref_date ≥ 2017-01-12. Each
-        retained industry/ref-month yields ``(0,0)``/``(1,0)``/``(2,0)`` plus a
-        single latest ``(2,1)`` row.
+        retained industry/ref-month yields ``(0,0)``/``(1,0)``/``(2,0)`` plus one
+        ``(2,1)`` row **per distinct annual-benchmark basis** (value and date
+        both drawn from the same ``(Y, 1)`` benchmark release — no lookahead).
 
     Raises
     ------
     FileNotFoundError
         If *cesvinall_dir* does not exist.
     """
+    if as_of is None:
+        as_of = date.today()
+
     path = cesvinall_dir or CESVINALL_DIR
     if not path.exists():
         raise FileNotFoundError(f"cesvinall directory not found: {path}")
@@ -293,21 +341,26 @@ def build_ces_panel(cesvinall_dir: Path | None = None) -> pl.DataFrame:
 
     allrows = pl.concat(parts)
 
+    # ``bench_year`` distinguishes per-benchmark (2,1) rows of one ref-month, so
+    # it must be part of the dedup/join key — otherwise distinct benchmark bases
+    # collapse to one combo and every (2,1) row is stamped with the first
+    # benchmark's date (a lookahead mis-stamp).
     vdates = _vintage_dates(
-        allrows.select("ref_date", "revision", "benchmark_revision").unique()
+        allrows.select(
+            "ref_date", "revision", "benchmark_revision", "bench_year"
+        ).unique()
     )
     result = allrows.join(
-        vdates, on=["ref_date", "revision", "benchmark_revision"], how="left"
+        vdates,
+        on=["ref_date", "revision", "benchmark_revision", "bench_year"],
+        how="left",
     )
 
-    # Drop benchmark rows whose annual-benchmark publication has not happened
-    # yet (the Jan-Y+1 date is a future lag approximation) — mirrors the
-    # ``vintage_date <= today`` filter in ``build_vintage_dates`` and keeps the
-    # frontier lookahead-safe. The first-basis (0,0)/(1,0)/(2,0) rows are real
-    # past prints and are retained.
-    today = date.today()
+    # Drop benchmark rows whose annual-benchmark publication post-dates ``as_of``
+    # (not yet released as of the frontier) — keeps the frontier lookahead-safe.
+    # The first-basis (0,0)/(1,0)/(2,0) rows are real past prints and retained.
     result = result.filter(
-        (pl.col("benchmark_revision") == 0) | (pl.col("vintage_date") <= today)
+        (pl.col("benchmark_revision") == 0) | (pl.col("vintage_date") <= as_of)
     )
 
     return result.select(
@@ -325,4 +378,13 @@ def build_ces_panel(cesvinall_dir: Path | None = None) -> pl.DataFrame:
         size_class_code=pl.lit(None, pl.Utf8),
         source=pl.lit("ces", pl.Utf8),
         seasonally_adjusted=pl.lit(False, pl.Boolean),
-    ).sort("industry_type", "industry_code", "ref_date", "revision", "benchmark_revision")
+    ).sort(
+        "industry_type",
+        "industry_code",
+        "ref_date",
+        "revision",
+        "benchmark_revision",
+        # Per-benchmark (2,1) rows share every other sort key; vintage_date
+        # disambiguates them so output ordering is deterministic.
+        "vintage_date",
+    )
