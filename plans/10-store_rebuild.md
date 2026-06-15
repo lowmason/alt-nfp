@@ -29,6 +29,38 @@ via `nfp_lookups.paths` (`storage_options_for`, `is_canonical_store`).
 
 ---
 
+## Status (2026-06-15)
+
+Branch `claude/compassionate-johnson-u1m8ou`. Pure-code, locally-verifiable tasks
+done and pushed; data-dependent tasks (BLS network / store creds) await the
+maintainer's local runs.
+
+| Task | State | Notes |
+|---|---|---|
+| **T0** Acquisition spike | ⏳ **maintainer** | Needs BLS egress (blocked in the cloud env). Walkthrough handed off; surfaced two acquire gaps (below). |
+| **T1** Schema & grammar | ✅ **done** (`bc932ba`) | ownership axis, `national` retired, taxonomy + remap, `55` two-level, schema dedup (IND-XC-3), tolerant reader. |
+| **T2** CES builder | ⛔ **blocked on T0** | `(2,1)`-source question (bulk flat file vs triangular) is a T0 unknown. |
+| **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
+| **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
+| **T5** Build orchestration | ⛔ **blocked on T2** | Canonical guard already exists (`build_store.is_canonical_store`). Acquire fix owed (below). |
+| **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
+| **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
+| **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
+
+Full non-network suite green (513 passed; only the 2 pre-existing `claims`/`jolts`
+indicator env-failures, unrelated to the rebuild). `ruff check .` clean.
+
+**Acquire gaps for T0/T5 to confirm + fix** (found reading `nfp_download.bls.bulk`):
+- `download_qcew_bulk._WANTED_AGGLVL = {10,11,14,15,50,51,54,55}` **excludes
+  agglvl 13** (supersector pulls `1012`–`1027`, used by T3) **and 16** (Logging
+  `1133`); `_KEEP_COLUMNS` **omits `size_code`** (used by T4). Rebuild acquire must
+  widen the filter to `{13,16,<size-agglvls>}` and keep `size_code`.
+- QCEW size data is **inside** the `{year}_qtrly_singlefile.zip` (not a separate
+  file), Q1 only, at size agglvl codes the spike must enumerate.
+
+---
+
+
 ## POLICY (rebuild-specific — replaces the plans/8-9 frozen-reference parity)
 
 1. **Scratch-only builds (hard).** Every build writes to
@@ -68,22 +100,27 @@ Three unknowns can invalidate later tasks; resolve them first, read-only.
 
 ---
 
-## T1 — Schema & grammar (`nfp-lookups`)  `[depends: T0]`
+## T1 — Schema & grammar (`nfp-lookups`)  `[depends: T0]`  — ✅ DONE (`bc932ba`)
 
-- [ ] Add `ownership` (str) to `VINTAGE_STORE_SCHEMA`; values `{private, total}`
+- [x] Add `ownership` (str) to `VINTAGE_STORE_SCHEMA`; values `{private, total}`
   (reserve `government`, not yet written).
-- [ ] Retire `industry_type='national'`; set the enum to
+- [x] Retire `industry_type='national'`; set the enum to
   `{total, domain, supersector, sector}`. Encode the §3 taxonomy table
   (`industry_type × ownership → code`) as the canonical mapping, including the
   `00`=`(total,total)` anchor and `05`=`(total,private)` root.
-- [ ] Add an **old→new `industry_type` remap** helper for the ≤2023 history join
+- [x] Add an **old→new `industry_type` remap** helper for the ≤2023 history join
   (`national/00`→`(total,total)`, `domain/05`→`(total,private)`,
   supersectors/sectors unchanged) — used by T6.
-- [ ] Update the series-ID grammar / hierarchy helpers; ensure **code `55`** is
+- [x] Update the series-ID grammar / hierarchy helpers; ensure **code `55`** is
   representable at both `supersector` and `sector` levels (the cross-level
   collision the keys must survive).
-- [ ] **Acceptance:** unit tests for the taxonomy map, the remap, and the `55`
+- [x] **Acceptance:** unit tests for the taxonomy map, the remap, and the `55`
   two-level representation; `ruff` clean; no upward imports.
+  → `nfp_lookups.{INDUSTRY_TAXONOMY, ownership_for, codes_for,
+  industry_types_for_code, remap_industry_type}`; tests in
+  `test_industry_taxonomy.py` (21). Also deduped the duplicate
+  `VINTAGE_STORE_SCHEMA` (ingest imports from lookups; IND-XC-3) and made
+  `read_vintage_store` tolerant of legacy stores (`missing_columns="insert"`).
 
 ---
 
@@ -104,36 +141,43 @@ Implement spec §4.1's provenance source table.
 
 ---
 
-## T3 — QCEW crosswalk + monthly explode (`nfp-ingest`)  `[depends: T1]`
+## T3 — QCEW crosswalk + monthly explode (`nfp-ingest`)  `[depends: T1]`  — ✅ DONE (`f399cc5`)
 
-- [ ] Crosswalk per `ces_qcew_industry.md`: `own_code=='5'`→`ownership='private'`,
+- [x] Crosswalk per `ces_qcew_industry.md`: `own_code=='5'`→`ownership='private'`,
   `area_fips=='US000'`, aggregate `(industry_code, agglvl)` cells into the CES
   private codes (§3). Apply the structural sums (`10`=`21`+Logging `1133`;
   Durable/Nondurable `31`/`32`). Drop raw-NAICS provenance.
-- [ ] Explode `month1/2/3_emplvl` → monthly rows, ÷1000. Sum the measure, never a
+- [x] Explode `month1/2/3_emplvl` → monthly rows, ÷1000. Sum the measure, never a
   rate. **Per-vintage aggregation:** never cross a QCEW `(rev, vintage_date)`.
-- [ ] `vintage_date` via `revision_schedules.get_qcew_vintage_date`; depth
+- [x] `vintage_date` via `revision_schedules.get_qcew_vintage_date`; depth
   Q1=4/Q2=3/Q3=2/Q4=1; `bmr=0` always.
-- [ ] **Acceptance:** tests for the crosswalk sums, the ÷1000 units, per-vintage
+- [x] **Acceptance:** tests for the crosswalk sums, the ÷1000 units, per-vintage
   isolation, and additive nesting (`05 = 06 + 08`, supersectors sum, sectors sum)
   on a synthetic frame.
+  → `nfp_ingest.qcew_crosswalk.build_qcew_panel`; pull tables in `nfp_lookups`
+  (`QCEW_SECTOR_PULLS/SUPERSECTOR/DOMAIN/AGGLVL/OWN_PRIVATE/AREA_NATIONAL`);
+  `test_qcew_crosswalk.py` (10). Supersectors use the agglvl-13 direct pull
+  (`10` sums its sectors); domains/`05` roll up from supersectors.
 
 ---
 
-## T4 — Size-class cross-product (`nfp-ingest`)  `[depends: T1, T3]`
+## T4 — Size-class cross-product (`nfp-ingest`)  `[depends: T1, T3]`  — ✅ DONE (`a28de4e`)
 
 Spec §8.
 
-- [ ] Q1 only (ref-month ∈ {01,02,03}): ingest native `size_code` 1–9 (`large`),
+- [x] Q1 only (ref-month ∈ {01,02,03}): ingest native `size_code` 1–9 (`large`),
   derive `small`/`medium` via `size_class_members` rollup, `total`(`'0'`) by
   summing natives. Never join `small`/`medium` to raw QCEW.
-- [ ] Cross-product `industry_code × size_class_type`; rows inherit the parent's
+- [x] Cross-product `industry_code × size_class_type`; rows inherit the parent's
   `(rev, vintage_date)` and `ownership='private'`.
-- [ ] On Q1 emit the all-sizes level as `total`/`'0'` **only** — no null-size row
+- [x] On Q1 emit the all-sizes level as `total`/`'0'` **only** — no null-size row
   (avoids the §7 `IS NULL OR size_class_code='0'` double-count). Null
   `size_class_*` for CES + QCEW Q2/Q3/Q4.
-- [ ] **Acceptance:** tests for the rollup, the Q1-only rule, the no-null-row
+- [x] **Acceptance:** tests for the rollup, the Q1-only rule, the no-null-row
   invariant, and the all-sizes selector returning one row per Q1 month.
+  → `nfp_ingest.size_class.{build_size_class_panel, all_sizes_predicate}`; scheme
+  in `nfp_lookups.size_classes`; `size_class_{type,code}` added to
+  `VINTAGE_STORE_SCHEMA`; tests `test_size_classes.py` (7) + `test_size_class.py` (18).
 
 ---
 
@@ -141,8 +185,14 @@ Spec §8.
 
 - [ ] Wire acquire → CES (T2) → QCEW (T3) → size-class (T4) → write, all to
   `NFP_STORE_URI=s3://alt-nfp/store-rebuild`. 2017+.
+  - **Acquire fix owed:** widen `download_qcew_bulk._WANTED_AGGLVL` to add agglvl
+    `13`/`16` + the QCEW size agglvls, and keep `size_code` in `_KEEP_COLUMNS`
+    (current filter strips all three). Confirm exact size agglvls via T0.
+  - **Compose glue:** for Q1 use the T4 size cross-product (incl. `total`/`'0'`
+    all-sizes); for Q2–Q4 use the T3 null-size rows — do **not** also emit a Q1
+    null-size row (§7). This glue is T0-independent and unit-testable now.
 - [ ] Enforce the `is_canonical_store` guard at the write boundary (refuse `…/store`
-  without `--allow-canonical`).
+  without `--allow-canonical`). *(Guard already lives in `build_store`.)*
 - [ ] **Acceptance:** a dry-run / small-window build to scratch succeeds; the guard
   test proves a canonical target is refused.
 
@@ -205,3 +255,7 @@ births-deaths. See spec §11.
   reconstruct-and-validate scope (sectors stay best-effort, per §10).
 - The reconstruction-accuracy tolerance (T6) is a judgement call with no
   reference number — set it from observed benchmark-month residuals, document it.
+- **Confirmed (reading `nfp_download.bls.bulk`):** the current QCEW acquire drops
+  the agglvl `13`/`16` rows and `size_code` that T3/T4 consume — a small acquire
+  fix (T5), but it means the existing `qcew_bulk.parquet` cannot feed the rebuild
+  until the filter is widened. T0 pins the exact size agglvl codes.
