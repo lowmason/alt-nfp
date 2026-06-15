@@ -19,12 +19,12 @@ Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network 
 | Task | State | Notes |
 |---|---|---|
 | **T0** Acquisition spike | ✅ **resolved** (local, 2026-06-15) | 3 unknowns resolved — [`store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md). `cesvinall` reconstructs `(rev,bmr)` (verified vs store); QCEW size + levels via API slices. |
-| **T0.5** QCEW vintaging | 🟡 **de-risked** | Per-industry QCEW vintages aren't on the live API, but the **reference already reconstructs them** (`alt_nfp/…/nfp_ingest/qcew.py` → `data/intermediate/qcew_revisions.parquet`, 554k per-industry vintage rows, store-schema). T0.5 = **port/verify** that method (+ `ownership`), not research. |
+| **T0.5** QCEW vintaging | ✅ **resolved (A)** | Per-industry QCEW has **no** published revision history — rev-0 only (verified: only national `00` has rev 0–4; `qcew-revisions.csv` & the BLS revisions page are total-level). **Decision A** (2026-06-15): store rev-0, carry revision uncertainty model-side (`QCEW_REVISIONS` noise). No reconstruction. |
 | **T1** Schema & grammar | ✅ **done** (`bc932ba`) | ownership axis, `national` retired, taxonomy + remap, `55` two-level, schema dedup (IND-XC-3), tolerant reader. |
 | **T2** CES builder | 🟢 **unblocked** | T0 resolved: `cesvinall` reconstructs all `(rev,bmr)`; build `(2,1)` **per benchmark** (one row per Feb re-basing), not the old store's collapsed single row. |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
 | **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
-| **T5** Build orchestration | ⛔ **blocked on T2 + T0.5** | Canonical guard exists. Acquire simplified to targeted API slices (area per-qtr + size per-Q1) — see T0 findings; QCEW vintaging (T0.5) gates the QCEW path. |
+| **T5** Build orchestration | ⛔ **blocked on T2** | Canonical guard exists. Acquire = targeted API slices (area per-qtr + size per-Q1; T0). QCEW = current rev-0 → T3 crosswalk (T0.5 resolved A — no vintage reconstruction). |
 | **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
 | **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
 | **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
@@ -58,23 +58,27 @@ All three unknowns resolved (read-only: cached `cesvinall` + live QCEW API slice
 
 **Bonus:** the QCEW acquire can use targeted API slices (US000 area per-qtr carries agglvl 13/16; size per-Q1) instead of the 280 MB singlefiles.
 
-## T0.5 — QCEW historical vintaging (new gate, surfaced by T0) `[blocking for QCEW build]`
+## T0.5 — QCEW historical vintaging — ✅ RESOLVED (decision A, 2026-06-15)
 
-The live QCEW API is current-only and `qcew-revisions.csv` is total-level only, so
-per-industry rev-0..4 history can't be pulled directly. **But the reference already
-solved this:** `~/Projects/alt_nfp/packages/nfp-ingest/src/nfp_ingest/qcew.py`
-reconstructs per-industry vintages, and the built artifact is present in v2 at
-`data/intermediate/qcew_revisions.parquet` (554k rows; `source/geographic/
-industry_type/industry_code/ref_date/vintage_date/revision/benchmark_revision/
-employment`; 37 CES industry codes). Option (d) (saved per-release captures) is
-**out** — neither repo has them.
+Investigation outcome (corrects the earlier "reference reconstructs per-industry
+vintages" read): **per-industry QCEW vintages do not exist.** BLS publishes
+revision history **only at the national total** — `qcew-revisions.csv` and the
+whole `bls.gov/cew/revisions/` page are area×field with no industry/size breakdown
+(verified by fetch), the open-data API serves current values only, and historical
+singlefiles are overwritten. In the existing store this shows up cleanly: only
+`industry_code='00'` carries rev 0–4; every per-industry private code is rev-0.
+The `qcew_vintages.parquet` / `load_qcew_vintages` / `ingest_qcew` path that would
+have held per-industry revisions is a **dead stub** — nothing writes it, no live
+callers. The live pipeline (`nfp_vintages/processing/qcew_bulk.py`) makes
+per-industry rev-0 (bulk) + national-`00` rev 0–4 (revisions CSV).
 
--   [ ] **Port + verify** the reference's QCEW vintage reconstruction into the v2
-    chain: confirm its method (read `alt_nfp/…/qcew.py`), reproduce the
-    `qcew_revisions.parquet`-shaped per-industry vintage frame, then feed it to
-    T3's `build_qcew_panel` (which expects a `revision`-tagged `raw`). Add the
-    `ownership='private'` tag and re-crosswalk to the new taxonomy. See
-    `store_rebuild_acquire.md` "OPEN RISK".
+-   [x] **Decision A** — store per-industry QCEW as a single `revision=0` row
+    (current value); carry revision uncertainty **model-side** via the
+    `QCEW_REVISIONS` noise schedule. No per-industry reconstruction.
+    (Rejected **B**: proportional synthesis from total-level revision ratios —
+    manufactures data BLS doesn't publish, assumes uniform per-industry revision.)
+    Spec §5 corrected to match. T5's QCEW path is therefore just **acquire current
+    (API slices) → T3 crosswalk → rev-0**; see `store_rebuild_acquire.md`.
 
 ------------------------------------------------------------------------
 

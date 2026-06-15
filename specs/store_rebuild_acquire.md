@@ -71,30 +71,36 @@ acquire risk (QCEW vintaging) that gates the QCEW build.
   the durable/nondurable (`31`/`32`) split. Spec already defers vintage-aware
   crosswalks.
 
-## ⚠ OPEN RISK (new) — QCEW historical per-industry vintaging
+## QCEW per-industry vintaging — ✅ RESOLVED (T0.5, decision A, 2026-06-15)
 
-This is the real gate on the QCEW build, and it is *not* one of T0's three listed
-unknowns:
+Investigated and settled. **Per-industry QCEW vintages do not exist** as a public
+source:
 
-- T3's `build_qcew_panel(raw)` expects `raw` **already tagged with a `revision`
-  column** — it does not synthesize revisions.
-- The live QCEW API serves **current (latest-revision) data only.**
-  `qcew-revisions.csv` gives Initial→Final revision values but **only at the
-  total US/state level**, not per industry.
-- So per-industry **rev-0..4 history (2017+) is not re-downloadable from scratch**
-  via the API. The existing store's QCEW vintage structure is also murky on quick
-  inspection (national `05` Q1-2017 shows only rev-0; unfiltered `00` shows
-  rev 0–4 across geographies) and is of unverified provenance.
-- **Decision needed before the QCEW build (T5):** how to source per-industry QCEW
-  vintages —
-  (a) reuse the existing store's QCEW captures (re-crosswalk, don't rebuild
-  history);
-  (b) reconstruct vintages by applying the total-level revision ratios
-  (`qcew-revisions.csv`) to current per-industry levels;
-  (c) capture-forward only (rev accumulates over future releases; history
-  approximate);
-  (d) check `~/Projects/alt_nfp` for saved per-release singlefile captures.
-  Recommend a short dedicated spike (call it **T0.5**) before T5's QCEW path.
+- BLS publishes QCEW revision history **only at the national total** —
+  `qcew-revisions.csv` and the entire `bls.gov/cew/revisions/` page are area×field
+  with no industry/size breakdown (verified by fetching the page: the sole data
+  file is the total-level CSV; "industry" mentions are nav chrome). The open-data
+  API serves current values only; historical singlefiles are overwritten.
+- Confirmed in the store: only `industry_code='00'` carries rev 0–4; **every
+  per-industry private code is rev-0** (`n_rev=1`). The pipeline hardcodes
+  `industry_code='00'` for the revisions CSV and tags all bulk per-industry rows
+  `revision=0`.
+- The `qcew_vintages.parquet` / `load_qcew_vintages` / `ingest_qcew` path (the
+  `QCEW_VINTAGE_SCHEMA` mechanism that *would* hold per-industry revisions) is a
+  **dead stub** — nothing writes it, no live callers; the file exists in neither
+  repo. The live QCEW data comes from `nfp_vintages/processing/qcew_bulk.py`
+  (per-industry rev-0 + national-`00` rev 0–4).
+
+**Decision A:** store per-industry QCEW as a single `revision=0` row (current
+value); carry revision uncertainty **model-side** via the `QCEW_REVISIONS` noise
+schedule (M3/M12 multipliers; nominal depth Q1=4/Q2=3/Q3=2/Q4=1). No per-industry
+reconstruction. Trade-off accepted: the rev-0 row holds a benchmarked level tagged
+at its initial publication date (a small as-of lookahead). **Rejected B**
+(proportional synthesis from total-level ratios — manufactures unpublished data,
+assumes uniform per-industry revision). Spec §5 corrected to match.
+
+So T5's QCEW path is simply **acquire current private slices (API) → T3 crosswalk
+→ rev-0 rows** — no vintage-reconstruction step, no separate gate.
 
 ## Go/no-go
 
@@ -102,5 +108,5 @@ unknowns:
 |---|---|
 | **T2** CES builder | **GO** — `cesvinall` suffices; build per-benchmark `(2,1)` rows + correct `vintage_date`. |
 | **T4** size-class | **GO** — source = QCEW size endpoint (Q1, national=private). |
-| **T5** acquire/orchestration | **GO for levels** via API slices; **QCEW vintaging (T0.5) is the gating open question** — spike first. |
+| **T5** acquire/orchestration | **GO** — API slices for levels; QCEW = current rev-0 → T3 crosswalk (T0.5 resolved A, no reconstruction). Blocked only on T2. |
 | **T6** gates | unaffected; refine the history-consistency gate for per-benchmark `(2,1)`. |

@@ -165,14 +165,23 @@ Layer-1 + `panel_adapter` Layer-2) works unchanged.
   (stamps misalign across the months being differenced,
   `ces_growth_convention.md` §4c). The store commits to neither growth form (§6);
   it stores levels.
-- **QCEW:** carries its **own** vintage structure — `revision 0-4` with
-  quarter-dependent depth (**Q1=4, Q2=3, Q3=2, Q4=1**), a distinct `vintage_date`
-  per `(ref_date, revision)`, and `benchmark_revision = 0` always (QCEW has no
-  annual benchmark). The crosswalk sum **never crosses a QCEW vintage** — mixing
-  vintages inside one aggregate would corrupt the level/growth. The concrete
-  `vintage_date` value for each `(ref_date, revision)` is the QCEW quarterly
-  publication date, from `nfp_lookups.revision_schedules.get_qcew_vintage_date`
-  (exact from the calendar when available, else the lag-based approximation).
+- **QCEW — single-vintage (`revision = 0`) per industry.** BLS publishes QCEW
+  revision history **only at the national total** (`qcew-revisions.csv` is
+  area×field with no industry breakdown — verified 2026-06-15), and the open-data
+  API serves only current values, so per-industry rev-1..4 levels **do not exist
+  as a public source**. Each per-industry cell is therefore stored as a single
+  `revision = 0` row (`benchmark_revision = 0` always — QCEW has no annual
+  benchmark), `vintage_date` = the QCEW quarterly publication date for that
+  ref-quarter from `nfp_lookups.revision_schedules.get_qcew_vintage_date` (exact
+  from the calendar when available, else the lag-based approximation). The stored
+  level is the current (latest-revised) value; QCEW **revision uncertainty is
+  carried model-side** by the per-quarter noise schedule (`QCEW_REVISIONS` noise
+  multipliers; nominal depth Q1=4/Q2=3/Q3=2/Q4=1), **not** as stored revision rows
+  — a deliberate accepted trade-off (**decision A**, 2026-06-15; the per-industry
+  rev-0 row holds a benchmarked value tagged at its initial publication date, a
+  small accepted as-of lookahead). See `store_rebuild_acquire.md`. The crosswalk
+  sum still **never crosses a QCEW vintage** (here trivially one rev-0 vintage per
+  ref-quarter).
 - **Publication lag.** QCEW lands ~5–6 months after the reference quarter; the
   reconstructed series inherits QCEW's `vintage_date`, so as-of knowability is
   honored automatically. The `(2,1)` CES benchmark rows carry the February
@@ -348,8 +357,12 @@ None outstanding. Resolved this round:
 - **`00` total-nonfarm kept as a stored-not-modeled anchor** (reverses the earlier
   "no need to store 00" — needed for the nowcast-vs-actual comparison).
 - **Nested additive hierarchy** (§3, §6), NSA-required; sectors future-facing.
+- **QCEW per-industry is single-vintage (`rev=0`)** — **decision A** (2026-06-15):
+  BLS publishes no per-industry revision history, so per-industry QCEW is stored
+  rev-0 (current value) and revision uncertainty stays model-side
+  (`QCEW_REVISIONS` noise). Only the national total has rev 0–4. (Rejected: B,
+  proportional synthesis from total-level revision ratios.)
 - Size cross-product keyed on `industry_code` (§8); all-sizes selection convention
-  (§7); QCEW `vintage_date` source (§5); reconstruction-accuracy tolerance deferred
-  (§10).
+  (§7); reconstruction-accuracy tolerance deferred (§10).
 
 The spec is ready for an implementation plan.
