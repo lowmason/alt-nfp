@@ -4,21 +4,25 @@ Composes the three source panels (CES, QCEW levels, QCEW size) into one
 ``VINTAGE_STORE_SCHEMA`` frame and writes it to a **scratch** store,
 refusing the canonical ``s3://alt-nfp/store``.
 
-The acquire layer (QCEW API-slice fetchers + size NAICS→CES crosswalk) is
-**deferred** (see ``specs/store_rebuild_acquire.md``).  The two seam functions
-:func:`_acquire_qcew_levels` and :func:`_acquire_qcew_size_native` raise
-``NotImplementedError`` until a maintainer implements them.
+The acquire layer (QCEW API-slice fetchers + size NAICS→CES crosswalk) fetches
+public BLS API slices via the Chrome-impersonating client (Akamai bot defence)
+and transforms them into frames ready for :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`
+and :func:`~nfp_ingest.size_class.build_size_class_panel`.
 
-Usage (once acquire is wired)::
+Usage::
 
     uv run alt-nfp build-rebuild [--allow-canonical]
 """
 
 from __future__ import annotations
 
+import io
+import logging
+from datetime import date
 from typing import Any
 
 import polars as pl
+from nfp_lookups.industry import QCEW_AREA_NATIONAL
 from nfp_lookups.paths import (
     VINTAGE_STORE_PATH,
     is_canonical_store,
@@ -26,6 +30,12 @@ from nfp_lookups.paths import (
     storage_options_for,
 )
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
+
+logger = logging.getLogger(__name__)
+
+# First year of the rebuild scope.  The rebuild covers 2017-present so that
+# QCEW revisions pre-2017 (not needed by the model) aren't fetched.
+_REBUILD_START_YEAR: int = 2017
 
 # The 6-column series identity that uniquely identifies one industry-month
 # *independent* of the size axis, vintage, or revision.  Used as the anti-join
@@ -43,56 +53,352 @@ _SERIES_IDENTITY_KEY = [
     "ref_date",
 ]
 
+# Columns required by build_qcew_panel (nfp_ingest.qcew_crosswalk._REQUIRED_COLUMNS).
+# We select these from each raw area-slice CSV before concat.
+_QCEW_LEVELS_REQUIRED = (
+    "area_fips",
+    "own_code",
+    "industry_code",
+    "agglvl_code",
+    "year",
+    "qtr",
+    "month1_emplvl",
+    "month2_emplvl",
+    "month3_emplvl",
+    "revision",
+)
+
+# agglvl codes present in the size-endpoint files; the duplicate family
+# (61–64) carries the same industry_codes as 21–24 and would double-count.
+# Filter to 21–28 only.
+_SIZE_AGGLVL_KEEP: frozenset[str] = frozenset(str(a) for a in range(21, 29))
+
+# The +10 shift that maps size agglvl to the equivalent area agglvl understood
+# by build_qcew_panel (23→13 supersectors, 24→14 sectors, 25→15 3-digit,
+# 26→16 4-digit). Applied as a vectorised subtraction inside _size_raw_to_native.
+_SIZE_AGGLVL_OFFSET: int = 10
+
 
 # ---------------------------------------------------------------------------
-# Deferred seams (acquire layer — NOT IMPLEMENTED)
+# Thin network helpers
 # ---------------------------------------------------------------------------
+
+
+def _fetch_qcew_csv(session: Any, url: str) -> pl.DataFrame | None:
+    """GET *url* with retry; return a raw all-string DataFrame or ``None`` on 404.
+
+    Uses :func:`~nfp_download.client.get_with_retry` for exponential back-off
+    and rate-limit handling.  Returns ``None`` when the slice doesn't exist yet
+    (404) so callers can skip it cleanly.  Re-raises all other HTTP errors.
+
+    Parameters
+    ----------
+    session :
+        An open :class:`curl_cffi.requests.Session` from
+        :func:`~nfp_download.client.create_impersonating_session`.
+    url : str
+        Absolute BLS API URL.
+
+    Returns
+    -------
+    pl.DataFrame or None
+        All columns as ``Utf8`` (``infer_schema_length=0``); caller is
+        responsible for casting numeric fields.  ``None`` on HTTP 404.
+    """
+    from curl_cffi.requests.exceptions import HTTPError as CurlHTTPError
+    from nfp_download.client import get_with_retry
+
+    try:
+        r = get_with_retry(session, url)
+    except CurlHTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            logger.debug("404 — skipping %s", url)
+            return None
+        raise
+
+    return pl.read_csv(io.BytesIO(r.content), infer_schema_length=0)
+
+
+# ---------------------------------------------------------------------------
+# Levels acquire — area endpoint /api/{y}/{q}/area/US000.csv
+# ---------------------------------------------------------------------------
+
+
+def _prep_area_raw(df: pl.DataFrame) -> pl.DataFrame:
+    """Prepare a raw area-endpoint CSV slice for :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`.
+
+    Filters to private establishments (``own_code == '5'``), selects the
+    columns required by ``build_qcew_panel``, casts the three
+    ``month{1,2,3}_emplvl`` columns to ``Int64`` (the CSV is read as all-string
+    to preserve codes like ``'44-45'`` and ``'US000'``), and attaches
+    ``revision = 0`` (QCEW area-endpoint rows are revision-0 only for the
+    rebuild scope).
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Raw all-string frame from :func:`_fetch_qcew_csv`.
+
+    Returns
+    -------
+    pl.DataFrame
+        Frame with exactly :data:`_QCEW_LEVELS_REQUIRED` columns, private rows
+        only, ``month*_emplvl`` as ``Int64``, ``revision`` as ``Int64``.
+    """
+    return (
+        df.filter(pl.col("own_code") == "5")
+        .select(
+            [c for c in _QCEW_LEVELS_REQUIRED if c != "revision"]
+        )
+        .with_columns(
+            pl.col("month1_emplvl").cast(pl.Int64, strict=False),
+            pl.col("month2_emplvl").cast(pl.Int64, strict=False),
+            pl.col("month3_emplvl").cast(pl.Int64, strict=False),
+            revision=pl.lit(0, pl.Int64),
+        )
+        .select(list(_QCEW_LEVELS_REQUIRED))
+    )
 
 
 def _acquire_qcew_levels() -> pl.DataFrame:
-    """Acquire raw QCEW area-endpoint rows for crosswalk → :func:`build_qcew_panel`.
+    """Acquire raw QCEW area-endpoint rows for crosswalk → :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`.
 
-    **NOT IMPLEMENTED** — deferred to the acquire layer.
+    Fetches ``/api/{year}/{qtr}/area/US000.csv`` for every ``(year, quarter)``
+    in the rebuild scope (2017–current year, all 4 quarters) using the
+    Chrome-impersonating HTTP client required by BLS's Akamai bot defence.
+    Per-slice 404s are skipped (the current year may lack later quarters).
 
-    Fetches per-quarter slices from the QCEW API (``/api/{y}/{q}/area/US000.csv``)
-    for each (year, quarter, revision) combination and attaches ``revision`` tags.
-    See ``specs/store_rebuild_acquire.md`` for the API-slice URLs and revision
-    convention.
+    All rows are tagged ``revision=0`` (decision A: per-industry QCEW data on
+    the area endpoint is revision-0 for the rebuild scope).
 
-    Raises
-    ------
-    NotImplementedError
-        Always.  Implement this function to enable ``build-rebuild`` QCEW levels.
+    Returns
+    -------
+    pl.DataFrame
+        Concatenated raw rows ready for :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`.
+        Carries exactly :data:`_QCEW_LEVELS_REQUIRED` columns:
+        ``area_fips``, ``own_code``, ``industry_code``, ``agglvl_code``,
+        ``year``, ``qtr``, ``month{1,2,3}_emplvl`` (``Int64``), ``revision=0``.
     """
-    raise NotImplementedError(
-        "_acquire_qcew_levels is not yet implemented. "
-        "See specs/store_rebuild_acquire.md for the QCEW API-slice URLs "
-        "and agglvl-13/14/15/16 revision convention."
+    from nfp_download.client import create_impersonating_session
+
+    current_year = date.today().year
+    slices: list[pl.DataFrame] = []
+
+    with create_impersonating_session() as session:
+        for year in range(_REBUILD_START_YEAR, current_year + 1):
+            for qtr in range(1, 5):
+                url = f"https://data.bls.gov/cew/data/api/{year}/{qtr}/area/US000.csv"
+                logger.info("Fetching QCEW levels %d Q%d ...", year, qtr)
+                raw = _fetch_qcew_csv(session, url)
+                if raw is None:
+                    logger.info("  skipped (404)")
+                    continue
+                prepped = _prep_area_raw(raw)
+                logger.info("  %d rows after private filter", prepped.height)
+                slices.append(prepped)
+
+    if not slices:
+        raise RuntimeError(
+            "_acquire_qcew_levels: no QCEW area slices fetched — "
+            "check network access and BLS API availability"
+        )
+
+    return pl.concat(slices)
+
+
+# ---------------------------------------------------------------------------
+# Size acquire — size endpoint /api/{y}/1/size/{size_code}.csv
+# ---------------------------------------------------------------------------
+
+
+def _size_raw_to_native(raw_size: pl.DataFrame) -> pl.DataFrame:
+    """Transform a concatenated raw size-endpoint frame into the ``native`` format.
+
+    Takes the combined frame for all size codes fetched across all years and
+    applies the full transform pipeline:
+
+    1. Filter ``own_code == '5'`` (private) and ``agglvl_code ∈ {'21'..'28'}``
+       (drops the duplicate 61–64 family that would double-count).
+    2. Drop rows where ``disclosure_code == 'N'`` (withheld cells; the
+       suppressed employment value is zero, not a real zero — never sum it).
+       Log the disclosure distribution.
+    3. Normalize ``area_fips`` to :data:`~nfp_lookups.industry.QCEW_AREA_NATIONAL`
+       (``'US000'``).  Size files are national-only but may carry a different
+       area code; :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel` filters
+       on ``area_fips == 'US000'``, so this normalisation is unconditional.
+    4. Remap ``agglvl_code`` by subtracting :data:`_SIZE_AGGLVL_OFFSET` (so
+       23→13, 24→14, 25→15, 26→16), making the size tree compatible with
+       ``build_qcew_panel``'s pull tables.
+    5. Cast ``month{1,2,3}_emplvl`` to ``Int64``; add ``revision = 0``.
+    6. Run :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel` **once per
+       ``size_code``** (avoids collapsing the size breakdown, since
+       ``build_qcew_panel``'s internal grouping has no size axis).
+    7. Attach ``size_code`` as a string column to each per-size output; concat.
+    8. Assert all ``ref_date``s are in Q1 (months 1–3); fail loud on any
+       ``size_code`` that produces zero rows.
+
+    Parameters
+    ----------
+    raw_size : pl.DataFrame
+        Concatenated raw size-endpoint CSVs (all-string schema) carrying at
+        minimum: ``area_fips``, ``own_code``, ``industry_code``,
+        ``agglvl_code``, ``disclosure_code``, ``year``, ``qtr``,
+        ``month{1,2,3}_emplvl``, ``size_code``.
+
+    Returns
+    -------
+    pl.DataFrame
+        ``native`` frame conformant to
+        :data:`~nfp_ingest.size_class._REQUIRED_COLUMNS`:
+        ``(geographic_type, geographic_code, ownership, industry_type,
+        industry_code, ref_date, vintage_date, revision, size_code,
+        employment)`` — ready for
+        :func:`~nfp_ingest.size_class.build_size_class_panel`.
+    """
+    from nfp_ingest.qcew_crosswalk import build_qcew_panel
+
+    # --- Step 1: filter ownership + agglvl ---
+    df = raw_size.filter(
+        (pl.col("own_code") == "5") & pl.col("agglvl_code").is_in(list(_SIZE_AGGLVL_KEEP))
     )
+
+    # --- Step 2: disclosure logging + drop suppressed rows ---
+    total_rows = df.height
+    disc_col = "disclosure_code" if "disclosure_code" in df.columns else None
+    if disc_col is not None:
+        disc_counts = (
+            df.group_by(disc_col)
+            .agg(pl.len().alias("n"))
+            .sort(disc_col)
+        )
+        logger.info(
+            "Disclosure distribution (private, agglvl 21-28): %s",
+            {r[disc_col]: r["n"] for r in disc_counts.to_dicts()},
+        )
+        suppressed = df.filter(pl.col(disc_col) == "N").height
+        if suppressed:
+            logger.info(
+                "Dropping %d suppressed (disclosure_code='N') rows out of %d",
+                suppressed,
+                total_rows,
+            )
+        df = df.filter(~(pl.col(disc_col) == "N"))
+    else:
+        logger.warning("disclosure_code column not found in size frame — skipping suppression filter")
+
+    logger.info(
+        "Size frame after ownership/agglvl/disclosure filter: %d rows", df.height
+    )
+
+    # --- Step 3: normalize area_fips to QCEW_AREA_NATIONAL ---
+    df = df.with_columns(area_fips=pl.lit(QCEW_AREA_NATIONAL, pl.Utf8))
+
+    # --- Steps 4 & 5: remap agglvl (-10), cast emplvl, add revision ---
+    df = df.with_columns(
+        agglvl_code=(pl.col("agglvl_code").cast(pl.Int64) - _SIZE_AGGLVL_OFFSET).cast(pl.Utf8),
+        month1_emplvl=pl.col("month1_emplvl").cast(pl.Int64, strict=False),
+        month2_emplvl=pl.col("month2_emplvl").cast(pl.Int64, strict=False),
+        month3_emplvl=pl.col("month3_emplvl").cast(pl.Int64, strict=False),
+        revision=pl.lit(0, pl.Int64),
+    )
+
+    # --- Step 6 & 7: per-size_code build_qcew_panel + re-tag size_code ---
+    size_codes = sorted(df["size_code"].unique().to_list())
+    native_parts: list[pl.DataFrame] = []
+
+    for sc in size_codes:
+        subset = df.filter(pl.col("size_code") == sc)
+        panel = build_qcew_panel(subset)
+        if panel.height == 0:
+            raise RuntimeError(
+                f"_size_raw_to_native: build_qcew_panel returned 0 rows for "
+                f"size_code={sc!r} — the agglvl remap or industry filter is broken"
+            )
+        # _SERIES_KEYS from size_class.py + employment, plus size_code
+        native_parts.append(
+            panel.select(
+                "geographic_type",
+                "geographic_code",
+                "ownership",
+                "industry_type",
+                "industry_code",
+                "ref_date",
+                "vintage_date",
+                "revision",
+                "employment",
+            ).with_columns(size_code=pl.lit(sc, pl.Utf8))
+        )
+
+    if not native_parts:
+        raise RuntimeError(
+            "_size_raw_to_native: no size_codes found in frame after filtering"
+        )
+
+    native = pl.concat(native_parts)
+
+    # --- Step 8: assert all ref_dates are Q1 ---
+    non_q1 = native.filter(~pl.col("ref_date").dt.month().is_in([1, 2, 3]))
+    if non_q1.height:
+        sample = non_q1.head(3)["ref_date"].to_list()
+        raise RuntimeError(
+            f"_size_raw_to_native: {non_q1.height} non-Q1 ref_dates in native output "
+            f"(e.g. {sample}); size-class data must be Q1-only"
+        )
+
+    return native
 
 
 def _acquire_qcew_size_native() -> pl.DataFrame:
-    """Acquire raw QCEW Q1 size-endpoint rows for :func:`build_size_class_panel`.
+    """Acquire raw QCEW Q1 size-endpoint rows for :func:`~nfp_ingest.size_class.build_size_class_panel`.
 
-    **NOT IMPLEMENTED** — deferred to the acquire layer.
+    Fetches ``/api/{year}/1/size/{size_code}.csv`` for every ``(year, size_code)``
+    in the rebuild scope (2017–current year, size codes 1–9) using the
+    Chrome-impersonating HTTP client.  The Q1-only endpoint is implicit in the
+    URL path (``/1/`` is quarter 1).  Per-slice 404s are skipped.
 
-    Fetches Q1-only per-size slices from the QCEW API
-    (``/api/{y}/1/size/{1-9}.csv``) and crosswalks agglvl-21–28 NAICS codes to
-    CES industry codes.  Note: the lookups pull-tables (``QCEW_SECTOR_PULLS``,
-    ``_QCEW_AGGLVL``) only cover agglvl 13/14/15/16 (the area endpoint); the
-    size endpoint delivers 21–28 and requires NEW pull mappings validated
-    against real size rows.  See ``specs/store_rebuild_acquire.md``.
+    The raw frames are concatenated and passed to :func:`_size_raw_to_native`,
+    which applies the agglvl −10 remap, disclosure filtering, area_fips
+    normalisation, and the per-size_code :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`
+    crosswalk.
 
-    Raises
-    ------
-    NotImplementedError
-        Always.  Implement this function to enable ``build-rebuild`` size classes.
+    Returns
+    -------
+    pl.DataFrame
+        ``native`` frame conformant to
+        :data:`~nfp_ingest.size_class._REQUIRED_COLUMNS` — ready for
+        :func:`~nfp_ingest.size_class.build_size_class_panel`.
     """
-    raise NotImplementedError(
-        "_acquire_qcew_size_native is not yet implemented. "
-        "See specs/store_rebuild_acquire.md for the size API-slice URLs "
-        "and the agglvl-21–28 NAICS→CES crosswalk gap."
-    )
+    from nfp_download.client import create_impersonating_session
+
+    current_year = date.today().year
+    slices: list[pl.DataFrame] = []
+
+    with create_impersonating_session() as session:
+        for year in range(_REBUILD_START_YEAR, current_year + 1):
+            for size_code in range(1, 10):
+                url = (
+                    f"https://data.bls.gov/cew/data/api/{year}/1/size/{size_code}.csv"
+                )
+                logger.info("Fetching QCEW size %d size_code=%d ...", year, size_code)
+                raw = _fetch_qcew_csv(session, url)
+                if raw is None:
+                    logger.info("  skipped (404)")
+                    continue
+                # Tag the size_code so _size_raw_to_native can partition by it.
+                # The CSV itself carries a size_code column; we overwrite it
+                # with the string form of the URL parameter so it's consistent.
+                raw = raw.with_columns(size_code=pl.lit(str(size_code), pl.Utf8))
+                logger.info("  %d rows", raw.height)
+                slices.append(raw)
+
+    if not slices:
+        raise RuntimeError(
+            "_acquire_qcew_size_native: no QCEW size slices fetched — "
+            "check network access and BLS API availability"
+        )
+
+    raw_size = pl.concat(slices, how="diagonal_relaxed")
+    return _size_raw_to_native(raw_size)
 
 
 # ---------------------------------------------------------------------------
