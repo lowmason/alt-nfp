@@ -409,26 +409,37 @@ class TestSizeRawToNative:
     # --- disclosure_code filtering ---
 
     def test_disclosure_n_rows_dropped(self):
-        """Rows with disclosure_code='N' must be dropped, not summed as zeros."""
+        """Rows with disclosure_code='N' must be dropped, not summed as zeros.
+
+        Discriminating design: the suppressed row uses industry_code '1027' at
+        agglvl 23 with month1=999_999.  If the N-row is NOT dropped it bleeds
+        into the build_qcew_panel sum and inflates total employment by ~999_999.
+        The baseline run has no such industry at that value, so any bleed is
+        detectable as a large employment difference.
+        """
         sc1_good = _make_minimal_size_rows("1", month1_base=1_000)
-        # Add a suppressed supersector row with a different industry to avoid confusion
+        # Baseline: employment sum without any N-row
+        native_baseline = self._native(sc1_good)
+        baseline_emp = native_baseline["employment"].sum()
+
+        # N-row uses a sentinel value that would inflate the sum if not filtered
         suppressed = _size_csv_row(
-            industry_code="1013",
+            industry_code="1027",   # other services supersector — present in minimal rows
             agglvl_code="23",
             size_code="1",
             disclosure_code="N",
-            month1=0,      # zeroed by BLS — should not contribute
-            month2=0,
-            month3=0,
+            month1=999_999,         # sentinel: visible if bleed-through occurs
+            month2=999_999,
+            month3=999_999,
         )
-        # The good rows already cover '1013' at agglvl 23; adding a N-row for
-        # the same code with zero employment should not change the sum (it's
-        # dropped, so the clean good row is used, not a sum including zeroed N).
         native_with_n = self._native(sc1_good + [suppressed])
-        # If N rows were NOT dropped, the group_by sum would add 0 (no change
-        # in this case). But if the 0 replaced a real value, it would reduce.
-        # The reliable test is that the N row itself does not appear in the frame.
-        assert native_with_n.height > 0  # output still produced (good rows survive)
+        emp_with_n = native_with_n["employment"].sum()
+
+        # If the N-row were included, employment would be ~999_999 higher
+        assert emp_with_n == pytest.approx(baseline_emp, rel=1e-6), (
+            f"N-row bleed detected: employment with N-row ({emp_with_n:.0f}) != "
+            f"baseline ({baseline_emp:.0f}); disclosure_code='N' filter is broken"
+        )
 
     def test_disclosure_empty_string_kept(self):
         """disclosure_code='' (disclosed) rows must be kept."""
@@ -436,6 +447,27 @@ class TestSizeRawToNative:
         # All rows in _make_minimal_size_rows have disclosure_code='' by default.
         native = self._native(rows)
         assert native.height > 0
+
+    def test_disclosure_null_kept(self):
+        """Null disclosure_code (empty CSV field parsed by Polars) must be kept.
+
+        ``pl.read_csv(infer_schema_length=0)`` parses an empty CSV field as
+        ``null`` (not ``""``).  The filter ``~(col == "N")`` would drop null rows
+        via Polars three-valued logic.  The safe filter is
+        ``col.is_null() | (col != "N")``.
+        """
+        from nfp_vintages.rebuild_store import _size_raw_to_native
+
+        sc1_rows = _make_minimal_size_rows("1", month1_base=1_000)
+        # Build the frame normally, then overwrite disclosure_code with None
+        # for all rows to simulate what Polars CSV read produces for empty fields.
+        raw = _make_size_raw(sc1_rows).with_columns(
+            pl.lit(None, pl.Utf8).alias("disclosure_code")
+        )
+        native = _size_raw_to_native(raw)
+        assert native.height > 0, (
+            "null disclosure_code rows were dropped — Polars null-safety bug in disclosure filter"
+        )
 
     def test_disclosure_logging(self, caplog):
         """Disclosure distribution must be logged at INFO level."""

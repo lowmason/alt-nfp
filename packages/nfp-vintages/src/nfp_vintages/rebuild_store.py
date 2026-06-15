@@ -282,7 +282,7 @@ def _size_raw_to_native(raw_size: pl.DataFrame) -> pl.DataFrame:
                 suppressed,
                 total_rows,
             )
-        df = df.filter(~(pl.col(disc_col) == "N"))
+        df = df.filter(pl.col(disc_col).is_null() | (pl.col(disc_col) != "N"))
     else:
         logger.warning("disclosure_code column not found in size frame — skipping suppression filter")
 
