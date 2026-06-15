@@ -24,7 +24,7 @@ Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network 
 | **T2** CES builder | ✅ **done** (`e662329`) | `nfp_ingest.ces_builder.build_ces_panel`: `cesvinall` → `(0,0)/(1,0)/(2,0)` + **per-benchmark** `(2,1)` (value+date same benchmark, no lookahead), ownership taxonomy, pure `as_of`. Spec + code-quality reviews passed; 10 tests, store anchors verified (Jun-2023 `00`). |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
 | **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
-| **T5** Build orchestration | 🟢 **unblocked** | T2/T3/T4 all done. Wire acquire (area per-qtr + size per-Q1 slices; T0) → CES (T2) → QCEW rev-0 (T3) → size (T4) → write to scratch; canonical guard exists. |
+| **T5** Build orchestration | 🟡 **core done** (`523f808`) | Compose + guarded scratch write + `build-rebuild` CLI wiring **done** (`nfp_vintages.rebuild_store.{compose_rebuild_panel, write_rebuild_store}`; §7 anti-join; 20 tests; spec + code-quality reviews passed). **Owed (maintainer / network):** the API-slice fetchers (area per-qtr + size per-Q1), the QCEW size NAICS→CES crosswalk (needs **new** agglvl-21–28 pull maps absent from lookups), and the actual small-window scratch run. Acquire seams are `NotImplementedError` stubs pointing to `store_rebuild_acquire.md`. |
 | **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
 | **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
 | **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
@@ -127,11 +127,14 @@ Spec §8.
 
 ------------------------------------------------------------------------
 
-## T5 — Build orchestration → scratch (`nfp-vintages` CLI) `[depends: T2, T3, T4]`
+## T5 — Build orchestration → scratch (`nfp-vintages` CLI) `[depends: T2, T3, T4]` — 🟡 CORE DONE (`523f808`)
 
--   [ ] Wire acquire → CES (T2) → QCEW (T3) → size-class (T4) → write, all to `NFP_STORE_URI=s3://alt-nfp/store-rebuild`. 2017+. **Acquire fix owed:** widen `download_qcew_bulk._WANTED_AGGLVL` to add agglvl `13`/`16` + the QCEW size agglvls, and keep `size_code` in `_KEEP_COLUMNS` (current filter strips all three; confirm exact size agglvls via T0). **Compose glue (T0-independent, unit-testable now):** for Q1 use the T4 size cross-product (incl. `total`/`'0'` all-sizes); for Q2–Q4 use the T3 null-size rows — do **not** also emit a Q1 null-size row (§7).
--   [ ] Enforce the `is_canonical_store` guard at the write boundary (refuse `…/store` without `--allow-canonical`). *(Guard already lives in `build_store`.)*
--   [ ] **Acceptance:** a dry-run / small-window build to scratch succeeds; the guard test proves a canonical target is refused.
+-   [x] **Compose glue (done, unit-tested):** `compose_rebuild_panel(ces, qcew_levels, size=None)` unions the three panels via `diagonal_relaxed` (null-fills the size cols `build_qcew_panel` omits) and enforces §7: for Q1, drop a `qcew_levels` null-size row **only** where the size frame has a `total`/`'0'` (all-sizes) row for that 6-col series identity (`geo_type, geo_code, ownership, industry_type, industry_code, ref_date`) — a conditional anti-join, **not** a month filter, so partial-coverage industries keep their null-size level. Q2–Q4 use the T3 null-size rows. Tests cover no-double-emit (exactly one `all_sizes_predicate` row), partial coverage (both branches), and non-Q1 never dropped.
+-   [x] **Guard (done):** `write_rebuild_store(panel, store_path=None, *, allow_canonical=False)` raises before any I/O when `is_canonical_store(store_path)` and not `allow_canonical`; mirrors `build_store`'s Hive write (untouched). Null-`vintage_date` partitions fail loud (no `v_None_None.parquet`).
+-   [x] **CLI (wired):** `alt-nfp build-rebuild [--allow-canonical]` wires `build_ces_panel()` → acquire-QCEW → acquire-size → compose → guarded write. The two acquire steps are `NotImplementedError` seams (`_acquire_qcew_levels`, `_acquire_qcew_size_native`) pointing to `store_rebuild_acquire.md`.
+-   [ ] **Owed — acquire layer (maintainer / network):** implement the QCEW **API-slice** fetchers (area per-qtr `…/api/{y}/{q}/area/US000.csv` + size per-Q1 `…/api/{y}/1/size/{1-9}.csv`, `own_code=5`, 2017+; tag `revision`). **The old "widen `download_qcew_bulk._WANTED_AGGLVL`" idea is superseded** — that filters the 280 MB *singlefiles*, which the API-slice path bypasses entirely (T0). Do not touch it.
+-   [ ] **Owed — QCEW size crosswalk (maintainer):** NAICS→CES mapping that preserves `size_code`, producing the `native` frame `build_size_class_panel` consumes. Needs **new agglvl-21–28 pull maps** — the lookups pulls (`QCEW_SECTOR_PULLS`, `_QCEW_AGGLVL`) cover only the area endpoint's 13/14/15/16. Validate against real size rows before trusting it.
+-   [ ] **Owed — acceptance run:** a small-window build to scratch (`NFP_STORE_URI=s3://alt-nfp/store-rebuild`) succeeds. (The canonical-refusal guard is already proven by `test_raises_for_canonical_store`.)
 
 ------------------------------------------------------------------------
 
