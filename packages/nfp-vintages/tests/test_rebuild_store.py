@@ -21,16 +21,6 @@ from nfp_vintages.rebuild_store import compose_rebuild_panel, write_rebuild_stor
 _VINT = date(2024, 8, 1)
 _VINT2 = date(2024, 11, 1)
 
-# The 6-col series identity key used by the anti-join.
-_SERIES_IDENTITY = [
-    "geographic_type",
-    "geographic_code",
-    "ownership",
-    "industry_type",
-    "industry_code",
-    "ref_date",
-]
-
 
 def _schema_row(**overrides) -> dict:
     """Minimal VINTAGE_STORE_SCHEMA row; override any field."""
@@ -378,13 +368,13 @@ class TestWriteRebuildStore:
         with pytest.raises(RuntimeError, match="canonical"):
             write_rebuild_store(panel, store_path=UPath("s3://alt-nfp/store"))
 
-    def test_raises_for_canonical_store_no_trailing_slash(self, _no_real_store):
-        """Canonical guard triggers without a trailing slash too."""
+    def test_raises_for_canonical_store_trailing_slash(self, _no_real_store):
+        """Canonical guard triggers even when the path has a trailing slash."""
         from upath import UPath
 
         panel = _make_ces([_ces_row()])
         with pytest.raises(RuntimeError, match="canonical"):
-            write_rebuild_store(panel, store_path=UPath("s3://alt-nfp/store"))
+            write_rebuild_store(panel, store_path=UPath("s3://alt-nfp/store/"))
 
     def test_canonical_allowed_with_flag(self, tmp_path, _no_real_store):
         """allow_canonical=True bypasses the guard and proceeds to write (local)."""
@@ -431,14 +421,9 @@ class TestWriteRebuildStore:
         # Should not raise
         write_rebuild_store(panel, store_path=tmp_path / "store-rebuild")
 
-    def test_scratch_remote_not_guarded(self, _no_real_store):
-        """s3://alt-nfp/store-rebuild does not trigger the guard."""
+    def test_scratch_remote_not_canonical(self):
+        """s3://alt-nfp/store-rebuild is NOT the canonical store — no-I/O assertion."""
+        from nfp_lookups.paths import is_canonical_store
         from upath import UPath
 
-        panel = _make_ces([_ces_row()])
-        # Will raise something (no real S3), but NOT a RuntimeError from our guard.
-        with pytest.raises(Exception) as exc_info:
-            write_rebuild_store(panel, store_path=UPath("s3://alt-nfp/store-rebuild"))
-        assert not isinstance(exc_info.value, RuntimeError), (
-            "scratch prefix must not trigger the canonical-store guard"
-        )
+        assert is_canonical_store(UPath("s3://alt-nfp/store-rebuild")) is False
