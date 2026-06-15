@@ -565,6 +565,86 @@ def qcew_to_sector() -> dict[str, str]:
     return mapping
 
 
+# ---------------------------------------------------------------------------
+# Rebuild QCEW→CES private crosswalk (ces_qcew_industry.md §9)  — store_rebuild
+# ---------------------------------------------------------------------------
+#
+# Reconstructs the CES *private* published series from QCEW national, private
+# (own_code=='5'), agglvl-coded cells. Distinct from the legacy ``qcew_to_sector``
+# CSV-API scheme above: this is the agglvl 13/14/15/16 ``singlefile`` pull spec.
+
+QCEW_OWN_PRIVATE: str = '5'
+"""QCEW ``own_code`` for private establishments (ces_qcew_industry.md §3.1)."""
+
+QCEW_AREA_NATIONAL: str = 'US000'
+"""QCEW ``area_fips`` for the national total."""
+
+QCEW_AGGLVL: dict[str, str] = {
+    'domain': '12',
+    'supersector': '13',
+    'sector': '14',
+    'naics_3': '15',
+    'naics_4': '16',
+}
+"""QCEW national-by-ownership aggregation-level codes (ces_qcew_industry.md §3.2)."""
+
+# CES private sector id → (QCEW industry_codes, agglvl_code). Leaf pulls: most
+# are direct agglvl-14 NAICS sectors; Logging is 4-digit 1133; Durable/Nondurable
+# sum the 3-digit subsectors (ces_qcew_industry.md §6.2-6.3).
+QCEW_SECTOR_PULLS: dict[str, tuple[tuple[str, ...], str]] = {
+    '11': (('1133',), '16'),                          # Logging only (NAICS 1133)
+    '21': (('21',), '14'),
+    '22': (('22',), '14'),
+    '23': (('23',), '14'),
+    '31': (  # Durable goods
+        ('321', '327', '331', '332', '333', '334', '335', '336', '337', '339'),
+        '15',
+    ),
+    '32': (  # Nondurable goods
+        ('311', '312', '313', '314', '315', '316', '322', '323', '324', '325', '326'),
+        '15',
+    ),
+    '42': (('42',), '14'),
+    '44': (('44-45',), '14'),
+    '48': (('48-49',), '14'),
+    '51': (('51',), '14'),
+    '52': (('52',), '14'),
+    '53': (('53',), '14'),
+    '54': (('54',), '14'),
+    '55': (('55',), '14'),
+    '56': (('56',), '14'),
+    '61': (('61',), '14'),
+    '62': (('62',), '14'),
+    '71': (('71',), '14'),
+    '72': (('72',), '14'),
+    '81': (('81',), '14'),
+}
+
+# CES supersector id → single agglvl-13 QCEW pull (``qcew_code``) plus its member
+# CES sector ids. ``qcew_code=None`` forces a member-sector sum: only ``'10'``
+# (the QCEW ``1011`` aggregate over-includes all agriculture, ces_qcew §4 Exc. A).
+QCEW_SUPERSECTOR: dict[str, dict[str, object]] = {
+    '10': {'qcew_code': None, 'sectors': ('11', '21')},
+    '20': {'qcew_code': '1012', 'sectors': ('23',)},
+    '30': {'qcew_code': '1013', 'sectors': ('31', '32')},
+    '40': {'qcew_code': '1021', 'sectors': ('42', '44', '48', '22')},
+    '50': {'qcew_code': '1022', 'sectors': ('51',)},
+    '55': {'qcew_code': '1023', 'sectors': ('52', '53')},
+    '60': {'qcew_code': '1024', 'sectors': ('54', '55', '56')},
+    '65': {'qcew_code': '1025', 'sectors': ('61', '62')},
+    '70': {'qcew_code': '1026', 'sectors': ('71', '72')},
+    '80': {'qcew_code': '1027', 'sectors': ('81',)},
+}
+
+# CES top aggregate id → component ids (pure roll-ups, ces_qcew_industry.md §5).
+# ``06``/``08`` are ``industry_type='domain'``; ``05`` is ``industry_type='total'``.
+QCEW_DOMAIN: dict[str, tuple[str, ...]] = {
+    '06': ('10', '20', '30'),
+    '08': ('40', '50', '55', '60', '65', '70', '80'),
+    '05': ('06', '08'),
+}
+
+
 def en_series_id(
     industry_entry: IndustryEntry,
     area: str = 'US000',
