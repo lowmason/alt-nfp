@@ -11,8 +11,9 @@ BLS and are **not run by CI**.  They must be triggered manually by the maintaine
 
 CRITICAL SAFETY: no test here writes to a real/remote store.  No test calls
 ``_acquire_qcew_levels()`` or ``_acquire_qcew_size_native()`` (the full network
-fetch loops) — those functions open a live curl_cffi session; only the pure
-transform helpers and a single-slice network probe are tested.
+fetch loops); only the pure transform helpers and single-slice network probes
+are tested. The network probes use ``create_client()`` (httpx) to exercise the
+**same** transport as production — ``data.bls.gov`` needs no impersonation.
 """
 
 from __future__ import annotations
@@ -596,21 +597,21 @@ class TestAcquireLevelsNetwork:
     """
 
     def test_single_slice_non_empty(self):
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv
 
         url = "https://data.bls.gov/cew/data/api/2024/1/area/US000.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None, "expected 200 for 2024/Q1 area slice"
         assert raw.height > 0
 
     def test_single_slice_has_expected_columns(self):
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv
 
         url = "https://data.bls.gov/cew/data/api/2024/1/area/US000.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None
         for col in [
@@ -620,11 +621,11 @@ class TestAcquireLevelsNetwork:
             assert col in raw.columns, f"missing column {col!r} in real area CSV"
 
     def test_prep_private_only(self):
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv, _prep_area_raw
 
         url = "https://data.bls.gov/cew/data/api/2024/1/area/US000.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None
         prepped = _prep_area_raw(raw)
@@ -632,11 +633,11 @@ class TestAcquireLevelsNetwork:
         assert prepped["own_code"].unique().to_list() == ["5"]
 
     def test_expected_agglvls_present(self):
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv, _prep_area_raw
 
         url = "https://data.bls.gov/cew/data/api/2024/1/area/US000.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None
         prepped = _prep_area_raw(raw)
@@ -645,11 +646,11 @@ class TestAcquireLevelsNetwork:
             assert expected in agglvls, f"agglvl_code {expected!r} missing from real area slice"
 
     def test_404_on_future_year_returns_none(self):
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv
 
         url = "https://data.bls.gov/cew/data/api/2099/4/area/US000.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             result = _fetch_qcew_csv(session, url)
         assert result is None, "expected None (404) for a far-future quarter"
 
@@ -662,33 +663,33 @@ class TestAcquireSizeNetwork:
     """
 
     def test_single_size_slice_non_empty(self):
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv
 
         url = "https://data.bls.gov/cew/data/api/2024/1/size/1.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None, "expected 200 for 2024/Q1 size/1 slice"
         assert raw.height > 0
 
     def test_size_slice_has_own_code(self):
         """Verify size CSVs carry own_code so private filter works."""
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv
 
         url = "https://data.bls.gov/cew/data/api/2024/1/size/1.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None
         assert "own_code" in raw.columns
 
     def test_size_agglvls_present(self):
         """Verify agglvl 23–26 exist in the real size CSV (the ones we remap)."""
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv
 
         url = "https://data.bls.gov/cew/data/api/2024/1/size/1.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None
         agglvls = set(raw["agglvl_code"].unique().to_list())
@@ -697,11 +698,11 @@ class TestAcquireSizeNetwork:
 
     def test_disclosure_logging_fires(self, caplog):
         """Verify _size_raw_to_native logs the disclosure distribution for a real slice."""
-        from nfp_download.client import create_impersonating_session
+        from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv, _size_raw_to_native
 
         url = "https://data.bls.gov/cew/data/api/2024/1/size/1.csv"
-        with create_impersonating_session() as session:
+        with create_client() as session:
             raw = _fetch_qcew_csv(session, url)
         assert raw is not None
         raw = raw.with_columns(size_code=pl.lit("1", pl.Utf8))
