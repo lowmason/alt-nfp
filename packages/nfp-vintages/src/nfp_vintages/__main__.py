@@ -217,6 +217,17 @@ def build(
 
 @app.command("build-rebuild")
 def build_rebuild(
+    start_year: int = typer.Option(
+        2017,
+        "--start-year",
+        help="First QCEW reference year to fetch (default 2017, the rebuild scope).",
+    ),
+    end_year: int | None = typer.Option(
+        None,
+        "--end-year",
+        help="Last QCEW reference year (inclusive; default = current year). "
+        "Set --start-year == --end-year for a one-year small-window smoke build.",
+    ),
     allow_canonical: bool = typer.Option(
         False,
         "--allow-canonical",
@@ -230,11 +241,13 @@ def build_rebuild(
 
     CES is built from the cached ``cesvinall/`` triangular CSVs (no network).
     QCEW levels and size are fetched from the BLS API slices (area + size
-    endpoints, 2017-present) via the impersonating client — so this command
-    needs network access, and writes to ``NFP_STORE_URI`` (the scratch
-    ``s3://alt-nfp/store-rebuild`` prefix; the canonical store is refused unless
-    ``--allow-canonical``). See specs/store_rebuild_acquire.md for the acquire
-    design.
+    endpoints) over plain httpx — so this command needs network access, and
+    writes to ``NFP_STORE_URI`` (the scratch ``s3://alt-nfp/store-rebuild``
+    prefix; the canonical store is refused unless ``--allow-canonical``).
+
+    Use ``--start-year 2024 --end-year 2024`` for a one-year small-window smoke
+    build (fetch → compose → scratch write) before the full 2017-present run.
+    See specs/store_rebuild_acquire.md for the acquire design.
     """
     from nfp_ingest.ces_builder import build_ces_panel
     from nfp_ingest.qcew_crosswalk import build_qcew_panel
@@ -253,16 +266,16 @@ def build_rebuild(
     ces = build_ces_panel()
     print(f"  CES: {ces.height:,} rows")
 
-    # Fetch QCEW area-endpoint slices (2017-present, all quarters) → crosswalk.
-    print("Acquiring QCEW levels (BLS area API slices)...")
-    raw_qcew = _acquire_qcew_levels()
+    # Fetch QCEW area-endpoint slices (all quarters) → crosswalk.
+    print(f"Acquiring QCEW levels (BLS area API slices, {start_year}-{end_year or 'now'})...")
+    raw_qcew = _acquire_qcew_levels(start_year=start_year, end_year=end_year)
     qcew_levels = build_qcew_panel(raw_qcew)
     print(f"  QCEW levels: {qcew_levels.height:,} rows")
 
-    # Fetch QCEW Q1 size-endpoint slices (2017-present, size_code 1-9) → crosswalk.
+    # Fetch QCEW Q1 size-endpoint slices (size_code 1-9) → crosswalk.
     # _acquire_qcew_size_native already crosswalks to CES codes (it is NOT raw CSV).
-    print("Acquiring QCEW size native rows (BLS size API slices)...")
-    size_native = _acquire_qcew_size_native()
+    print(f"Acquiring QCEW size native rows (BLS size API slices, {start_year}-{end_year or 'now'})...")
+    size_native = _acquire_qcew_size_native(start_year=start_year, end_year=end_year)
     size = build_size_class_panel(size_native)
     print(f"  QCEW size: {size.height:,} rows")
 

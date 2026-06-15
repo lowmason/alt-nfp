@@ -170,16 +170,26 @@ def _prep_area_raw(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _acquire_qcew_levels() -> pl.DataFrame:
+def _acquire_qcew_levels(
+    start_year: int = _REBUILD_START_YEAR, end_year: int | None = None
+) -> pl.DataFrame:
     """Acquire raw QCEW area-endpoint rows for crosswalk → :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`.
 
     Fetches ``/api/{year}/{qtr}/area/US000.csv`` for every ``(year, quarter)``
-    in the rebuild scope (2017–current year, all 4 quarters) over plain httpx
+    in ``[start_year, end_year]`` (all 4 quarters) over plain httpx
     (``data.bls.gov`` is not Akamai-fingerprinted, unlike www.bls.gov).
     Per-slice 404s are skipped (the current year may lack later quarters).
 
     All rows are tagged ``revision=0`` (decision A: per-industry QCEW data on
     the area endpoint is revision-0 for the rebuild scope).
+
+    Parameters
+    ----------
+    start_year : int
+        First reference year to fetch. Defaults to :data:`_REBUILD_START_YEAR`
+        (2017). Narrow this for a small-window smoke build.
+    end_year : int or None
+        Last reference year (inclusive). Defaults to the current calendar year.
 
     Returns
     -------
@@ -191,11 +201,11 @@ def _acquire_qcew_levels() -> pl.DataFrame:
     """
     from nfp_download.client import create_client
 
-    current_year = date.today().year
+    last_year = end_year if end_year is not None else date.today().year
     slices: list[pl.DataFrame] = []
 
     with create_client() as session:
-        for year in range(_REBUILD_START_YEAR, current_year + 1):
+        for year in range(start_year, last_year + 1):
             for qtr in range(1, 5):
                 url = f"https://data.bls.gov/cew/data/api/{year}/{qtr}/area/US000.csv"
                 logger.info("Fetching QCEW levels %d Q%d ...", year, qtr)
@@ -358,11 +368,13 @@ def _size_raw_to_native(raw_size: pl.DataFrame) -> pl.DataFrame:
     return native
 
 
-def _acquire_qcew_size_native() -> pl.DataFrame:
+def _acquire_qcew_size_native(
+    start_year: int = _REBUILD_START_YEAR, end_year: int | None = None
+) -> pl.DataFrame:
     """Acquire raw QCEW Q1 size-endpoint rows for :func:`~nfp_ingest.size_class.build_size_class_panel`.
 
     Fetches ``/api/{year}/1/size/{size_code}.csv`` for every ``(year, size_code)``
-    in the rebuild scope (2017–current year, size codes 1–9) over plain httpx
+    in ``[start_year, end_year]`` (size codes 1–9) over plain httpx
     (``data.bls.gov`` needs no impersonation).  The Q1-only endpoint is implicit in the
     URL path (``/1/`` is quarter 1).  Per-slice 404s are skipped.
 
@@ -370,6 +382,14 @@ def _acquire_qcew_size_native() -> pl.DataFrame:
     which applies the agglvl −10 remap, disclosure filtering, area_fips
     normalisation, and the per-size_code :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`
     crosswalk.
+
+    Parameters
+    ----------
+    start_year : int
+        First reference year to fetch. Defaults to :data:`_REBUILD_START_YEAR`
+        (2017). Narrow this for a small-window smoke build.
+    end_year : int or None
+        Last reference year (inclusive). Defaults to the current calendar year.
 
     Returns
     -------
@@ -380,11 +400,11 @@ def _acquire_qcew_size_native() -> pl.DataFrame:
     """
     from nfp_download.client import create_client
 
-    current_year = date.today().year
+    last_year = end_year if end_year is not None else date.today().year
     slices: list[pl.DataFrame] = []
 
     with create_client() as session:
-        for year in range(_REBUILD_START_YEAR, current_year + 1):
+        for year in range(start_year, last_year + 1):
             for size_code in range(1, 10):
                 url = (
                     f"https://data.bls.gov/cew/data/api/{year}/1/size/{size_code}.csv"
