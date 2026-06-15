@@ -16,6 +16,8 @@ Usage (once acquire is wired)::
 
 from __future__ import annotations
 
+from typing import Any
+
 import polars as pl
 from nfp_lookups.paths import (
     VINTAGE_STORE_PATH,
@@ -108,10 +110,12 @@ def compose_rebuild_panel(
     Parameters
     ----------
     ces : pl.DataFrame
-        ``VINTAGE_STORE_SCHEMA``-conformant rows from :func:`nfp_ingest.ces_builder.build_ces_panel`.
+        ``VINTAGE_STORE_SCHEMA``-conformant rows from
+        :func:`nfp_ingest.ces_builder.build_ces_panel`.
         Has ``size_class_type``/``size_class_code`` (both null).
     qcew_levels : pl.DataFrame
-        ``VINTAGE_STORE_SCHEMA``-conformant rows from :func:`nfp_ingest.qcew_crosswalk.build_qcew_panel`.
+        ``VINTAGE_STORE_SCHEMA``-conformant rows from
+        :func:`nfp_ingest.qcew_crosswalk.build_qcew_panel`.
         **Omits** ``size_class_type``/``size_class_code`` entirely (the builder's
         ``.select(...)`` ends before those cols); ``diagonal_relaxed`` null-fills them.
     size : pl.DataFrame or None
@@ -177,6 +181,8 @@ def compose_rebuild_panel(
         "ref_date",
         "size_class_type",
         "size_class_code",
+        "vintage_date",
+        "revision",
     )
 
 
@@ -187,7 +193,7 @@ def compose_rebuild_panel(
 
 def write_rebuild_store(
     panel: pl.DataFrame,
-    store_path=None,
+    store_path: Any = None,
     *,
     allow_canonical: bool = False,
 ) -> None:
@@ -246,6 +252,14 @@ def write_rebuild_store(
         write_df = partition_df.drop(["source", "seasonally_adjusted"])
         vmin = write_df["vintage_date"].min()
         vmax = write_df["vintage_date"].max()
+        # Polars aggregates skip nulls; an all-null vintage_date would silently
+        # name the file ``v_None_None.parquet``. Fail loud — the rebuild path
+        # pulls from API slices where a missing vintage_date signals bad data.
+        if vmin is None or vmax is None:
+            raise ValueError(
+                f"partition (source={source}, seasonally_adjusted={sa_str}) has "
+                "null vintage_date values; cannot name the output file"
+            )
         fname = f"v_{vmin}_{vmax}.parquet"
 
         write_df.write_parquet(

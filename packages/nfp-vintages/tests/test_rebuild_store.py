@@ -376,10 +376,16 @@ class TestWriteRebuildStore:
         with pytest.raises(RuntimeError, match="canonical"):
             write_rebuild_store(panel, store_path=UPath("s3://alt-nfp/store/"))
 
-    def test_canonical_allowed_with_flag(self, tmp_path, _no_real_store):
-        """allow_canonical=True bypasses the guard and proceeds to write (local)."""
+    def test_allow_canonical_flag_accepted_on_local_write(self, tmp_path, _no_real_store):
+        """``allow_canonical=True`` is a valid kwarg and does not break a normal write.
+
+        This does NOT exercise the guard *bypass* — ``tmp_path`` is local, so
+        ``is_canonical_store`` returns False and the guard never fires regardless
+        of the flag. Proving the bypass against a real canonical target would
+        require an unsafe remote write; the guard's False branch (raise when the
+        flag is absent) is covered by ``test_raises_for_canonical_store`` above.
+        """
         panel = _make_ces([_ces_row()])
-        # Should NOT raise; write to local tmp_path with allow_canonical=True.
         write_rebuild_store(panel, store_path=tmp_path, allow_canonical=True)
 
     def test_local_write_success(self, tmp_path, _no_real_store):
