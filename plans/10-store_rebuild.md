@@ -145,6 +145,7 @@ Implement the four gates; key on `industry_type + industry_code + ownership + (r
 -   [ ] **History consistency:** rebuilt `source=ces` matches the current store ≤2023 (private hierarchy + `00` anchor); four-combo `(rev,bmr)` reproduces.
 -   [ ] **Gap fill (priority):** *hard* — `05` + supersectors current to frontier, 2024-12/2025-12 `(2,1)` complete; *reconstruct-and-validate* — `06`/`08`/sectors refilled, additive nesting validated where present (missing sector-month does not block).
 -   [ ] **Reconstruction accuracy:** QCEW vs published CES at benchmark months / annual averages; `81/80/08/05` residual small and **non-negative**. **Set the numeric `|residual|` tolerance here** (owed by this plan per §10) — choose and justify a bound; do not require exact equality.
+    -   *Q1 headline continuity (T5 carry-over):* compose **replaces** the QCEW area all-sizes level with the size-endpoint `total`/`'0'` (= sum of the nine native buckets) on Q1 — spec-faithful (§7/§8), but if size-endpoint coverage ≠ area-endpoint coverage the two totals diverge and Q1 headline values become discontinuous with Q2–Q4. Add a gate check that the Q1 `total`/`'0'` matches the area-endpoint all-sizes level within tolerance.
 -   [ ] **Vintage integrity:** `_validate_censored_selection`-style checks on an as-of slice (no dups, no cross-vintage sums, no nulls/zeros).
 -   [ ] **Acceptance:** validator runs against the scratch store and reports pass/fail per gate; gates are tests, not prose.
 
