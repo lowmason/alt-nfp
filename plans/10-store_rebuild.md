@@ -21,10 +21,10 @@ Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network 
 | **T0** Acquisition spike | ✅ **resolved** (local, 2026-06-15) | 3 unknowns resolved — [`store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md). `cesvinall` reconstructs `(rev,bmr)` (verified vs store); QCEW size + levels via API slices. |
 | **T0.5** QCEW vintaging | ✅ **resolved (A)** | Per-industry QCEW has **no** published revision history — rev-0 only (verified: only national `00` has rev 0–4; `qcew-revisions.csv` & the BLS revisions page are total-level). **Decision A** (2026-06-15): store rev-0, carry revision uncertainty model-side (`QCEW_REVISIONS` noise). No reconstruction. |
 | **T1** Schema & grammar | ✅ **done** (`bc932ba`) | ownership axis, `national` retired, taxonomy + remap, `55` two-level, schema dedup (IND-XC-3), tolerant reader. |
-| **T2** CES builder | 🟢 **unblocked** | T0 resolved: `cesvinall` reconstructs all `(rev,bmr)`; build `(2,1)` **per benchmark** (one row per Feb re-basing), not the old store's collapsed single row. |
+| **T2** CES builder | ✅ **done** (`e662329`) | `nfp_ingest.ces_builder.build_ces_panel`: `cesvinall` → `(0,0)/(1,0)/(2,0)` + **per-benchmark** `(2,1)` (value+date same benchmark, no lookahead), ownership taxonomy, pure `as_of`. Spec + code-quality reviews passed; 10 tests, store anchors verified (Jun-2023 `00`). |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
 | **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
-| **T5** Build orchestration | ⛔ **blocked on T2** | Canonical guard exists. Acquire = targeted API slices (area per-qtr + size per-Q1; T0). QCEW = current rev-0 → T3 crosswalk (T0.5 resolved A — no vintage reconstruction). |
+| **T5** Build orchestration | 🟢 **unblocked** | T2/T3/T4 all done. Wire acquire (area per-qtr + size per-Q1 slices; T0) → CES (T2) → QCEW rev-0 (T3) → size (T4) → write to scratch; canonical guard exists. |
 | **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
 | **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
 | **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
@@ -92,14 +92,18 @@ per-industry rev-0 (bulk) + national-`00` rev 0–4 (revisions CSV).
 
 ------------------------------------------------------------------------
 
-## T2 — CES builder (`nfp-ingest`) `[depends: T1]`
+## T2 — CES builder (`nfp-ingest`) `[depends: T1]` — ✅ DONE (`e662329`)
 
-Implement spec §4.1's provenance source table.
+`nfp_ingest.ces_builder.build_ces_panel(cesvinall_dir=None, *, as_of=None)`. Note:
+T0 showed `cesvinall` alone reconstructs every `(rev,bmr)` — including the
+benchmark `(2,1)` (the triangle's February column-steps) — so the builder is
+**triangle-sourced** (no separate bulk file), and `(2,1)` is **per-benchmark**
+(decision this session) rather than the spec's original single-bulk row.
 
--   [ ] Triangular `cesvinall` → real-time prints `(rev∈{0,1,2}, bmr=0)`, tagged by ordinal; private hierarchy `ownership='private'`, the `00` series `ownership='total'`.
--   [ ] Bulk → benchmarked history as `(rev=2, bmr=1)` at the February benchmark `vintage_date`; the un-benchmarked tail as `(rev∈{0,1,2}, bmr=0)`. Precedence: bulk wins for the tail, triangular for established history.
--   [ ] Never write `07`/`90`–`93`. Day-12 `ref_date`; NSA; thousands.
--   [ ] **Acceptance:** tests reproduce the four-combo `(rev,bmr)` population and the known anchors (Dec-25 `(2,1)`=158,497; a post-benchmark second print stays `(1,0)`, e.g. Dec-2024 rev-1=158,926). `tmp_path`/synthetic only.
+-   [x] Triangular `cesvinall` → `(0,0)/(1,0)/(2,0)` prints, `bmr=0`, ownership taxonomy (`00`→`total/total`, `05`→`total/private`, `06/08`→`domain/private`, supersectors/sectors→`private`); `07/90–93` dropped.
+-   [x] Per-benchmark `(2,1)`: one row per distinct annual-benchmark basis (value + `vintage_date` both from the same `(Y,1)` release — no lookahead; unchanged later benchmarks skipped). Pure `as_of` frontier filter.
+-   [x] Day-12 `ref_date`; NSA; thousands; 2017+; `nfp_lookups`-only imports; no store I/O.
+-   [x] **Acceptance:** 10 tests (synthetic + `as_of` gating + dedup) + offline `cesvinall` cross-check — Jun-2023 `00` NSA: prints `156963/156945/156905`, `(2,1)`={`156842`@2024-02-02, `156701`@2025-02-07}. Spec-compliance + code-quality reviews passed.
 
 ------------------------------------------------------------------------
 
