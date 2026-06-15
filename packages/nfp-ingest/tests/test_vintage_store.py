@@ -1056,7 +1056,8 @@ def test_append_two_disjoint_multivintage_batches_conserves_rows(tmp_path):
         return pl.DataFrame({
             "geographic_type": ["national"] * n,
             "geographic_code": ["00"] * n,
-            "industry_type": ["national"] * n,
+            "ownership": ["total"] * n,
+            "industry_type": ["total"] * n,
             "industry_code": ["00"] * n,
             "ref_date": refs,
             "vintage_date": vints,

@@ -236,6 +236,121 @@ def get_domain_supersectors(domain_code: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Vintage-store industry taxonomy (industry_type × ownership)  — store_rebuild
+# ---------------------------------------------------------------------------
+#
+# The rebuilt vintage store splits the two axes the legacy single
+# ``industry_code`` column conflated: ``industry_type`` (level within the
+# industry partition) and ``ownership``. See ``specs/store_rebuild.md`` §3.
+#
+# ``industry_type`` retires the legacy ``'national'`` value (which collided with
+# ``geographic_type='national'``); the ``'00'`` total-nonfarm series is now the
+# ``(total, total)`` anchor and ``'05'`` total private the ``(total, private)``
+# private-tree root.
+
+INDUSTRY_TYPES: tuple[str, ...] = ('total', 'domain', 'supersector', 'sector')
+"""Valid ``industry_type`` values in the rebuilt store (``'national'`` retired)."""
+
+OWNERSHIPS: tuple[str, ...] = ('total', 'private', 'government')
+"""Valid ``ownership`` values; ``'government'`` is reserved (deferred, §11)."""
+
+_SUPERSECTOR_PRIVATE_CODES: tuple[str, ...] = (
+    '10', '20', '30', '40', '50', '55', '60', '65', '70', '80',
+)
+_SECTOR_PRIVATE_CODES: tuple[str, ...] = (
+    '11', '21', '22', '23', '31', '32', '42', '44', '48', '51',
+    '52', '53', '54', '55', '56', '61', '62', '71', '72', '81',
+)
+
+# Canonical (industry_type, ownership, industry_code) taxonomy of the stored
+# axis. ``ownership='government'`` and codes ``07``/``90``-``93`` are deferred
+# (§11) and intentionally absent. Note code ``55`` appears at *both* the
+# supersector (Financial Activities) and sector (Management of companies) level.
+_TAXONOMY_ROWS: list[tuple[str, str, str]] = [
+    ('total', 'total', '00'),      # total nonfarm — anchor, stored not modeled
+    ('total', 'private', '05'),    # total private — private-tree root
+    ('domain', 'private', '06'),   # goods-producing
+    ('domain', 'private', '08'),   # private service-providing
+    *[('supersector', 'private', c) for c in _SUPERSECTOR_PRIVATE_CODES],
+    *[('sector', 'private', c) for c in _SECTOR_PRIVATE_CODES],
+]
+
+# (industry_type, industry_code) → ownership. Keyed on the *pair* so that code
+# ``'55'`` survives the cross-level collision (supersector 55 vs sector 55)
+# instead of being collapsed into one entry.
+INDUSTRY_TAXONOMY: dict[tuple[str, str], str] = {
+    (itype, code): own for itype, own, code in _TAXONOMY_ROWS
+}
+
+
+def ownership_for(industry_type: str, industry_code: str) -> str:
+    """Return the ``ownership`` for a stored ``(industry_type, industry_code)``.
+
+    Raises
+    ------
+    ValueError
+        If the pair is not part of the stored taxonomy (e.g. a deferred
+        government code, or a code at the wrong level).
+    """
+    try:
+        return INDUSTRY_TAXONOMY[(industry_type, industry_code)]
+    except KeyError:
+        raise ValueError(
+            f'No stored taxonomy entry for industry_type={industry_type!r}, '
+            f'industry_code={industry_code!r}'
+        ) from None
+
+
+def codes_for(industry_type: str, ownership: str | None = None) -> list[str]:
+    """Return the sorted stored ``industry_code``s at *industry_type*.
+
+    Optionally restrict to a single *ownership*.
+    """
+    return sorted(
+        code
+        for (itype, code), own in INDUSTRY_TAXONOMY.items()
+        if itype == industry_type and (ownership is None or own == ownership)
+    )
+
+
+def industry_types_for_code(industry_code: str) -> list[str]:
+    """Return the sorted ``industry_type``s a code is stored at.
+
+    Code ``'55'`` returns ``['sector', 'supersector']`` — the lone cross-level
+    collision the store keys must keep distinct.
+    """
+    return sorted(
+        {itype for (itype, code) in INDUSTRY_TAXONOMY if code == industry_code}
+    )
+
+
+def remap_industry_type(
+    industry_type: str, industry_code: str
+) -> tuple[str, str]:
+    """Map a legacy ``(industry_type, industry_code)`` to ``(industry_type, ownership)``.
+
+    Bridges the pre-rebuild store (no ``ownership`` axis; ``'national'`` for the
+    ``00`` total) to the rebuilt taxonomy so the ≤2023 history-consistency gate
+    (``specs/store_rebuild.md`` §10) keys on the same axes:
+
+    - ``('national', '00')`` → ``('total', 'total')``
+    - ``('domain', '05')``   → ``('total', 'private')``
+    - ``('domain', '06'|'08')`` → ``('domain', 'private')``
+    - supersectors / sectors → unchanged level, ``ownership='private'``
+
+    Already-rebuilt inputs are idempotent. Raises ``ValueError`` for codes
+    outside the stored taxonomy (deferred government, etc.).
+    """
+    if industry_type == 'national':
+        new_type = 'total'
+    elif industry_type == 'domain' and industry_code == '05':
+        new_type = 'total'
+    else:
+        new_type = industry_type
+    return new_type, ownership_for(new_type, industry_code)
+
+
+# ---------------------------------------------------------------------------
 # CES-to-QCEW industry cross-mapping
 # ---------------------------------------------------------------------------
 

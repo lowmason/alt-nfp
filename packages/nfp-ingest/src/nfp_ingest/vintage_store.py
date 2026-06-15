@@ -21,21 +21,12 @@ from pathlib import Path
 import polars as pl
 from nfp_lookups.paths import VINTAGE_STORE_PATH, is_remote, storage_options_for
 
-logger = logging.getLogger(__name__)
+# Single source of truth lives in nfp_lookups.schemas; re-exported here for the
+# many existing callers that import it from this module (was a duplicate
+# definition — audit IND-XC-3).
+from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
-VINTAGE_STORE_SCHEMA: dict[str, pl.DataType] = {
-    "geographic_type": pl.Utf8,
-    "geographic_code": pl.Utf8,
-    "industry_type": pl.Utf8,
-    "industry_code": pl.Utf8,
-    "ref_date": pl.Date,
-    "vintage_date": pl.Date,
-    "revision": pl.UInt8,
-    "benchmark_revision": pl.UInt8,
-    "employment": pl.Float64,
-    "source": pl.Utf8,
-    "seasonally_adjusted": pl.Boolean,
-}
+logger = logging.getLogger(__name__)
 
 # Boundary between pre-2017 (max-revision) and 2017+ (rank-based) QCEW regimes.
 # Before this date only a single revision exists per ref_date, so we just keep
@@ -369,8 +360,9 @@ def read_vintage_store(
         Filter by geographic type.
     geographic_code : str or None
         Filter by geographic code (e.g. ``'00'`` for national).
-    industry_type : {'national', 'domain', 'supersector', 'sector'} or None
-        Filter by industry type.
+    industry_type : {'total', 'domain', 'supersector', 'sector'} or None
+        Filter by industry type. (Legacy pre-rebuild stores use ``'national'``
+        for the ``00`` total; see ``nfp_lookups.remap_industry_type``.)
     industry_code : str or None
         Filter by industry code (e.g. ``'05'`` for total private).
     ref_date_range : tuple[date, date] or None
@@ -385,6 +377,10 @@ def read_vintage_store(
         str(store_path / "**/*.parquet"),
         hive_partitioning=True,
         schema=VINTAGE_STORE_SCHEMA,
+        # Legacy stores predate the `ownership` column (store_rebuild §3); insert
+        # it as null so pre-rebuild parquet reads cleanly (the T6 remap derives
+        # ownership from (industry_type, industry_code) for the history join).
+        missing_columns="insert",
         storage_options=storage_options_for(store_path),
     )
 

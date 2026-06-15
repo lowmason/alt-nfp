@@ -117,9 +117,15 @@ def empty_panel() -> pl.DataFrame:
 
 
 # Hive-partitioned vintage store schema (source × seasonally_adjusted).
+#
+# ``ownership`` (store_rebuild §3/§7) splits the axis the single ``industry_code``
+# column conflated: ``private`` (the modeled hierarchy) / ``total`` (the ``00``
+# anchor). ``government`` is reserved (deferred, §11). ``industry_type`` retires
+# the legacy ``'national'`` value in favour of ``total/domain/supersector/sector``.
 VINTAGE_STORE_SCHEMA: dict[str, pl.DataType] = {
     "geographic_type": pl.Utf8,
     "geographic_code": pl.Utf8,
+    "ownership": pl.Utf8,
     "industry_type": pl.Utf8,
     "industry_code": pl.Utf8,
     "ref_date": pl.Date,
