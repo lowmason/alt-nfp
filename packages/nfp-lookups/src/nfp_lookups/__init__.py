@@ -83,3 +83,10 @@ from .series_ids import (
     list_programs,
     parse_series_id,
 )
+from .size_classes import (
+    NATIVE_SIZE_CODES,
+    SIZE_CLASS_CODE,
+    SIZE_CLASS_MEMBERS,
+    SIZE_CLASS_TYPES,
+    native_to_scheme,
+)

@@ -1064,6 +1064,8 @@ def test_append_two_disjoint_multivintage_batches_conserves_rows(tmp_path):
             "revision": pl.Series([0] * n, dtype=pl.UInt8),
             "benchmark_revision": pl.Series([0] * n, dtype=pl.UInt8),
             "employment": emps,
+            "size_class_type": pl.Series([None] * n, dtype=pl.Utf8),
+            "size_class_code": pl.Series([None] * n, dtype=pl.Utf8),
             "source": ["ces"] * n,
             "seasonally_adjusted": [True] * n,
         })

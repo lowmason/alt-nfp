@@ -133,6 +133,12 @@ VINTAGE_STORE_SCHEMA: dict[str, pl.DataType] = {
     "revision": pl.UInt8,
     "benchmark_revision": pl.UInt8,
     "employment": pl.Float64,
+    # Size-class dimension (store_rebuild §8): populated only for QCEW Q1
+    # (ref-month ∈ {01,02,03}); null for CES and QCEW Q2/Q3/Q4. ``size_class_code``
+    # is singular. All-sizes selection = ``size_class_type IS NULL OR
+    # size_class_code = '0'`` (§7).
+    "size_class_type": pl.Utf8,
+    "size_class_code": pl.Utf8,
     "source": pl.Utf8,
     "seasonally_adjusted": pl.Boolean,
 }
