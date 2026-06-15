@@ -19,7 +19,7 @@ Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network 
 | Task | State | Notes |
 |---|---|---|
 | **T0** Acquisition spike | ✅ **resolved** (local, 2026-06-15) | 3 unknowns resolved — [`store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md). `cesvinall` reconstructs `(rev,bmr)` (verified vs store); QCEW size + levels via API slices. |
-| **T0.5** QCEW vintaging | ⏳ **new gate** | Per-industry QCEW rev-0..4 history is **not** re-downloadable from the current API; pick a source (reuse / reconstruct / capture-forward / old-repo) before T5's QCEW path. |
+| **T0.5** QCEW vintaging | 🟡 **de-risked** | Per-industry QCEW vintages aren't on the live API, but the **reference already reconstructs them** (`alt_nfp/…/nfp_ingest/qcew.py` → `data/intermediate/qcew_revisions.parquet`, 554k per-industry vintage rows, store-schema). T0.5 = **port/verify** that method (+ `ownership`), not research. |
 | **T1** Schema & grammar | ✅ **done** (`bc932ba`) | ownership axis, `national` retired, taxonomy + remap, `55` two-level, schema dedup (IND-XC-3), tolerant reader. |
 | **T2** CES builder | 🟢 **unblocked** | T0 resolved: `cesvinall` reconstructs all `(rev,bmr)`; build `(2,1)` **per benchmark** (one row per Feb re-basing), not the old store's collapsed single row. |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
@@ -60,7 +60,21 @@ All three unknowns resolved (read-only: cached `cesvinall` + live QCEW API slice
 
 ## T0.5 — QCEW historical vintaging (new gate, surfaced by T0) `[blocking for QCEW build]`
 
--   [ ] Decide how to source per-industry QCEW rev-0..4 vintages (the live API is current-only; `qcew-revisions.csv` is total-level only): **(a)** reuse the existing store's QCEW captures (re-crosswalk, don't rebuild history); **(b)** reconstruct via total-level revision ratios × current per-industry levels; **(c)** capture-forward only; **(d)** recover per-release captures from `~/Projects/alt_nfp`. Short spike; see `store_rebuild_acquire.md` "OPEN RISK".
+The live QCEW API is current-only and `qcew-revisions.csv` is total-level only, so
+per-industry rev-0..4 history can't be pulled directly. **But the reference already
+solved this:** `~/Projects/alt_nfp/packages/nfp-ingest/src/nfp_ingest/qcew.py`
+reconstructs per-industry vintages, and the built artifact is present in v2 at
+`data/intermediate/qcew_revisions.parquet` (554k rows; `source/geographic/
+industry_type/industry_code/ref_date/vintage_date/revision/benchmark_revision/
+employment`; 37 CES industry codes). Option (d) (saved per-release captures) is
+**out** — neither repo has them.
+
+-   [ ] **Port + verify** the reference's QCEW vintage reconstruction into the v2
+    chain: confirm its method (read `alt_nfp/…/qcew.py`), reproduce the
+    `qcew_revisions.parquet`-shaped per-industry vintage frame, then feed it to
+    T3's `build_qcew_panel` (which expects a `revision`-tagged `raw`). Add the
+    `ownership='private'` tag and re-crosswalk to the new taxonomy. See
+    `store_rebuild_acquire.md` "OPEN RISK".
 
 ------------------------------------------------------------------------
 
