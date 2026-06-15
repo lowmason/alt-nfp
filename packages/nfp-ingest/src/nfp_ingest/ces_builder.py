@@ -107,9 +107,9 @@ def _taxonomy_for(entry) -> tuple[str, str, str]:
     """
     code = entry.industry_code
     if code == "00":
-        return "total", "total", "00"
+        return "total", ownership_for("total", "00"), "00"
     if code == "05":
-        return "total", "private", "05"
+        return "total", ownership_for("total", "05"), "05"
     industry_type = entry.industry_type
     if industry_type == "domain":
         # 06 / 08 are private domains in the rebuilt taxonomy.
