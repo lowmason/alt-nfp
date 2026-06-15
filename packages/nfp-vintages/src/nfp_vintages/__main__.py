@@ -215,6 +215,64 @@ def build(
     build_store(releases_path=releases_path, allow_canonical=allow_canonical)
 
 
+@app.command("build-rebuild")
+def build_rebuild(
+    allow_canonical: bool = typer.Option(
+        False,
+        "--allow-canonical",
+        help=(
+            "Permit writing to the canonical store in place "
+            "(DANGEROUS — only for explicit maintainer override)."
+        ),
+    ),
+) -> None:
+    """Compose CES + QCEW panels into the scratch rebuild store.
+
+    The QCEW levels and size acquire steps are NOT YET IMPLEMENTED (deferred).
+    Running this command will raise NotImplementedError at the first acquire step.
+    See specs/store_rebuild_acquire.md for what remains.
+
+    CES panel is built from the cached cesvinall/ triangular CSVs (no network).
+    QCEW levels and size require the API-slice acquire layer (deferred to T0).
+    """
+    from nfp_ingest.ces_builder import build_ces_panel
+    from nfp_ingest.qcew_crosswalk import build_qcew_panel
+    from nfp_ingest.size_class import build_size_class_panel
+
+    from nfp_vintages.rebuild_store import (
+        _acquire_qcew_levels,  # noqa: PLC2701
+        _acquire_qcew_size_native,  # noqa: PLC2701
+        compose_rebuild_panel,
+        write_rebuild_store,
+    )
+
+    print("=== Build-rebuild: composing CES + QCEW panels ===")
+
+    print("Building CES panel from cesvinall/ triangular CSVs...")
+    ces = build_ces_panel()
+    print(f"  CES: {ces.height:,} rows")
+
+    # DEFERRED: acquire QCEW area-endpoint slices. Raises NotImplementedError.
+    print("Acquiring QCEW levels (DEFERRED — will raise NotImplementedError)...")
+    raw_qcew = _acquire_qcew_levels()
+    qcew_levels = build_qcew_panel(raw_qcew)
+    print(f"  QCEW levels: {qcew_levels.height:,} rows")
+
+    # DEFERRED: acquire QCEW Q1 size-endpoint slices. Raises NotImplementedError.
+    print("Acquiring QCEW size native rows (DEFERRED — will raise NotImplementedError)...")
+    raw_size = _acquire_qcew_size_native()
+    size = build_size_class_panel(raw_size)
+    print(f"  QCEW size: {size.height:,} rows")
+
+    print("Composing panels...")
+    panel = compose_rebuild_panel(ces, qcew_levels, size)
+    print(f"  Combined: {panel.height:,} rows")
+
+    print("Writing rebuild store...")
+    write_rebuild_store(panel, allow_canonical=allow_canonical)
+    print("Done.")
+
+
 @app.command()
 def snapshot(
     as_of: str = typer.Option(
