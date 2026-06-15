@@ -228,12 +228,13 @@ def build_rebuild(
 ) -> None:
     """Compose CES + QCEW panels into the scratch rebuild store.
 
-    The QCEW levels and size acquire steps are NOT YET IMPLEMENTED (deferred).
-    Running this command will raise NotImplementedError at the first acquire step.
-    See specs/store_rebuild_acquire.md for what remains.
-
-    CES panel is built from the cached cesvinall/ triangular CSVs (no network).
-    QCEW levels and size require the API-slice acquire layer (deferred to T0).
+    CES is built from the cached ``cesvinall/`` triangular CSVs (no network).
+    QCEW levels and size are fetched from the BLS API slices (area + size
+    endpoints, 2017-present) via the impersonating client — so this command
+    needs network access, and writes to ``NFP_STORE_URI`` (the scratch
+    ``s3://alt-nfp/store-rebuild`` prefix; the canonical store is refused unless
+    ``--allow-canonical``). See specs/store_rebuild_acquire.md for the acquire
+    design.
     """
     from nfp_ingest.ces_builder import build_ces_panel
     from nfp_ingest.qcew_crosswalk import build_qcew_panel
@@ -252,14 +253,14 @@ def build_rebuild(
     ces = build_ces_panel()
     print(f"  CES: {ces.height:,} rows")
 
-    # DEFERRED: acquire QCEW area-endpoint slices. Raises NotImplementedError.
-    print("Acquiring QCEW levels (DEFERRED — will raise NotImplementedError)...")
+    # Fetch QCEW area-endpoint slices (2017-present, all quarters) → crosswalk.
+    print("Acquiring QCEW levels (BLS area API slices)...")
     raw_qcew = _acquire_qcew_levels()
     qcew_levels = build_qcew_panel(raw_qcew)
     print(f"  QCEW levels: {qcew_levels.height:,} rows")
 
-    # DEFERRED: acquire QCEW Q1 size-endpoint slices. Raises NotImplementedError.
-    print("Acquiring QCEW size native rows (DEFERRED — will raise NotImplementedError)...")
+    # Fetch QCEW Q1 size-endpoint slices (2017-present, size_code 1-9) → crosswalk.
+    print("Acquiring QCEW size native rows (BLS size API slices)...")
     raw_size = _acquire_qcew_size_native()
     size = build_size_class_panel(raw_size)
     print(f"  QCEW size: {size.height:,} rows")
