@@ -138,16 +138,16 @@ Spec §8.
 
 ------------------------------------------------------------------------
 
-## T6 — Acceptance-gate validator (§10) `[depends: T5]`
+## T6 — Acceptance-gate validator (§10) `[depends: T5]` — 🟢 GATES BUILT (`1fba229`); full real-store run owed
 
-Implement the four gates; key on `industry_type + industry_code + ownership + (rev,bmr) + values` using the T1 remap (so code `55` stays unambiguous).
+Five gap-collector gates in `nfp_vintages.rebuild_gates` (+50 unit tests), built via workflow (implement → 4-lens adversarial review → fix) then recalibrated. Key on `industry_type + industry_code + ownership + (rev,bmr)` via the T1 remap (code `55` unambiguous).
 
--   [ ] **History consistency:** rebuilt `source=ces` matches the current store ≤2023 (private hierarchy + `00` anchor); four-combo `(rev,bmr)` reproduces.
--   [ ] **Gap fill (priority):** *hard* — `05` + supersectors current to frontier, 2024-12/2025-12 `(2,1)` complete; *reconstruct-and-validate* — `06`/`08`/sectors refilled, additive nesting validated where present (missing sector-month does not block).
--   [ ] **Reconstruction accuracy:** QCEW vs published CES at benchmark months / annual averages; `81/80/08/05` residual small and **non-negative**. **Set the numeric `|residual|` tolerance here** (owed by this plan per §10) — choose and justify a bound; do not require exact equality.
-    -   *Q1 headline continuity (T5 carry-over):* compose **replaces** the QCEW area all-sizes level with the size-endpoint `total`/`'0'` (= sum of the nine native buckets) on Q1 — spec-faithful (§7/§8), but if size-endpoint coverage ≠ area-endpoint coverage the two totals diverge and Q1 headline values become discontinuous with Q2–Q4. Add a gate check that the Q1 `total`/`'0'` matches the area-endpoint all-sizes level within tolerance.
--   [ ] **Vintage integrity:** `_validate_censored_selection`-style checks on an as-of slice (no dups, no cross-vintage sums, no nulls/zeros).
--   [ ] **Acceptance:** validator runs against the scratch store and reports pass/fail per gate; gates are tests, not prose.
+-   [x] **History consistency** (`gate_history_consistency`): remaps the legacy store, cohort-aligned `(2,1)` join, four-combo `(rev,bmr)` for root + `00` anchor. Code done; **real-store run owed** (needs the dual-store harness: scratch *and* canonical).
+-   [x] **Gap fill** (`gate_gap_fill`): HARD `05`+supersectors-to-frontier + Dec `(2,1)`; SOFT additive nesting (`05=06+08`, supersectors sum, sectors sum), `(2,1)` fan-out collapsed, missing-component skip. Code done; real-store run owed.
+-   [x] **Reconstruction accuracy** (`gate_reconstruction_accuracy`): **RECALIBRATED** — the §10 "small *non-negative* residual" was wrong (verified: rebuild == published QCEW to the unit; QCEW < CES is definitional). Now expects per-series bands `_EXPECTED_QCEW_CES_RESIDUAL` {05:-2.5%, 08:-2.9%, 80/81:-22.5%} ±`_QCEW_CES_RESIDUAL_BAND`; HARD on out-of-band/positive/settled-implausible-collapse; SOFT-warns the unsettled frontier (auto-detected latest year) + COVID. New **`gate_qcew_fidelity`** (rebuilt-QCEW vs published-QCEW, to-the-unit) is the true accuracy check. **✅ GREEN against the rebuilt store** (0 HARD; 9 frontier + 96 COVID SOFT). `specs/ces_qcew_industry.md` §8 corrected.
+    -   *Q1 continuity (T5 carry-over):* `gate_q1_continuity` — temporal-neighbour proxy (the literal area-vs-size diff is impossible post-compose); SOFT/diagnostic-only.
+-   [x] **Vintage integrity** (`gate_vintage_integrity`): `_validate_censored_selection`-style (no dups, one vintage per series-month, no null/zero). Code done; real-store run owed.
+-   [ ] **Acceptance (owed):** run all five against the real stores (history needs canonical+scratch; gap-fill/integrity against scratch) for a complete pass/fail verdict. Reconstruction is already green; the others are code-complete but unrun on the real store.
 
 ------------------------------------------------------------------------
 
