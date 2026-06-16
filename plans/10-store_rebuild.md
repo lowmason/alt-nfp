@@ -12,9 +12,9 @@
 
 ------------------------------------------------------------------------
 
-## Status (2026-06-15)
+## Status (2026-06-16)
 
-Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network / store creds) await the maintainer's local runs.
+Builder + gate **code** is complete (T0–T6). The **full rebuild has run** to scratch (maintainer, 2026-06-16) and is verified faithful to published QCEW; the **reconstruction gate is green** against it. Remaining: run the other three gates against the real stores (T6 acceptance), re-baseline goldens (T7), and promote (T8, maintainer GO).
 
 | Task | State | Notes |
 |---|---|---|
@@ -24,10 +24,10 @@ Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network 
 | **T2** CES builder | ✅ **done** (`e662329`) | `nfp_ingest.ces_builder.build_ces_panel`: `cesvinall` → `(0,0)/(1,0)/(2,0)` + **per-benchmark** `(2,1)` (value+date same benchmark, no lookahead), ownership taxonomy, pure `as_of`. Spec + code-quality reviews passed; 10 tests, store anchors verified (Jun-2023 `00`). |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
 | **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
-| **T5** Build orchestration | 🟢 **code-complete** (`fa5168a`) | Compose + guarded scratch write + `build-rebuild` CLI + **acquire layer** all done & reviewed (compose: `523f808`; acquire: `77c5a9f`/`e3aa7c7`/`d9ae49d`/`fa5168a`). Acquire = httpx API slices (area per-qtr + size per-Q1, 2017+), size crosswalk **reuses `build_qcew_panel`** via agglvl −10 remap, per `size_code`; drops `disclosure_code='N'`; excludes the 61–64 duplicate family. Spec + 2× code-quality reviews passed; 26 unit tests + 9 network-marked (maintainer-run). **Only remaining: the maintainer runs `alt-nfp build-rebuild` to scratch** (BLS network + `NFP_STORE_URI` creds). |
-| **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
-| **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
-| **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
+| **T5** Build orchestration | ✅ **done** (`fa5168a`; run 2026-06-16) | Compose + guarded write + `build-rebuild` CLI + httpx API-slice acquire (area per-qtr + size per-Q1; size crosswalk reuses `build_qcew_panel` via agglvl −10 remap; drops `disclosure_code='N'`; excludes the 61–64 dup). **Full rebuild ran to scratch** (CES 16,408 / QCEW 17,880 rows, 2017+) and is verified faithful to published QCEW (Other Services 80 == published QCEW NAICS 81 to the unit); canonical untouched. |
+| **T6** Acceptance-gate validator | 🟢 **gates built** (`1fba229`); 1/5 run | 5 gates + 50 unit tests; reconstruction gate **recalibrated + GREEN** against the rebuilt store (QCEW≤CES bands; frontier+COVID SOFT). History/gap-fill/vintage-integrity are **code-complete but unrun** on the real stores (history needs canonical+scratch). |
+| **T7** Re-baseline goldens | ⬜ depends T6 | Needs the other gates run + scratch store. |
+| **T8** Promotion | ⬜ depends T6/T7 + GO | Maintainer approval; scratch→canonical cutover. |
 
 Full non-network suite green (513 passed; only the 2 pre-existing `claims`/`jolts` indicator env-failures, unrelated to the rebuild). `ruff check .` clean.
 
@@ -127,14 +127,14 @@ Spec §8.
 
 ------------------------------------------------------------------------
 
-## T5 — Build orchestration → scratch (`nfp-vintages` CLI) `[depends: T2, T3, T4]` — 🟢 CODE-COMPLETE (`fa5168a`); run owed
+## T5 — Build orchestration → scratch (`nfp-vintages` CLI) `[depends: T2, T3, T4]` — ✅ DONE (`fa5168a`; run 2026-06-16)
 
 -   [x] **Compose glue (done, unit-tested):** `compose_rebuild_panel(ces, qcew_levels, size=None)` unions the three panels via `diagonal_relaxed` (null-fills the size cols `build_qcew_panel` omits) and enforces §7: for Q1, drop a `qcew_levels` null-size row **only** where the size frame has a `total`/`'0'` (all-sizes) row for that 6-col series identity (`geo_type, geo_code, ownership, industry_type, industry_code, ref_date`) — a conditional anti-join, **not** a month filter, so partial-coverage industries keep their null-size level. Q2–Q4 use the T3 null-size rows. Tests cover no-double-emit (exactly one `all_sizes_predicate` row), partial coverage (both branches), and non-Q1 never dropped.
 -   [x] **Guard (done):** `write_rebuild_store(panel, store_path=None, *, allow_canonical=False)` raises before any I/O when `is_canonical_store(store_path)` and not `allow_canonical`; mirrors `build_store`'s Hive write (untouched). Null-`vintage_date` partitions fail loud (no `v_None_None.parquet`).
 -   [x] **CLI (wired):** `alt-nfp build-rebuild [--allow-canonical]` wires `build_ces_panel()` → acquire-QCEW → acquire-size → compose → guarded write. The two acquire steps are `NotImplementedError` seams (`_acquire_qcew_levels`, `_acquire_qcew_size_native`) pointing to `store_rebuild_acquire.md`.
 -   [x] **Acquire layer (done):** httpx API-slice fetchers — `_acquire_qcew_levels` (area per-qtr `…/api/{y}/{q}/area/US000.csv`, all 4 qtrs) + `_acquire_qcew_size_native` (size per-Q1 `…/api/{y}/1/size/{1-9}.csv`), `own_code=5`, 2017+, `revision=0`, 404-tolerant. **Transport = plain httpx** (`create_client`) — `data.bls.gov` is not Akamai-fingerprinted (only www.bls.gov is); the singlefile/`_WANTED_AGGLVL` path stays untouched. Disclosure: drop `disclosure_code='N'` (withheld); the 61–64 duplicate family is excluded by the 21–28 filter.
 -   [x] **QCEW size crosswalk (done — no new pull maps needed):** the size tree = the area tree shifted **+10 agglvl** (verified live: 23=supersector…26=4-digit incl. `1133`). So `_size_raw_to_native` remaps agglvl **−10** and reuses the T3-tested `build_qcew_panel`, run **once per `size_code`** (its grouping has no size axis — a combined call would sum across size classes), then re-tags `size_code` → `native`. Suppression contained to sectors `31`/`32`/`11` (3/4-digit); hard-gate levels exact. Tests: per-size_code independence, 61–64 exclusion, disclosure null-safety, round-trip through `build_size_class_panel`.
--   [ ] **Owed — acceptance run (maintainer / network):** run `uv run alt-nfp build-rebuild` with `NFP_STORE_URI=s3://alt-nfp/store-rebuild` + `AWS_*` creds set. (The canonical-refusal guard is already proven by `test_raises_for_canonical_store`; the 9 `@network` probe tests validate the live BLS fetch.)
+-   [x] **Acceptance run (done, maintainer, 2026-06-16):** `alt-nfp build-rebuild` ran to `s3://alt-nfp/store-rebuild` — CES 16,408 / QCEW 17,880 rows (2017+); structure verified (ownership axis, four `(rev,bmr)`, size cross-product, `05=06+08` exact) and **faithful to published QCEW** (Other Services `80` == published QCEW NAICS `81` to the unit @ 2024-06). Canonical untouched (guard held). Known frontier-lag: 2025-Q1 size/sector-detail tables hadn't published (SOFT-warned by the reconstruction gate; fills on the next rebuild).
 
 ------------------------------------------------------------------------
 
