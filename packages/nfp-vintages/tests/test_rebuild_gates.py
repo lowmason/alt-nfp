@@ -807,20 +807,17 @@ class TestGateReconstructionAccuracy:
         assert not hard, "\n".join(gaps)
 
     def test_settled_month_collapse_fails_hard(self) -> None:
-        """A >50% collapse in a SETTLED month HARD-fails (not hidden as SOFT).
+        """An implausible collapse in a SETTLED month HARD-fails (not hidden as SOFT).
 
-        The pre-fix frontier rule was a pure VALUE test with no date gate, so a
-        catastrophic collapse in a settled month (e.g. 2024-03) — which has a clean
-        prior-year 2023-03 row — was silently downgraded to SOFT and dropped from
-        the band; the median of the surviving months stayed clean.  The fix
-        date-scopes the frontier exclusion to the 2025-Q1 window AND adds a
-        per-month implausible-collapse floor, so a settled-month collapse stays in
-        the clean set and trips the floor as a HARD failure.
+        The frontier exclusion is date-scoped to the unsettled window, so the SAME
+        implausible-collapse signal in settled history is NOT excused as lag — it
+        stays in the clean set and trips the per-month implausible-collapse floor as
+        a HARD failure (otherwise the median could absorb it).  Here the window is
+        pinned to 2025-01-01, so the 2024-03 collapse is settled and must HARD-fail.
         """
-        # 80 series: 2022/2023 in-band at -22.5%, 2024-03 collapses to ~-67%
-        # (2000 vs prior-year 2023-03 = 4650 -> ratio 0.43, < 0.5).  2024-03 is
-        # SETTLED (before the 2025-01-01 frontier window), so it must NOT be
-        # excluded — it must HARD-fail.
+        # 80 series: 2022/2023 in-band at -22.5%, 2024-03 collapses to ~-67%.
+        # 2024-03 is SETTLED relative to the pinned 2025-01-01 window, so it must
+        # NOT be excused as frontier — it must HARD-fail the floor.
         refs = [date(y, 3, 12) for y in (2022, 2023, 2024)]
         ces_rows = [
             _row(industry_type="supersector", industry_code="80",
@@ -836,7 +833,10 @@ class TestGateReconstructionAccuracy:
                      ownership="private", ref_date=ref, employment=emp,
                      source="qcew")
             )
-        gaps = gate_reconstruction_accuracy(_frame(qcew_rows), _frame(ces_rows))
+        gaps = gate_reconstruction_accuracy(
+            _frame(qcew_rows), _frame(ces_rows),
+            frontier_window_start=date(2025, 1, 1),
+        )
         hard = [g for g in gaps if not g.startswith("SOFT:")]
         assert hard, "\n".join(gaps)
         assert any("implausible collapse" in g for g in hard)

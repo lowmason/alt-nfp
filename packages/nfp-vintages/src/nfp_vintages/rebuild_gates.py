@@ -565,10 +565,6 @@ _IMPLAUSIBLE_COLLAPSE_MARGIN: float = 0.15
 # data-relative value rule (QCEW << prior-year) is a NECESSARY but not sufficient
 # condition: a settled-history month that collapses is a reconstruction error, not
 # an incomplete frontier, so it must stay in the hard band and trip the floor.  The
-# 2025-Q1 frontier (verified domain 06 -88%) carries partial size data; settled =
-# anything before this date.
-_FRONTIER_WINDOW_START: date = date(2025, 1, 1)
-
 # CES carries Other Services ONLY as supersector/80 (verified 0 CES sector/81
 # rows), so QCEW sector/81 is compared against CES supersector/80.  Every other
 # residual series maps to its own (industry_type, industry_code) on the CES side.
@@ -589,8 +585,7 @@ def gate_reconstruction_accuracy(
     *,
     band: dict[str, float] | None = None,
     pos_margin: float = 0.01,
-    frontier_min_ratio: float = 0.5,
-    frontier_window_start: date = _FRONTIER_WINDOW_START,
+    frontier_window_start: date | None = None,
     implausible_collapse_margin: float = _IMPLAUSIBLE_COLLAPSE_MARGIN,
 ) -> list[str]:
     """Rebuilt-QCEW vs published-CES DEFINITIONAL-residual band gate (§10).
@@ -606,23 +601,17 @@ def gate_reconstruction_accuracy(
     ``qcew.employment / ces.employment - 1`` over shared ref_dates, then:
 
     * **Excluded from the median** — COVID years (2020, 2021) and
-      incomplete-frontier months.  Frontier rule (data-relative AND date-scoped):
+      incomplete-frontier months.  Frontier rule (collapse-signal AND date-scoped):
       a month qualifies as incomplete-frontier ONLY when it both (a) falls on/after
-      ``frontier_window_start`` (default 2025-01-01, the known-incomplete 2025-Q1
-      window) AND (b) has a QCEW headline below ``frontier_min_ratio`` (default 0.5)
-      of the SAME series' prior-year same-month QCEW level.  The date gate is
-      load-bearing: a pure value test would let a catastrophic collapse in a
-      SETTLED month be downgraded to SOFT and dropped from the band, the bigger the
-      break the more likely the exclusion — exactly the hole this gate must not
-      have.  A collapse in settled history is a reconstruction error, so it stays
-      in the hard band and trips the floor below.
-
-      The median is already robust to *moderate* frontier outliers (a single
-      -20% 2025-Q1 month against many settled -2.5% months barely moves it), so
-      the value rule only needs to excise the *extreme* collapses; it
-      intentionally leaves a -20% month (05's frontier, ~82% of prior, above the
-      0.5 ratio) in, where the median absorbs it.  Cranking the ratio up to catch
-      that too would risk dropping legitimate year-over-year swings.
+      ``frontier_window_start`` (the unsettled window; defaults to the latest
+      calendar year in the data, where the QCEW size / sector-detail tables lag the
+      area tables — verified 2025-Q1: domain 06 -88%, total 05 -20%) AND (b) shows
+      an implausible collapse (residual more negative than
+      ``expected - implausible_collapse_margin``).  The date gate is load-bearing:
+      the SAME collapse signal in SETTLED history is a reconstruction error, so it
+      stays in the hard band and trips the floor below — it is never downgraded to
+      SOFT.  Normal-magnitude months in the frontier window stay in the band (only
+      the implausibly-collapsed ones are excused as lag).
 
       Both classes of exclusion — COVID years and incomplete-frontier months —
       are SOFT-reported (one line each) so the maintainer sees every month that
@@ -718,53 +707,41 @@ def gate_reconstruction_accuracy(
         return ["reconstruction: no shared (industry, ref_date) rows to compare"]
     merged = pl.concat(rows, how="vertical")
 
-    # Incomplete-frontier detection (data-relative value rule AND date gate): a
-    # month qualifies as incomplete-frontier ONLY when it both (a) falls on/after
-    # ``frontier_window_start`` (the known-incomplete 2025-Q1 window) AND (b) has a
-    # QCEW headline below ``frontier_min_ratio`` of the SAME series' prior-year
-    # same-month QCEW level.  The date gate is load-bearing: without it a
-    # catastrophic collapse in a SETTLED month would be silently downgraded to SOFT
-    # and dropped from the band (the bigger the break, the more certain the
-    # exclusion).  Self-join on the original QCEW series + (ref_date - 1y).
-    series_cols = [
-        "geographic_type", "geographic_code", "ownership",
-        "industry_type", "industry_code",
-    ]
-    prior = (
-        merged.select([*series_cols, "ref_date", "_qcew"])
-        .rename({"_qcew": "_qcew_prior", "ref_date": "_prior_ref"})
+    # Expected per-series definitional residual + the implausible-collapse signal
+    # (a residual more negative than ``expected - implausible_collapse_margin``).
+    merged = merged.with_columns(
+        pl.col("industry_code")
+        .replace_strict(_EXPECTED_QCEW_CES_RESIDUAL, default=None)
+        .alias("_expected")
+    ).with_columns(
+        (pl.col("_resid") < pl.col("_expected") - implausible_collapse_margin)
+        .alias("_implausible")
     )
-    merged = (
-        merged.with_columns(
-            pl.col("ref_date").dt.offset_by("-1y").alias("_lookup")
-        )
-        .join(
-            prior,
-            left_on=[*series_cols, "_lookup"],
-            right_on=[*series_cols, "_prior_ref"],
-            how="left",
-        )
-        .with_columns(
-            (
-                (pl.col("ref_date") >= frontier_window_start)
-                & pl.col("_qcew_prior").is_not_null()
-                & (pl.col("_qcew") < frontier_min_ratio * pl.col("_qcew_prior"))
-            ).alias("_is_frontier")
-        )
-    )
+
+    # Incomplete-frontier detection: an implausible collapse INSIDE the unsettled
+    # frontier window — the latest, still-settling calendar year, where the QCEW
+    # size / sector-detail tables lag the area tables (verified 2025-Q1: domain 06
+    # -88%, total 05 -20%).  An implausible collapse in SETTLED history is NOT
+    # frontier — it stays in the hard band and trips the floor below (a settled
+    # collapse is a reconstruction error, not lag).  The window auto-detects from
+    # the data (max ref_date year) unless pinned via ``frontier_window_start``; the
+    # date gate is load-bearing so a settled-month break is never downgraded to SOFT.
+    if frontier_window_start is None:
+        max_year = merged["ref_date"].dt.year().max()
+        frontier_window_start = date(int(max_year), 1, 1)
 
     year = pl.col("ref_date").dt.year()
     is_covid = year.is_in(list(_COVID_YEARS))
-    is_frontier = pl.col("_is_frontier")
+    is_frontier = (pl.col("ref_date") >= frontier_window_start) & pl.col("_implausible")
 
-    # SOFT-report the excluded frontier months (so the maintainer sees them).
+    # SOFT-report the excluded frontier months.  ``& ~is_covid`` so a COVID-year
+    # month is reported once (under COVID), partitioning the two SOFT lines.
     excluded = merged.filter(is_frontier & ~is_covid)
     if not excluded.is_empty():
         ex = [
             f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
-            f"resid={r['_resid']:.3f} (incomplete frontier: QCEW "
-            f"{r['_qcew']:.1f} < {frontier_min_ratio:.0%} of prior-year "
-            f"{r['_qcew_prior']:.1f})"
+            f"resid={r['_resid']:+.3f} (expected {r['_expected']:+.3f}; incomplete "
+            f"frontier >= {frontier_window_start} — QCEW size/detail tables lag)"
             for r in excluded.sort("ref_date").head(5).iter_rows(named=True)
         ]
         gaps.append(
@@ -772,11 +749,7 @@ def gate_reconstruction_accuracy(
             f"months from the band check:\n" + "\n".join(ex)
         )
 
-    # SOFT-report the excluded COVID months too (so the maintainer sees both
-    # classes of exclusion, not just the frontier one).  Filtered on plain
-    # ``is_covid`` (the frontier line above carries ``& ~is_covid``), so the two
-    # SOFT lines partition the excluded set without double-counting a month that
-    # is both COVID and frontier.
+    # SOFT-report the excluded COVID months too (both classes stay visible).
     covid_excluded = merged.filter(is_covid)
     if not covid_excluded.is_empty():
         cx = [
@@ -792,26 +765,18 @@ def gate_reconstruction_accuracy(
     clean = merged.filter(~is_covid & ~is_frontier)
     if clean.is_empty():
         # HARD (not SOFT): an all-excluded series would otherwise let a systematic
-        # collapse slip through.  The date-scoped frontier rule makes this
-        # unreachable for settled history, but the hard path closes the hole.
+        # collapse slip through.
         gaps.append(
             "reconstruction: no clean (non-COVID, non-frontier) months to "
             "band-check — every comparable month was excluded"
         )
         return gaps
 
-    # HARD per-month floor: a clean month whose residual is more negative than
-    # ``expected - implausible_collapse_margin`` is an implausible coverage
-    # collapse the median would otherwise absorb.  Independent of the frontier
-    # exclusion (now date-scoped), so a settled-month collapse trips here.
-    clean = clean.with_columns(
-        pl.col("industry_code")
-        .replace_strict(_EXPECTED_QCEW_CES_RESIDUAL, default=None)
-        .alias("_expected")
-    )
-    collapsed = clean.filter(
-        pl.col("_resid") < pl.col("_expected") - implausible_collapse_margin
-    )
+    # HARD per-month floor: a SETTLED clean month with an implausible collapse.
+    # In-window implausible collapses are SOFT frontier (above) and excluded from
+    # ``clean``; what remains implausible in ``clean`` is therefore settled history
+    # — a real reconstruction error the median would otherwise absorb.
+    collapsed = clean.filter(pl.col("_implausible"))
     if not collapsed.is_empty():
         ex = [
             f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
@@ -820,7 +785,7 @@ def gate_reconstruction_accuracy(
             for r in collapsed.sort("ref_date").head(5).iter_rows(named=True)
         ]
         gaps.append(
-            f"reconstruction: {collapsed.height} clean months show an implausible "
+            f"reconstruction: {collapsed.height} settled months show an implausible "
             f"collapse (residual >{implausible_collapse_margin:.0%} below "
             f"expected — not the definitional gap):\n" + "\n".join(ex)
         )
