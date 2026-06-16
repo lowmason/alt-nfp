@@ -301,6 +301,9 @@ supersector `55` (Financial activities) vs sector `55` (Management of companies)
 - **History consistency:** rebuilt `source=ces` prints match the current store's
   rows where both exist (≤2023, the known-good core) — for the private hierarchy
   **and** the `00` anchor. The four-combo `(rev,bmr)` population must reproduce.
+  *(Recalibrated 2026-06-16 — see the implementation note below: HARD only on the
+  benchmark-**free** `(0,0)`/`(1,0)` prints; the benchmark cohorts are SOFT, with
+  the HARD rail moved to the new `gate_ces_fidelity`.)*
 - **Gap fill — priority-ordered:**
   - *Hard gate:* `05` + the supersectors current to the published frontier (what
     the nowcast and the supersector narrative read today), and the 2024-12 /
@@ -318,6 +321,23 @@ supersector `55` (Financial activities) vs sector `55` (Management of companies)
   gate is operational; do not hardcode equality).
 - **Vintage integrity:** `_validate_censored_selection`-style fail-fast checks pass
   on an as-of slice (no dups, no cross-vintage sums, no nulls/zeros).
+
+**Implementation note (2026-06-16) — history recalibration + `gate_ces_fidelity`.**
+Run against the real stores, the history gate's original premise ("rebuilt
+reproduces the legacy store to 0.5k on all four `(rev,bmr)` cohorts") proved wrong
+for the **benchmark-bearing** cohorts. A primary-source cross-check against the raw
+`cesvinall` triangle showed the rebuilt `(2,0)` *and* `(2,1)` reproduce the literal
+published cells **to the unit** (including the per-benchmark `(2,1)` fan-out), while
+the **legacy store deviates** — its `(2,1)` mis-stamped the *latest* benchmark value
+under the *earliest* `vintage_date` (a lookahead contamination from the old
+benchmark splice). The benchmark-**free** `(0,0)`/`(1,0)` prints reproduce the legacy
+store **exactly** (0/2520 diverge). So the gate now keys the verdict by cohort: HARD
+on `(0,0)`/`(1,0)`-vs-legacy + the four-combo population; SOFT on `(2,0)`/`(2,1)`-vs-legacy
+(the rebuild correctly diverges from a buggy reference). The HARD accuracy rail on
+the benchmark cohorts moves to a new **`gate_ces_fidelity`** (rebuilt CES `==` a fresh
+`build_ces_panel(cesvinall)`, to the unit) — the CES analogue of `gate_qcew_fidelity`.
+This mirrors the reconstruction-gate recalibration: a §10 premise that contradicted
+verified-correct rebuilt data was corrected against ground truth, not the data.
 
 **Promotion:** once gates pass, cut over deliberately (repoint `NFP_STORE_URI` to
 the validated prefix, or copy scratch→canonical with the explicit

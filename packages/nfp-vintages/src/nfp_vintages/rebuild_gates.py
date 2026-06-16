@@ -127,13 +127,22 @@ def gate_history_consistency(
       supersectors/sectors unchanged with ``ownership='private'``).  The
       *rebuilt* store already carries those axes — leave it alone.
     * For (series, ref_date, revision, benchmark_revision) rows present in
-      BOTH stores, ``employment`` must match within ``abs_tol + rel_tol * |old|``.
-      A rebuilt store reproducing the old core should match to rounding, so the
-      tolerance is deliberately tight: ``abs_tol=0.5`` covers thousands-precision
-      rounding and ``rel_tol=1e-6`` is a near-zero relative rail (at a 130 000
-      total-private level the admitted slack is ≈0.63, not the ~13 500 a looser
-      ``rel_tol`` would permit — a single-digit-thousands reconstruction drift
-      must FAIL this gate, not slip through as "rounding").
+      BOTH stores, ``employment`` is compared within ``abs_tol + rel_tol * |old|``
+      (``abs_tol=0.5`` covers thousands-precision rounding; ``rel_tol=1e-6`` is a
+      near-zero relative rail).  The verdict is **split by cohort**:
+
+      - **HARD** — the benchmark-free prints ``(0,0)``/``(1,0)`` must reproduce the
+        legacy store to that tolerance.  These carry no annual-benchmark
+        ambiguity (verified 2026-06-16: 0/2520 diverge on the real stores), so a
+        drift is a genuine reconstruction bug.
+      - **SOFT** — the benchmark-bearing cohorts ``(2,0)``/``(2,1)`` are reported
+        ``"SOFT: "`` only.  The legacy benchmark splice deviates from
+        BLS-published cesvinall (its ``(2,1)`` mis-stamped the *latest* benchmark
+        value under the *earliest* ``vintage_date`` — a lookahead bug); the
+        rebuilt store reproduces the literal cesvinall cells to the unit, so it
+        *correctly* diverges from legacy here.  The HARD accuracy rail on these
+        cohorts is :func:`gate_ces_fidelity` (rebuilt vs cesvinall), not this
+        legacy-store comparison.
     * The four ``(revision, benchmark_revision)`` cohorts
       ``{(0,0),(1,0),(2,0),(2,1)}`` must all appear in the rebuilt CES for the
       private hierarchy **and** the ``00`` anchor.
@@ -256,17 +265,44 @@ def gate_history_consistency(
         (pl.col("employment") - pl.col("_employment_old")).abs()
         > (abs_tol + rel_tol * pl.col("_employment_old").abs())
     )
-    if not mismatched.is_empty():
-        examples = [
+
+    # Split the divergence by cohort.  The benchmark-FREE prints (0,0)/(1,0)
+    # carry no annual-benchmark ambiguity, so the rebuilt store must reproduce
+    # the legacy store's first/second prints to rounding — a drift here is a real
+    # reconstruction bug (HARD).  The benchmark-BEARING cohorts (2,0)/(2,1) are a
+    # different matter: verified against the real stores (2026-06-16), the legacy
+    # benchmark splice deviates from BLS-published cesvinall — its (2,1) even
+    # mis-stamped the latest benchmark value under the earliest vintage_date (a
+    # lookahead bug) — while the rebuilt store reproduces the literal cesvinall
+    # cells to the unit.  So a (2,0)/(2,1)-vs-legacy divergence is a *documented
+    # expected* divergence (the rebuild diverges toward ground truth), reported
+    # SOFT; the HARD accuracy rail on those cohorts is :func:`gate_ces_fidelity`
+    # (rebuilt vs cesvinall), not this legacy-store comparison.
+    _benchmark_free = (pl.col("benchmark_revision") == 0) & (pl.col("revision") < 2)
+    prebench = mismatched.filter(_benchmark_free)
+    bench = mismatched.filter(~_benchmark_free)
+
+    def _examples(frame: pl.DataFrame) -> str:
+        return "\n".join(
             f"  {r['industry_type']}/{r['industry_code']} "
             f"(own={r['ownership']}) ref={r['ref_date']} "
             f"(rev,bmr)=({r['revision']},{r['benchmark_revision']}): "
             f"rebuilt={r['employment']} old={r['_employment_old']}"
-            for r in mismatched.head(5).iter_rows(named=True)
-        ]
+            for r in frame.head(5).iter_rows(named=True)
+        )
+
+    if not prebench.is_empty():
         gaps.append(
-            f"history: {mismatched.height} CES employment values diverge from "
-            f"the existing store on the ≤2023 core:\n" + "\n".join(examples)
+            f"history: {prebench.height} CES benchmark-free (rev 0/1) employment "
+            f"values diverge from the existing store on the ≤2023 core:\n"
+            + _examples(prebench)
+        )
+    if not bench.is_empty():
+        gaps.append(
+            f"SOFT: history {bench.height} CES benchmark-cohort (2,0)/(2,1) values "
+            f"diverge from the existing store — expected: the legacy benchmark "
+            f"splice deviates from BLS-published cesvinall, which gate_ces_fidelity "
+            f"checks the rebuild reproduces:\n" + _examples(bench)
         )
 
     return gaps
@@ -313,6 +349,97 @@ def _cohort_aligned_match(
         rebuilt.filter(is_2_1), existing.filter(is_2_1), [*base_key, "vintage_date"]
     )
     return pl.concat([non21, only21])
+
+
+# ---------------------------------------------------------------------------
+# Gate 1b — CES fidelity (rebuilt CES vs cesvinall reference)
+# ---------------------------------------------------------------------------
+
+
+def gate_ces_fidelity(
+    rebuilt_ces: pl.DataFrame,
+    reference_ces: pl.DataFrame,
+    *,
+    abs_tol: float = 0.5,
+    rel_tol: float = 0.0,
+) -> list[str]:
+    """Rebuilt CES reproduces the cesvinall-derived reference to the unit.
+
+    The TRUE CES reconstruction-accuracy rail (the CES analogue of
+    :func:`gate_qcew_fidelity`).  Where :func:`gate_history_consistency`
+    compares against the *legacy store* — whose benchmark splice deviates from
+    BLS-published cesvinall on the ``(2,0)``/``(2,1)`` cohorts — this gate
+    compares against the cesvinall triangle itself (the reference is a fresh
+    ``build_ces_panel`` of the raw ``cesvinall`` CSVs).  It is therefore the
+    HARD accuracy check on the benchmark-bearing cohorts the history gate now
+    treats SOFT: a real benchmark-walk regression (off-by-one, wrong
+    ``vintage_date`` stamp) that the legacy comparison can no longer catch must
+    fail HERE.
+
+    Both frames are reduced to the all-sizes level, then compared on the full
+    per-vintage key ``(geographic_type, geographic_code, ownership,
+    industry_type, industry_code, ref_date, revision, benchmark_revision,
+    vintage_date)`` — ``vintage_date`` is in the key so the ``(2,1)``
+    per-benchmark fan-out aligns cohort-for-cohort:
+
+    * **Hard** (failing entry): for rows present in BOTH, an absolute mismatch
+      ``|rebuilt - reference| > abs_tol + rel_tol * |reference|``.
+    * **Soft** (``"SOFT: "``): rows present on only one side (a coverage /
+      ``as_of`` frontier difference, not a value corruption).
+
+    This is a SAME-SOURCE, to-the-unit reproduction (rebuilt CES == the
+    cesvinall triangle), so the tolerance is a flat absolute rounding rail:
+    ``rel_tol=0`` and ``abs_tol=0.5`` (employment in thousands, stored rounded
+    to integer thousands).  A magnitude-scaling ``rel_tol`` is rejected for the
+    same reason as :func:`gate_qcew_fidelity` — it would wave through a
+    hundreds-to-thousands-of-jobs store-write corruption at the total level.
+
+    Pure: frames in, gaps out.  No I/O.
+    """
+    gaps: list[str] = []
+    key = [*_SERIES_KEY, "ref_date", "revision", "benchmark_revision", "vintage_date"]
+    rebuilt = _all_sizes(rebuilt_ces)
+    reference = _all_sizes(reference_ces)
+    if rebuilt.is_empty() or reference.is_empty():
+        return ["fidelity: rebuilt or reference CES frame is empty"]
+
+    left = rebuilt.select([*key, "employment"]).rename({"employment": "_rebuilt"})
+    right = reference.select([*key, "employment"]).rename({"employment": "_reference"})
+
+    matched = left.join(right, on=key, how="inner")
+    bad = matched.filter(
+        (pl.col("_rebuilt") - pl.col("_reference")).abs()
+        > (abs_tol + rel_tol * pl.col("_reference").abs())
+    )
+    if not bad.is_empty():
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']} "
+            f"(rev,bmr)=({r['revision']},{r['benchmark_revision']}): "
+            f"rebuilt={r['_rebuilt']:.3f} reference={r['_reference']:.3f}"
+            for r in bad.head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"fidelity: {bad.height} CES values differ from the cesvinall "
+            f"reference beyond {abs_tol}+{rel_tol:.0e}*|ref|:\n" + "\n".join(ex)
+        )
+
+    only_rebuilt = left.join(right, on=key, how="anti")
+    only_reference = right.join(left, on=key, how="anti")
+    for frame, where in ((only_rebuilt, "rebuilt"), (only_reference, "reference")):
+        if frame.is_empty():
+            continue
+        missing_side = "reference" if where == "rebuilt" else "rebuilt"
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']} "
+            f"(rev,bmr)=({r['revision']},{r['benchmark_revision']})"
+            for r in frame.sort(key).head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"SOFT: fidelity {frame.height} CES rows present in {where} but "
+            f"missing in {missing_side}:\n" + "\n".join(ex)
+        )
+
+    return gaps
 
 
 # ---------------------------------------------------------------------------
