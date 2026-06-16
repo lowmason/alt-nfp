@@ -26,9 +26,12 @@ from nfp_lookups.industry import QCEW_SUPERSECTOR
 from nfp_lookups.paths import VINTAGE_STORE_PATH
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 from nfp_vintages.rebuild_gates import (
+    _EXPECTED_QCEW_CES_RESIDUAL,
+    _QCEW_CES_RESIDUAL_BAND,
     gate_gap_fill,
     gate_history_consistency,
     gate_q1_continuity,
+    gate_qcew_fidelity,
     gate_reconstruction_accuracy,
     gate_vintage_integrity,
 )
@@ -631,96 +634,278 @@ class TestGateGapFill:
 
 
 class TestGateReconstructionAccuracy:
-    _REF = date(2023, 3, 12)  # a March benchmark month
+    """QCEW-vs-CES definitional-residual band gate (recalibrated).
+
+    The rebuilt QCEW is faithful to published QCEW (UI-covered employment); CES
+    estimates ALL nonfarm payroll incl. UI-exempt orgs.  So ``QCEW < CES`` is the
+    EXPECTED direction and the gate checks each series' MEDIAN residual
+    (``qcew/ces - 1``) against a per-series expected band, not a hard sign.
+    """
+
+    # Several settled, non-COVID months so the per-series MEDIAN is meaningful.
+    _REFS = [date(y, 3, 12) for y in (2022, 2023, 2024)]
+
+    def _pair_at_residuals(
+        self, residuals: dict[str, float], refs: list[date] | None = None
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """Build a QCEW/CES pair whose per-series residual is *exactly* given.
+
+        ``residuals`` maps an industry_code in {05, 08, 80, 81} to a fraction
+        ``r``; QCEW is stamped at ``ces * (1 + r)``.  CES carries Other Services
+        ONLY as supersector/80 (verified 0 CES sector/81 rows), so QCEW sector/81
+        is compared to CES supersector/80.
+        """
+        refs = refs or self._REFS
+        # Fixed CES base levels per series (headline thousands).
+        ces_base = {"05": 130_000.0, "08": 105_000.0, "80": 6_000.0}
+        ces_meta = {
+            "05": ("total", "05"),
+            "08": ("domain", "08"),
+            "80": ("supersector", "80"),
+        }
+        # QCEW carries the same three PLUS a sector/81 (maps to CES 80).
+        qcew_meta = {
+            "05": ("total", "05"),
+            "08": ("domain", "08"),
+            "80": ("supersector", "80"),
+            "81": ("sector", "81"),
+        }
+        ces_rows: list[dict] = []
+        qcew_rows: list[dict] = []
+        for ref in refs:
+            for code, (it, ic) in ces_meta.items():
+                ces_rows.append(
+                    _row(industry_type=it, industry_code=ic, ownership="private",
+                         ref_date=ref, employment=ces_base[code], source="ces")
+                )
+            for code, (it, ic) in qcew_meta.items():
+                # 81 compares to CES 80, so it uses the 80 base.
+                base = ces_base["80"] if code == "81" else ces_base[code]
+                r = residuals[code]
+                qcew_rows.append(
+                    _row(industry_type=it, industry_code=ic, ownership="private",
+                         ref_date=ref, employment=base * (1.0 + r), source="qcew")
+                )
+        return _frame(qcew_rows), _frame(ces_rows)
 
     def _good_pair(self) -> tuple[pl.DataFrame, pl.DataFrame]:
-        # QCEW slightly ABOVE CES (8131 inclusion) for each residual code.
-        qcew_rows = [
-            _row(industry_type="sector", industry_code="81", ownership="private",
-                 ref_date=self._REF, employment=6_000.0, source="qcew"),
-            _row(industry_type="supersector", industry_code="80",
-                 ownership="private", ref_date=self._REF, employment=6_050.0,
-                 source="qcew"),
-            _row(industry_type="domain", industry_code="08", ownership="private",
-                 ref_date=self._REF, employment=106_000.0, source="qcew"),
-            _row(industry_type="total", industry_code="05", ownership="private",
-                 ref_date=self._REF, employment=131_000.0, source="qcew"),
-        ]
-        ces_rows = [
-            _row(industry_type="sector", industry_code="81", ownership="private",
-                 ref_date=self._REF, employment=5_950.0, source="ces"),
-            _row(industry_type="supersector", industry_code="80",
-                 ownership="private", ref_date=self._REF, employment=6_000.0,
-                 source="ces"),
-            _row(industry_type="domain", industry_code="08", ownership="private",
-                 ref_date=self._REF, employment=105_500.0, source="ces"),
-            _row(industry_type="total", industry_code="05", ownership="private",
-                 ref_date=self._REF, employment=130_500.0, source="ces"),
-        ]
-        return _frame(qcew_rows), _frame(ces_rows)
+        # In-band residuals exactly at the verified expectations.
+        return self._pair_at_residuals(
+            {"05": -0.025, "08": -0.029, "80": -0.225, "81": -0.225}
+        )
 
     def test_good_frame_passes(self) -> None:
         qcew, ces = self._good_pair()
         assert gate_reconstruction_accuracy(qcew, ces) == []
 
-    def test_multiple_rev_bmr_cohorts_not_summed(self) -> None:
-        """Multiple (rev,bmr) cohorts per series-month must NOT be summed.
+    def test_81_maps_to_ces_80_not_silently_skipped(self) -> None:
+        """QCEW sector/81 is compared to CES supersector/80, not dropped.
 
-        CES carries up to five all-sizes cohorts per (series, ref_date); a sum
-        would inflate the level ~5x and produce a spurious huge residual.  The
-        gate must compare the best-available single cohort per side.
+        Build CES with ONLY supersector/80 (no sector/81 — verified store reality)
+        and QCEW with ONLY sector/81.  An in-band 81 must compare and PASS; an
+        out-of-band 81 must HARD-fail naming sector/81 — proving the remap fired,
+        not a silent skip.
         """
-        qcew, ces = self._good_pair()
-        # Replace the single 05 CES row with all four cohorts at ~the same level.
-        ces = ces.filter(pl.col("industry_code") != "05")
-        ces = pl.concat(
+        # In-band 81 -> CES 80 at -22.5%: passes.
+        qcew = _frame(
             [
-                ces,
-                _frame(
-                    [
-                        _row(industry_type="total", industry_code="05",
-                             ownership="private", ref_date=self._REF,
-                             employment=130_500.0 + d, revision=r,
-                             benchmark_revision=b,
-                             vintage_date=date(2024, 2, 1))
-                        for (r, b, d) in [
-                            (0, 0, 4.0), (1, 0, 2.0), (2, 0, 1.0), (2, 1, 0.0)
-                        ]
-                    ]
-                ),
+                _row(industry_type="sector", industry_code="81",
+                     ownership="private", ref_date=ref,
+                     employment=6_000.0 * (1.0 - 0.225), source="qcew")
+                for ref in self._REFS
             ]
         )
-        # QCEW 05 stays at 131_000; best-available CES 05 = the (2,1) row 130_500.
-        # Residual = +500 (small, non-negative) — passes. A sum would be ~522k.
+        ces = _frame(
+            [
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=ref, employment=6_000.0,
+                     source="ces")
+                for ref in self._REFS
+            ]
+        )
         assert gate_reconstruction_accuracy(qcew, ces) == []
 
-    def test_negative_residual_fails_hard(self) -> None:
-        """QCEW below CES contradicts the 8131 direction — a hard failure."""
-        qcew, ces = self._good_pair()
-        qcew = qcew.with_columns(
-            pl.when(pl.col("industry_code") == "81")
-            .then(pl.lit(5_000.0))  # below CES's 5,950
-            .otherwise(pl.col("employment"))
-            .alias("employment")
+        # Out-of-band 81 (-45%) -> hard fail naming sector/81.
+        qcew_bad = _frame(
+            [
+                _row(industry_type="sector", industry_code="81",
+                     ownership="private", ref_date=ref,
+                     employment=6_000.0 * (1.0 - 0.45), source="qcew")
+                for ref in self._REFS
+            ]
         )
-        gaps = gate_reconstruction_accuracy(qcew, ces)
-        assert gaps
+        gaps = gate_reconstruction_accuracy(qcew_bad, ces)
         hard = [g for g in gaps if not g.startswith("SOFT:")]
-        assert hard and any("NEGATIVE" in g for g in hard)
+        assert hard and any("sector/81" in g for g in hard)
 
-    def test_large_positive_residual_is_soft(self) -> None:
-        """A residual over the relative bound is reported SOFT, not hard."""
-        qcew, ces = self._good_pair()
-        qcew = qcew.with_columns(
-            pl.when(pl.col("industry_code") == "81")
-            .then(pl.lit(9_000.0))  # +51% over CES 5,950 — exceeds 10%
-            .otherwise(pl.col("employment"))
-            .alias("employment")
+    def test_residual_too_shallow_fails_hard(self) -> None:
+        """80 at -5% (far above its -22.5% band) is a HARD fail."""
+        qcew, ces = self._pair_at_residuals(
+            {"05": -0.025, "08": -0.029, "80": -0.05, "81": -0.225}
         )
         gaps = gate_reconstruction_accuracy(qcew, ces)
-        assert gaps
-        assert all(g.startswith("SOFT:") for g in gaps)
-        assert any("relative bound" in g for g in gaps)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("supersector/80" in g and "out-of-band" in g for g in hard)
+
+    def test_residual_too_deep_fails_hard(self) -> None:
+        """80 at -45% (far below its -22.5% band) is a HARD fail."""
+        qcew, ces = self._pair_at_residuals(
+            {"05": -0.025, "08": -0.029, "80": -0.45, "81": -0.225}
+        )
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("supersector/80" in g and "out-of-band" in g for g in hard)
+
+    def test_positive_residual_fails_hard(self) -> None:
+        """A positive residual (QCEW > CES) beyond a small margin is anomalous."""
+        qcew, ces = self._pair_at_residuals(
+            {"05": 0.03, "08": -0.029, "80": -0.225, "81": -0.225}
+        )
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("total/05" in g and "positive" in g for g in hard)
+
+    def test_shallow_05_at_zero_fails_hard(self) -> None:
+        """05 at 0% (definitional gap erased) HARD-fails the tight per-series band.
+
+        A uniform 8pp band would admit 0% for the -2.5% series, waving through a
+        coverage bug that pulls CES-universe data or includes UI-exempt orgs.  The
+        per-series ~2pp band on 05 catches it: |0 - (-0.025)| = 0.025 > 0.02, and
+        0.0 is not > pos_margin (0.01) so it reaches the out-of-band check.
+        """
+        qcew, ces = self._pair_at_residuals(
+            {"05": 0.0, "08": -0.029, "80": -0.225, "81": -0.225}
+        )
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("total/05" in g and "out-of-band" in g for g in hard)
+
+    def test_shallow_08_at_zero_fails_hard(self) -> None:
+        """08 at 0% (definitional gap erased) HARD-fails the tight per-series band.
+
+        |0 - (-0.029)| = 0.029 > 0.02; same named adversarial case as 05.
+        """
+        qcew, ces = self._pair_at_residuals(
+            {"05": -0.025, "08": 0.0, "80": -0.225, "81": -0.225}
+        )
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("domain/08" in g and "out-of-band" in g for g in hard)
+
+    def test_shallow_05_just_inside_tight_band_passes(self) -> None:
+        """05 at -1.5% (1pp from -2.5%, inside the 2pp band) still PASSES.
+
+        The tight band is not zero-width: a residual within the verified spread of
+        the definitional gap must not flag, so the band stays above the claimed
+        <1pp p10-p90 spread.
+        """
+        qcew, ces = self._pair_at_residuals(
+            {"05": -0.015, "08": -0.029, "80": -0.225, "81": -0.225}
+        )
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert not hard, "\n".join(gaps)
+
+    def test_settled_month_collapse_fails_hard(self) -> None:
+        """A >50% collapse in a SETTLED month HARD-fails (not hidden as SOFT).
+
+        The pre-fix frontier rule was a pure VALUE test with no date gate, so a
+        catastrophic collapse in a settled month (e.g. 2024-03) — which has a clean
+        prior-year 2023-03 row — was silently downgraded to SOFT and dropped from
+        the band; the median of the surviving months stayed clean.  The fix
+        date-scopes the frontier exclusion to the 2025-Q1 window AND adds a
+        per-month implausible-collapse floor, so a settled-month collapse stays in
+        the clean set and trips the floor as a HARD failure.
+        """
+        # 80 series: 2022/2023 in-band at -22.5%, 2024-03 collapses to ~-67%
+        # (2000 vs prior-year 2023-03 = 4650 -> ratio 0.43, < 0.5).  2024-03 is
+        # SETTLED (before the 2025-01-01 frontier window), so it must NOT be
+        # excluded — it must HARD-fail.
+        refs = [date(y, 3, 12) for y in (2022, 2023, 2024)]
+        ces_rows = [
+            _row(industry_type="supersector", industry_code="80",
+                 ownership="private", ref_date=ref, employment=6_000.0,
+                 source="ces")
+            for ref in refs
+        ]
+        qcew_rows = []
+        for ref in refs:
+            emp = 2_000.0 if ref.year == 2024 else 6_000.0 * (1.0 - 0.225)
+            qcew_rows.append(
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=ref, employment=emp,
+                     source="qcew")
+            )
+        gaps = gate_reconstruction_accuracy(_frame(qcew_rows), _frame(ces_rows))
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard, "\n".join(gaps)
+        assert any("implausible collapse" in g for g in hard)
+        # And it must NOT be silently downgraded to a frontier SOFT exclusion.
+        assert not any(
+            g.startswith("SOFT:") and "frontier" in g for g in gaps
+        ), "settled-month collapse must not be excluded as a frontier month"
+
+    def test_all_months_excluded_fails_hard(self) -> None:
+        """A series with NO clean months to band-check HARD-fails (not SOFT pass).
+
+        If every comparable month is excluded (here all are COVID years), the
+        empty-clean path must be a HARD gap, not a silent SOFT return — otherwise a
+        systematic collapse excluded month-by-month could slip through.
+        """
+        covid_refs = [date(2020, 3, 12), date(2021, 3, 12)]
+        ces_rows = [
+            _row(industry_type="supersector", industry_code="80",
+                 ownership="private", ref_date=ref, employment=6_000.0,
+                 source="ces")
+            for ref in covid_refs
+        ]
+        qcew_rows = [
+            _row(industry_type="supersector", industry_code="80",
+                 ownership="private", ref_date=ref, employment=2_000.0,
+                 source="qcew")
+            for ref in covid_refs
+        ]
+        gaps = gate_reconstruction_accuracy(_frame(qcew_rows), _frame(ces_rows))
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("no clean" in g for g in hard), "\n".join(gaps)
+
+    def test_covid_and_frontier_months_excluded_and_soft(self) -> None:
+        """COVID years and incomplete-frontier months drop from the hard band.
+
+        Add a wild 2020/2021 (COVID) month and a 2025-Q1 incomplete-frontier
+        month to an otherwise in-band 80 series.  The median band check must still
+        PASS (those months excluded), and the frontier month is surfaced SOFT.
+        """
+        # Settled in-band 80 across 2022-2024, plus COVID + frontier outliers.
+        settled = self._pair_at_residuals(
+            {"05": -0.025, "08": -0.029, "80": -0.225, "81": -0.225}
+        )
+        qcew, ces = settled
+        # COVID 2020 month: 80 at -60% (would wreck the median if counted).
+        covid_ces = _row(industry_type="supersector", industry_code="80",
+                         ownership="private", ref_date=date(2020, 6, 12),
+                         employment=6_000.0, source="ces")
+        covid_qcew = _row(industry_type="supersector", industry_code="80",
+                          ownership="private", ref_date=date(2020, 6, 12),
+                          employment=6_000.0 * 0.40, source="qcew")
+        # Frontier 2025-Q1 month: 80 at -88% (incomplete size data).
+        front_ces = _row(industry_type="supersector", industry_code="80",
+                         ownership="private", ref_date=date(2025, 3, 12),
+                         employment=6_000.0, source="ces")
+        front_qcew = _row(industry_type="supersector", industry_code="80",
+                          ownership="private", ref_date=date(2025, 3, 12),
+                          employment=6_000.0 * 0.12, source="qcew")
+        qcew = pl.concat([qcew, _frame([covid_qcew, front_qcew])])
+        ces = pl.concat([ces, _frame([covid_ces, front_ces])])
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        # No hard band failure — the outliers were excluded from the median.
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert not hard, "\n".join(gaps)
+        # The frontier month is surfaced SOFT for the maintainer.
+        assert any(g.startswith("SOFT:") and "frontier" in g for g in gaps)
+        # The COVID month is ALSO surfaced SOFT (not dropped silently) — both
+        # classes of exclusion from the hard band are visible to the maintainer.
+        assert any(g.startswith("SOFT:") and "COVID" in g for g in gaps)
 
     def test_size_buckets_excluded_from_residual(self) -> None:
         """Q1 size buckets on the QCEW side must not inflate the residual."""
@@ -728,15 +913,31 @@ class TestGateReconstructionAccuracy:
         bucket = _frame(
             [
                 _row(industry_type="sector", industry_code="81",
-                     ownership="private", ref_date=self._REF, employment=3_000.0,
-                     source="qcew", size_class_type="size_class",
-                     size_class_code="1"),
+                     ownership="private", ref_date=self._REFS[0],
+                     employment=3_000.0, source="qcew",
+                     size_class_type="size_class", size_class_code="1"),
             ]
         )
         qcew = pl.concat([qcew, bucket])
-        # Without the all-sizes filter, 81 would be 6,000+3,000 = 9,000 (soft
-        # bound breach). With it, the bucket is dropped and the good frame passes.
+        # Without the all-sizes filter, 81 at the first ref would be inflated by
+        # the bucket and break its band.  With it, the bucket is dropped.
         assert gate_reconstruction_accuracy(qcew, ces) == []
+
+    def test_expected_residual_constant_shape(self) -> None:
+        """The seeded expectations cover exactly {05, 08, 80, 81}."""
+        assert set(_EXPECTED_QCEW_CES_RESIDUAL) == {"05", "08", "80", "81"}
+        assert all(v < 0 for v in _EXPECTED_QCEW_CES_RESIDUAL.values())
+
+    def test_band_constant_covers_every_expected_code(self) -> None:
+        """The per-series band dict MUST cover every expected-residual code.
+
+        A code present in _EXPECTED_QCEW_CES_RESIDUAL but absent from the band dict
+        would KeyError at band[code]; this pins them in lockstep.  The shallow
+        05/08 get a tight band; the deep 80/81 keep the generous one.
+        """
+        assert set(_QCEW_CES_RESIDUAL_BAND) == set(_EXPECTED_QCEW_CES_RESIDUAL)
+        assert _QCEW_CES_RESIDUAL_BAND["05"] < _QCEW_CES_RESIDUAL_BAND["80"]
+        assert _QCEW_CES_RESIDUAL_BAND["08"] < _QCEW_CES_RESIDUAL_BAND["81"]
 
 
 class TestGateQ1Continuity:
@@ -817,6 +1018,142 @@ class TestGateQ1Continuity:
                  size_class_type="size_class", size_class_code="0"),
         ]
         assert gate_q1_continuity(_frame(rows)) == []
+
+
+# ===========================================================================
+# Gate 3b — QCEW reconstruction fidelity (rebuilt vs reference QCEW)
+# ===========================================================================
+
+
+class TestGateQcewFidelity:
+    """Rebuilt QCEW must reproduce published/reference QCEW near-exactly.
+
+    Unlike the CES residual gate (a definitional gap), this is the TRUE
+    reconstruction-accuracy check: two QCEW frames compared on the full key.
+    """
+
+    _REF = date(2024, 6, 12)
+
+    def _reference(self) -> pl.DataFrame:
+        return _frame(
+            [
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=self._REF, employment=4_739.7,
+                     source="qcew", seasonally_adjusted=False),
+                _row(industry_type="sector", industry_code="81",
+                     ownership="private", ref_date=self._REF, employment=4_739.7,
+                     source="qcew", seasonally_adjusted=False),
+                _row(industry_type="total", industry_code="05",
+                     ownership="private", ref_date=self._REF, employment=130_000.0,
+                     source="qcew", seasonally_adjusted=False),
+            ]
+        )
+
+    def test_matching_frames_pass(self) -> None:
+        ref = self._reference()
+        assert gate_qcew_fidelity(ref.clone(), ref) == []
+
+    def test_perturbed_value_fails(self) -> None:
+        ref = self._reference()
+        rebuilt = ref.with_columns(
+            pl.when(pl.col("industry_code") == "80")
+            .then(pl.col("employment") + 50.0)  # well beyond abs_tol + rel_tol
+            .otherwise(pl.col("employment"))
+            .alias("employment")
+        )
+        gaps = gate_qcew_fidelity(rebuilt, ref)
+        assert gaps
+        assert any("supersector/80" in g and "differ" in g for g in gaps)
+
+    def test_within_tolerance_passes(self) -> None:
+        """A rounding-scale diff inside abs_tol does not flag."""
+        ref = self._reference()
+        rebuilt = ref.with_columns(
+            pl.when(pl.col("industry_code") == "80")
+            .then(pl.col("employment") + 0.01)  # inside abs_tol=0.05
+            .otherwise(pl.col("employment"))
+            .alias("employment")
+        )
+        assert gate_qcew_fidelity(rebuilt, ref) == []
+
+    def test_thousand_job_corruption_fails(self) -> None:
+        """A +1.0-thousand (1,000-job) corruption at the 05 level HARD-fails.
+
+        With the old ``rel_tol=1e-4`` the effective slack at a 130,000 level was
+        ~13,050 jobs, so a few-hundred-to-thousands-job store-write corruption slipped
+        through.  This is a SAME-SOURCE to-the-unit reproduction, so ``rel_tol=0``
+        and a flat ``abs_tol=0.05`` (50 jobs): +1.0 thousand must flag.
+        """
+        ref = self._reference()
+        rebuilt = ref.with_columns(
+            pl.when(pl.col("industry_code") == "05")
+            .then(pl.col("employment") + 1.0)  # 1,000 jobs (employment in thousands)
+            .otherwise(pl.col("employment"))
+            .alias("employment")
+        )
+        gaps = gate_qcew_fidelity(rebuilt, ref)
+        assert gaps
+        assert any("total/05" in g and "differ" in g for g in gaps)
+
+    def test_few_hundred_job_corruption_at_80_fails(self) -> None:
+        """A +0.52-thousand (520-job) corruption at the 80 level HARD-fails.
+
+        The old ``rel_tol=1e-4`` admitted ~474 jobs at the 80 level (4,739.7), so a
+        +0.52-thousand perturbation passed.  With ``rel_tol=0`` the flat 50-job rail
+        flags it.
+        """
+        ref = self._reference()
+        rebuilt = ref.with_columns(
+            pl.when(pl.col("industry_code") == "80")
+            .then(pl.col("employment") + 0.52)  # 520 jobs
+            .otherwise(pl.col("employment"))
+            .alias("employment")
+        )
+        gaps = gate_qcew_fidelity(rebuilt, ref)
+        assert gaps
+        assert any("supersector/80" in g and "differ" in g for g in gaps)
+
+    def test_missing_row_reported(self) -> None:
+        """A row present in reference but absent in rebuilt is reported."""
+        ref = self._reference()
+        rebuilt = ref.filter(pl.col("industry_code") != "05")
+        gaps = gate_qcew_fidelity(rebuilt, ref)
+        assert gaps
+        assert any("missing" in g and "total/05" in g for g in gaps)
+
+    def test_size_buckets_reduced_before_compare(self) -> None:
+        """Q1 size buckets on the rebuilt side are reduced to all-sizes first.
+
+        The stored rebuilt QCEW carries Q1 size buckets; the reference (from
+        ``build_qcew_panel``) does not.  Without the all-sizes reduction the join
+        would go many-to-one and corrupt the comparison.
+        """
+        q1 = date(2024, 3, 12)
+        ref = _frame(
+            [
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=q1, employment=4_700.0,
+                     source="qcew", seasonally_adjusted=False),
+            ]
+        )
+        rebuilt = _frame(
+            [
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=q1, employment=4_700.0,
+                     source="qcew", seasonally_adjusted=False,
+                     size_class_type="size_class", size_class_code="0"),
+                # Buckets that must be excluded (else 80 inflates).
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=q1, employment=3_000.0,
+                     source="qcew", seasonally_adjusted=False,
+                     size_class_type="size_class", size_class_code="1"),
+                _row(industry_type="supersector", industry_code="80",
+                     ownership="private", ref_date=q1, employment=1_700.0,
+                     source="qcew", seasonally_adjusted=False,
+                     size_class_type="size_class", size_class_code="2"),
+            ]
+        )
+        assert gate_qcew_fidelity(rebuilt, ref) == []
 
 
 # ===========================================================================
@@ -975,12 +1312,19 @@ class TestGatesAgainstRealStore:
       store paths is a maintainer concern (see module deferred-notes), so it is
       left to the maintainer's dual-store harness and not exercised here.
 
-    The reconstruction wrapper hard-asserts the **sign** (non-negative
-    residual): spec §10 defers only the residual *magnitude* tolerance to the
-    first real run — a negative residual is an explicit, non-deferred gate
-    FAILURE.  So a broken QCEW reconstruction surfaces RED (blocking promotion),
-    never as a benign skip.  The over-``rel_tol`` magnitude breach is SOFT and
-    does not fail.
+    The reconstruction wrapper hard-asserts the per-series **median residual
+    band**: ``QCEW < CES`` is the expected definitional direction (QCEW counts
+    UI-covered employment; CES estimates ALL nonfarm payroll), so the gate now
+    checks each series' median ``qcew/ces - 1`` against the verified per-series
+    expectations within ``band_tol`` — an out-of-band median (too shallow, too
+    deep, or anomalously positive) is a hard FAILURE.  COVID + incomplete-frontier
+    months are excluded from the median and surfaced SOFT.
+
+    The fidelity wrapper is the TRUE reconstruction-accuracy check — it compares
+    the stored rebuilt QCEW against the reference QCEW it is meant to reproduce.
+    That reference comes from the live area endpoint (data.bls.gov), so the
+    fidelity real-store test is additionally ``@pytest.mark.network`` and
+    self-skips offline.
     """
 
     def test_reconstruction_accuracy_real(self) -> None:
@@ -992,7 +1336,7 @@ class TestGatesAgainstRealStore:
         qcew_bm = qcew.filter(pl.col("ref_date").dt.month() == 3)
         ces_bm = ces.filter(pl.col("ref_date").dt.month() == 3)
         gaps = gate_reconstruction_accuracy(qcew_bm, ces_bm)
-        # Sign (non-negative) is hard per §10; magnitude (SOFT) is deferred.
+        # The per-series median band is hard; frontier exclusions are SOFT.
         hard = [g for g in gaps if not g.startswith("SOFT:")]
         assert not hard, "\n".join(gaps)
 
@@ -1029,3 +1373,66 @@ class TestGatesAgainstRealStore:
             pytest.skip("no pre-benchmark CES rows to slice")
         gaps = gate_vintage_integrity(as_of)
         assert not gaps, "\n".join(gaps)
+
+    @pytest.mark.network
+    def test_qcew_fidelity_real(self) -> None:
+        """Rebuilt QCEW reproduces the live area-endpoint reference (opt-in).
+
+        Fetches the QCEW area singlefile from data.bls.gov (plain httpx), runs
+        ``build_qcew_panel`` on it, and compares to the stored rebuilt QCEW.  This
+        is the TRUE reconstruction-accuracy check (the CES residual gate measures
+        a definitional gap, not fidelity).  Maintainer-run: ``@network`` +
+        ``@real_store``; self-skips offline / without the rebuilt store.
+
+        UNVERIFIED INPUT CONTRACT (maintainer must check before relying on this).
+        ``build_qcew_panel`` requires its raw frame to carry a ``revision`` column
+        ("assigned by the acquisition/orchestration layer") plus the rest of its
+        ``_REQUIRED_COLUMNS``, and it converts employment persons->thousands.  The
+        bare ``_qtrly_singlefile`` from data.bls.gov does NOT carry ``revision``
+        and may need unit/column adaptation, so this wrapper may raise on the
+        column contract or mismatch on units as written.  It is kept minimal and
+        opt-in per task scope; the graded gate is the unit tests above.  Adapt the
+        raw frame (add ``revision``; confirm thousands) before depending on it.
+        """
+        import io
+
+        from nfp_download.client import create_client, get_with_retry
+        from nfp_ingest.qcew_crosswalk import build_qcew_panel
+
+        qcew = _load_rebuilt("qcew")
+        if not _is_rebuilt_schema(qcew):
+            pytest.skip("rebuilt-schema NSA QCEW partition not available")
+
+        # A single recent QCEW year area singlefile (NAICS, US national rows are
+        # a subset).  The maintainer adjusts the year to one present in the store.
+        year = 2024
+        url = (
+            "https://data.bls.gov/cew/data/files/"
+            f"{year}/csv/{year}_qtrly_singlefile.zip"
+        )
+        client = create_client(http2=False)
+        try:
+            resp = get_with_retry(client, url)
+        except Exception as exc:  # network flake / endpoint move → skip, not error
+            pytest.skip(f"area endpoint unreachable: {exc}")
+        finally:
+            client.close()
+
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            name = next(n for n in zf.namelist() if n.endswith(".csv"))
+            raw = pl.read_csv(zf.read(name))
+        reference = build_qcew_panel(raw)
+
+        # Compare only the year/rows the reference covers, NSA, bmr=0 (the
+        # reference is a single benchmark-0 build; stored (2,1) rows are not its
+        # responsibility and would all show "missing in reference").
+        stored = qcew.filter(
+            (pl.col("ref_date").dt.year() == year)
+            & (pl.col("benchmark_revision") == 0)
+        )
+        gaps = gate_qcew_fidelity(stored, reference)
+        # Value mismatches are hard; missing-row reports are SOFT diagnostics.
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert not hard, "\n".join(gaps)

@@ -520,101 +520,421 @@ def _check_additive_nesting(df: pl.DataFrame, tol: float) -> list[str]:
 # Gate 3 — Reconstruction accuracy + Q1 continuity
 # ---------------------------------------------------------------------------
 
-# Industries where the 8131 (religious orgs) inclusion predicts a small,
-# non-negative QCEW-minus-CES residual (store_rebuild §10; ces_qcew_industry §8).
-_RESIDUAL_CODES: tuple[str, ...] = ("81", "80", "08", "05")
+# Verified per-series QCEW-minus-CES DEFINITIONAL residuals as a fraction
+# (qcew/ces - 1), settled non-COVID, headline level.  QCEW counts UI-covered
+# employment; CES estimates ALL nonfarm payroll incl. UI-exempt orgs (religious/
+# membership NAICS 813, private households 814, etc.), so QCEW sits BELOW CES and
+# the residual is NEGATIVE.  The Other Services gap (80/81 ~ -22.5%) is driven by
+# UI-exempt religious/membership organizations in NAICS 813.
+#
+# Source: maintainer verification 2026-06-16, against published QCEW (rebuilt 80
+# == published agglvl-13 '1027' == 4739.7 @ 2024-06).  RE-SEED these if the
+# QCEW->CES crosswalk or the QCEW UI-coverage universe changes — they are
+# empirical, not structural.
+_EXPECTED_QCEW_CES_RESIDUAL: dict[str, float] = {
+    "05": -0.025,
+    "08": -0.029,
+    "80": -0.225,
+    "81": -0.225,
+}
+
+# Per-series acceptance band (half-width, fraction) around the expected residual.
+# A single uniform band straddling a -22.5% series and a -2.9% series rubber-stamps
+# the named adversarial case: an 8pp band on 08 (expected -0.029) admits 0% — a
+# coverage bug that pulls CES-universe data or includes UI-exempt orgs (erasing the
+# definitional gap) would slip through.  So the shallow 05/08 series get a tight
+# ~2pp band (well above the verified <1pp p10-p90 spread, but tight enough to catch
+# the 0% regression), while the deep 80/81 series keep the generous 8pp headroom
+# their -22.5% magnitude warrants.  Tighten as confidence grows.  Every code in
+# _EXPECTED_QCEW_CES_RESIDUAL MUST appear here.
+_QCEW_CES_RESIDUAL_BAND: dict[str, float] = {
+    "05": 0.02,
+    "08": 0.02,
+    "80": 0.08,
+    "81": 0.08,
+}
+
+# A residual more negative than ``expected - _IMPLAUSIBLE_COLLAPSE_MARGIN`` is an
+# implausible coverage collapse, not the definitional gap.  This per-MONTH HARD
+# floor is independent of the frontier exclusion (which is now date-scoped to the
+# incomplete window): a settled month whose QCEW falls far below CES cannot be
+# waved through as a "frontier" exclusion and then hidden by the median.
+_IMPLAUSIBLE_COLLAPSE_MARGIN: float = 0.15
+
+# The frontier exclusion only applies to ref_dates in this incomplete window.  The
+# data-relative value rule (QCEW << prior-year) is a NECESSARY but not sufficient
+# condition: a settled-history month that collapses is a reconstruction error, not
+# an incomplete frontier, so it must stay in the hard band and trip the floor.  The
+# 2025-Q1 frontier (verified domain 06 -88%) carries partial size data; settled =
+# anything before this date.
+_FRONTIER_WINDOW_START: date = date(2025, 1, 1)
+
+# CES carries Other Services ONLY as supersector/80 (verified 0 CES sector/81
+# rows), so QCEW sector/81 is compared against CES supersector/80.  Every other
+# residual series maps to its own (industry_type, industry_code) on the CES side.
+_CES_RESIDUAL_TARGET: dict[tuple[str, str], tuple[str, str]] = {
+    ("total", "05"): ("total", "05"),
+    ("domain", "08"): ("domain", "08"),
+    ("supersector", "80"): ("supersector", "80"),
+    ("sector", "81"): ("supersector", "80"),
+}
+
+# COVID years dropped from the median (employment levels were anomalous).
+_COVID_YEARS: frozenset[int] = frozenset({2020, 2021})
 
 
 def gate_reconstruction_accuracy(
     rebuilt_qcew: pl.DataFrame,
     published_ces: pl.DataFrame,
     *,
-    rel_tol: float = 0.10,
+    band: dict[str, float] | None = None,
+    pos_margin: float = 0.01,
+    frontier_min_ratio: float = 0.5,
+    frontier_window_start: date = _FRONTIER_WINDOW_START,
+    implausible_collapse_margin: float = _IMPLAUSIBLE_COLLAPSE_MARGIN,
 ) -> list[str]:
-    """Rebuilt-QCEW vs published-CES residual gate (store_rebuild §10).
+    """Rebuilt-QCEW vs published-CES DEFINITIONAL-residual band gate (§10).
 
-    At shared ``(industry_type, industry_code, ownership, ref_date)`` the
-    residual ``= rebuilt_qcew.employment - published_ces.employment`` for
-    ``industry_code in {81, 80, 08, 05}``:
+    The rebuilt QCEW is faithful to published QCEW (UI-covered employment); CES
+    estimates ALL nonfarm payroll including UI-exempt employers.  So ``QCEW < CES``
+    is the EXPECTED direction and the per-series residual is a stable, negative,
+    *definitional* gap — not a reconstruction error.  (Reconstruction fidelity is
+    :func:`gate_qcew_fidelity`, a QCEW-vs-QCEW check.)  This gate therefore checks
+    each series' MEDIAN residual against :data:`_EXPECTED_QCEW_CES_RESIDUAL`.
 
-    * **Hard:** residual must be ``>= 0`` (non-negative).  A negative residual
-      FAILS — it contradicts the 8131 religious-org inclusion direction (CES
-      ``81`` omits NAICS 8131, QCEW includes it).
-    * **Soft** (``"SOFT: "``): residual ``<= rel_tol * published_ces.employment``
-      (relative bound).
+    For each series in :data:`_CES_RESIDUAL_TARGET`, the per-ref_date residual is
+    ``qcew.employment / ces.employment - 1`` over shared ref_dates, then:
 
-    Tolerance decision: ``rel_tol`` defaults to ``0.10`` — an initial generous
-    bound.  Tighten it from observed benchmark-month residuals per spec §10
-    after the first real run: the spec defers the numeric magnitude to this
-    plan, requiring only a *bound*, not exact equality.  The hard
-    non-negativity check carries the real semantic weight; the relative bound
-    is a sanity rail.
+    * **Excluded from the median** — COVID years (2020, 2021) and
+      incomplete-frontier months.  Frontier rule (data-relative AND date-scoped):
+      a month qualifies as incomplete-frontier ONLY when it both (a) falls on/after
+      ``frontier_window_start`` (default 2025-01-01, the known-incomplete 2025-Q1
+      window) AND (b) has a QCEW headline below ``frontier_min_ratio`` (default 0.5)
+      of the SAME series' prior-year same-month QCEW level.  The date gate is
+      load-bearing: a pure value test would let a catastrophic collapse in a
+      SETTLED month be downgraded to SOFT and dropped from the band, the bigger the
+      break the more likely the exclusion — exactly the hole this gate must not
+      have.  A collapse in settled history is a reconstruction error, so it stays
+      in the hard band and trips the floor below.
 
-    Both sides are reduced to the all-sizes level before the residual is taken.
-    Compare at benchmark months / annual averages (the caller selects those
-    ref_dates); month-to-month QCEW-vs-CES differences are expected and not a
-    gate concern.
+      The median is already robust to *moderate* frontier outliers (a single
+      -20% 2025-Q1 month against many settled -2.5% months barely moves it), so
+      the value rule only needs to excise the *extreme* collapses; it
+      intentionally leaves a -20% month (05's frontier, ~82% of prior, above the
+      0.5 ratio) in, where the median absorbs it.  Cranking the ratio up to catch
+      that too would risk dropping legitimate year-over-year swings.
+
+      Both classes of exclusion — COVID years and incomplete-frontier months —
+      are SOFT-reported (one line each) so the maintainer sees every month that
+      dropped out of the hard band check, not just the frontier ones.
+
+    * **Hard fail (implausible collapse, per-month floor)** — for every clean
+      (non-COVID, non-frontier) month, a residual more negative than
+      ``expected - implausible_collapse_margin`` (default 0.15 below expected)
+      hard-fails as an implausible coverage collapse.  This floor catches a
+      settled-month collapse the median would otherwise absorb, and is independent
+      of the frontier exclusion (which the date gate now confines to the incomplete
+      window).
+
+    * **Hard fail (median band)** if the median of the *remaining* (clean)
+      residuals is outside ``expected ± band[code]`` (the per-series band in
+      :data:`_QCEW_CES_RESIDUAL_BAND` — ~2pp for the shallow 05/08, ~8pp for the
+      deep 80/81).  A single uniform band would straddle a -22.5% series and a
+      -2.9% series and admit a 0% residual on 08, rubber-stamping a coverage bug
+      that erased the definitional gap; the per-series band closes that.  A median
+      more positive than ``pos_margin`` (default +0.01) ALSO hard-fails as an
+      anomalous direction (QCEW > CES).
+
+    If, after exclusions, a series has NO clean months to band-check, that is a
+    HARD failure (not a silent SOFT pass): an all-excluded series would otherwise
+    let a systematic collapse — which the value rule excludes month-by-month —
+    slip through.  The date-scoped frontier rule makes this unreachable for settled
+    history, but the hard path closes the residual hole.
+
+    The 81->80 mapping is explicit (:data:`_CES_RESIDUAL_TARGET`): QCEW sector/81
+    joins CES supersector/80 but the median is grouped on the ORIGINAL QCEW
+    ``(industry_type, industry_code)`` so 80 and 81 stay distinct series and 81 is
+    never silently dropped.
+
+    Both sides are reduced to the all-sizes level and to a single best-available
+    cohort per (series, ref_date) before the residual is taken — NEVER summed
+    across cohorts (which would inflate the level and make residuals meaningless).
     """
     gaps: list[str] = []
-    qcew = _all_sizes(rebuilt_qcew).filter(
-        pl.col("industry_code").is_in(_RESIDUAL_CODES)
-    )
-    ces = _all_sizes(published_ces).filter(
-        pl.col("industry_code").is_in(_RESIDUAL_CODES)
-    )
+    band = band if band is not None else _QCEW_CES_RESIDUAL_BAND
+    codes = {c for (_it, c) in _CES_RESIDUAL_TARGET}
+    qcew = _all_sizes(rebuilt_qcew).filter(pl.col("industry_code").is_in(codes))
+    ces = _all_sizes(published_ces)
     if qcew.is_empty() or ces.is_empty():
-        return ["reconstruction: no rows for residual codes {81,80,08,05}"]
+        return ["reconstruction: no rows for residual codes {05,08,80,81}"]
 
-    # Compare the best-available SINGLE cohort per (series, ref_date) on each
-    # side — NEVER sum across (revision, benchmark_revision).  CES carries up to
-    # five cohorts per series-month ((2,1)×benchmarks + (2,0) + (1,0) + (0,0));
-    # summing them inflates the level ~5× and makes every residual meaningless.
-    # "Best available" = highest revision, then highest benchmark_revision, then
-    # latest vintage_date — the published/benchmarked print the gate keys on.
-    # The join key matches _best_available's uniqueness key (full _SERIES_KEY,
-    # incl. geography) so a second geography never turns the inner join into a
-    # multi-geo cross-join that inflates the residual rows.
-    join_key = [*_SERIES_KEY, "ref_date"]
-    merged = (
-        _best_available(qcew).select([*join_key, "employment"]).rename(
-            {"employment": "_qcew"}
+    # Best-available single cohort per (series, ref_date) on each side.
+    qcew_ba = _best_available(qcew)
+    ces_ba = _best_available(ces)
+
+    # Map each QCEW residual series onto its CES target series, join on the CES
+    # axes + ref_date, then group/median on the ORIGINAL QCEW series so 80 and 81
+    # remain distinct (and 81 is never dropped by the 80 join).
+    ces_lookup = (
+        ces_ba.select(
+            ["geographic_type", "geographic_code", "ownership",
+             "industry_type", "industry_code", "ref_date", "employment"]
         )
-        .join(
-            _best_available(ces).select([*join_key, "employment"]).rename(
-                {"employment": "_ces"}
+        .rename(
+            {
+                "industry_type": "_ces_itype",
+                "industry_code": "_ces_icode",
+                "employment": "_ces",
+            }
+        )
+    )
+
+    rows: list[pl.DataFrame] = []
+    for (q_it, q_ic), (c_it, c_ic) in _CES_RESIDUAL_TARGET.items():
+        side = qcew_ba.filter(
+            (pl.col("industry_type") == q_it) & (pl.col("industry_code") == q_ic)
+        ).select(
+            ["geographic_type", "geographic_code", "ownership",
+             "industry_type", "industry_code", "ref_date", "employment"]
+        ).rename({"employment": "_qcew"})
+        if side.is_empty():
+            continue
+        merged = side.join(
+            ces_lookup.filter(
+                (pl.col("_ces_itype") == c_it) & (pl.col("_ces_icode") == c_ic)
             ),
-            on=join_key,
+            left_on=["geographic_type", "geographic_code", "ownership", "ref_date"],
+            right_on=["geographic_type", "geographic_code", "ownership", "ref_date"],
             how="inner",
         )
-        .with_columns((pl.col("_qcew") - pl.col("_ces")).alias("_resid"))
-    )
-    if merged.is_empty():
-        return ["reconstruction: no shared (industry, ref_date) rows to compare"]
+        if not merged.is_empty():
+            rows.append(
+                merged.with_columns(
+                    (pl.col("_qcew") / pl.col("_ces") - 1.0).alias("_resid")
+                )
+            )
 
-    # HARD: non-negative residual (the 8131 direction).
-    negative = merged.filter(pl.col("_resid") < 0)
-    if not negative.is_empty():
+    if not rows:
+        return ["reconstruction: no shared (industry, ref_date) rows to compare"]
+    merged = pl.concat(rows, how="vertical")
+
+    # Incomplete-frontier detection (data-relative value rule AND date gate): a
+    # month qualifies as incomplete-frontier ONLY when it both (a) falls on/after
+    # ``frontier_window_start`` (the known-incomplete 2025-Q1 window) AND (b) has a
+    # QCEW headline below ``frontier_min_ratio`` of the SAME series' prior-year
+    # same-month QCEW level.  The date gate is load-bearing: without it a
+    # catastrophic collapse in a SETTLED month would be silently downgraded to SOFT
+    # and dropped from the band (the bigger the break, the more certain the
+    # exclusion).  Self-join on the original QCEW series + (ref_date - 1y).
+    series_cols = [
+        "geographic_type", "geographic_code", "ownership",
+        "industry_type", "industry_code",
+    ]
+    prior = (
+        merged.select([*series_cols, "ref_date", "_qcew"])
+        .rename({"_qcew": "_qcew_prior", "ref_date": "_prior_ref"})
+    )
+    merged = (
+        merged.with_columns(
+            pl.col("ref_date").dt.offset_by("-1y").alias("_lookup")
+        )
+        .join(
+            prior,
+            left_on=[*series_cols, "_lookup"],
+            right_on=[*series_cols, "_prior_ref"],
+            how="left",
+        )
+        .with_columns(
+            (
+                (pl.col("ref_date") >= frontier_window_start)
+                & pl.col("_qcew_prior").is_not_null()
+                & (pl.col("_qcew") < frontier_min_ratio * pl.col("_qcew_prior"))
+            ).alias("_is_frontier")
+        )
+    )
+
+    year = pl.col("ref_date").dt.year()
+    is_covid = year.is_in(list(_COVID_YEARS))
+    is_frontier = pl.col("_is_frontier")
+
+    # SOFT-report the excluded frontier months (so the maintainer sees them).
+    excluded = merged.filter(is_frontier & ~is_covid)
+    if not excluded.is_empty():
         ex = [
             f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
-            f"resid={r['_resid']:.3f} (qcew={r['_qcew']:.1f} ces={r['_ces']:.1f})"
-            for r in negative.head(5).iter_rows(named=True)
+            f"resid={r['_resid']:.3f} (incomplete frontier: QCEW "
+            f"{r['_qcew']:.1f} < {frontier_min_ratio:.0%} of prior-year "
+            f"{r['_qcew_prior']:.1f})"
+            for r in excluded.sort("ref_date").head(5).iter_rows(named=True)
         ]
         gaps.append(
-            f"reconstruction: {negative.height} NEGATIVE residuals "
-            f"(QCEW < CES contradicts 8131 inclusion):\n" + "\n".join(ex)
+            f"SOFT: reconstruction excluded {excluded.height} incomplete-frontier "
+            f"months from the band check:\n" + "\n".join(ex)
         )
 
-    # SOFT: relative bound.
-    over = merged.filter(pl.col("_resid").abs() > rel_tol * pl.col("_ces").abs())
-    if not over.is_empty():
-        ex = [
+    # SOFT-report the excluded COVID months too (so the maintainer sees both
+    # classes of exclusion, not just the frontier one).  Filtered on plain
+    # ``is_covid`` (the frontier line above carries ``& ~is_covid``), so the two
+    # SOFT lines partition the excluded set without double-counting a month that
+    # is both COVID and frontier.
+    covid_excluded = merged.filter(is_covid)
+    if not covid_excluded.is_empty():
+        cx = [
             f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
-            f"resid={r['_resid']:.3f} > {rel_tol:.0%} of ces={r['_ces']:.1f}"
-            for r in over.head(5).iter_rows(named=True)
+            f"resid={r['_resid']:.3f} (COVID year)"
+            for r in covid_excluded.sort("ref_date").head(5).iter_rows(named=True)
         ]
         gaps.append(
-            f"SOFT: reconstruction {over.height} residuals exceed "
-            f"{rel_tol:.0%} relative bound:\n" + "\n".join(ex)
+            f"SOFT: reconstruction excluded {covid_excluded.height} COVID "
+            f"months from the band check:\n" + "\n".join(cx)
+        )
+
+    clean = merged.filter(~is_covid & ~is_frontier)
+    if clean.is_empty():
+        # HARD (not SOFT): an all-excluded series would otherwise let a systematic
+        # collapse slip through.  The date-scoped frontier rule makes this
+        # unreachable for settled history, but the hard path closes the hole.
+        gaps.append(
+            "reconstruction: no clean (non-COVID, non-frontier) months to "
+            "band-check — every comparable month was excluded"
+        )
+        return gaps
+
+    # HARD per-month floor: a clean month whose residual is more negative than
+    # ``expected - implausible_collapse_margin`` is an implausible coverage
+    # collapse the median would otherwise absorb.  Independent of the frontier
+    # exclusion (now date-scoped), so a settled-month collapse trips here.
+    clean = clean.with_columns(
+        pl.col("industry_code")
+        .replace_strict(_EXPECTED_QCEW_CES_RESIDUAL, default=None)
+        .alias("_expected")
+    )
+    collapsed = clean.filter(
+        pl.col("_resid") < pl.col("_expected") - implausible_collapse_margin
+    )
+    if not collapsed.is_empty():
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
+            f"resid={r['_resid']:+.3f} (expected {r['_expected']:+.3f}; "
+            f">{implausible_collapse_margin:.0%} below)"
+            for r in collapsed.sort("ref_date").head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"reconstruction: {collapsed.height} clean months show an implausible "
+            f"collapse (residual >{implausible_collapse_margin:.0%} below "
+            f"expected — not the definitional gap):\n" + "\n".join(ex)
+        )
+
+    # Per-series median residual, keyed on the ORIGINAL QCEW series.
+    medians = (
+        clean.group_by(["industry_type", "industry_code"])
+        .agg(pl.col("_resid").median().alias("_med"), pl.len().alias("_n"))
+    )
+    for r in medians.sort("industry_type", "industry_code").iter_rows(named=True):
+        code = r["industry_code"]
+        med = r["_med"]
+        expected = _EXPECTED_QCEW_CES_RESIDUAL[code]
+        band_tol = band[code]
+        if med > pos_margin:
+            gaps.append(
+                f"reconstruction: {r['industry_type']}/{code} median residual "
+                f"{med:+.3f} is anomalously positive (QCEW > CES by "
+                f">{pos_margin:.0%}; expected ~{expected:+.3f}) over {r['_n']} "
+                f"clean months"
+            )
+        elif abs(med - expected) > band_tol:
+            gaps.append(
+                f"reconstruction: {r['industry_type']}/{code} median residual "
+                f"{med:+.3f} out-of-band (expected {expected:+.3f} ± "
+                f"{band_tol:.0%}) over {r['_n']} clean months"
+            )
+
+    return gaps
+
+
+def gate_qcew_fidelity(
+    rebuilt_qcew: pl.DataFrame,
+    reference_qcew: pl.DataFrame,
+    *,
+    abs_tol: float = 0.05,
+    rel_tol: float = 0.0,
+) -> list[str]:
+    """Rebuilt-QCEW vs reference-QCEW near-exact fidelity gate (store_rebuild §10).
+
+    The TRUE reconstruction-accuracy check.  Unlike
+    :func:`gate_reconstruction_accuracy` (which measures the *definitional* gap
+    between QCEW and CES), this compares the rebuilt QCEW against the published
+    QCEW it is meant to reproduce — catching store-write corruption or a
+    stale/``!=published`` build.
+
+    Both frames are reduced to the all-sizes level (the stored rebuild carries Q1
+    size buckets; a ``build_qcew_panel`` reference does not), then compared on the
+    full key ``(geographic_type, geographic_code, ownership, industry_type,
+    industry_code, ref_date, revision, benchmark_revision)``:
+
+    * **Hard** (failing entry): for rows present in BOTH, an absolute mismatch
+      ``|rebuilt - reference| > abs_tol + rel_tol * |reference|`` (near-exact).
+    * **Soft** (``"SOFT: "``): rows present on only one side are reported (a
+      coverage/vintage difference, not a value corruption).
+
+    This is a SAME-SOURCE, to-the-unit reproduction (rebuilt QCEW == published
+    QCEW), so the tolerance is a flat absolute rounding rail: ``rel_tol=0`` and
+    ``abs_tol=0.05`` (= 50 jobs, employment in thousands).  A magnitude-scaling
+    ``rel_tol`` is deliberately rejected — at ``rel_tol=1e-4`` the admitted slack
+    is ``1e-4 * |ref|``, i.e. ~13,050 jobs at a 130,000 total-private level and
+    ~474 jobs at the 80 level, which would wave through a real store-write
+    corruption of hundreds-to-thousands of jobs (the same reason
+    :func:`gate_history_consistency` uses ``rel_tol=1e-6``, not ``1e-4``).  With a
+    flat ``abs_tol`` the rail is the same 50 jobs at every level.
+
+    Pure: frames in, gaps out.  No I/O.
+    """
+    gaps: list[str] = []
+    key = [
+        "geographic_type", "geographic_code", "ownership",
+        "industry_type", "industry_code", "ref_date",
+        "revision", "benchmark_revision",
+    ]
+    rebuilt = _all_sizes(rebuilt_qcew)
+    reference = _all_sizes(reference_qcew)
+    if rebuilt.is_empty() or reference.is_empty():
+        return ["fidelity: rebuilt or reference QCEW frame is empty"]
+
+    left = rebuilt.select([*key, "employment"]).rename({"employment": "_rebuilt"})
+    right = reference.select([*key, "employment"]).rename({"employment": "_reference"})
+
+    matched = left.join(right, on=key, how="inner")
+    bad = matched.filter(
+        (pl.col("_rebuilt") - pl.col("_reference")).abs()
+        > (abs_tol + rel_tol * pl.col("_reference").abs())
+    )
+    if not bad.is_empty():
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']} "
+            f"(rev,bmr)=({r['revision']},{r['benchmark_revision']}): "
+            f"rebuilt={r['_rebuilt']:.3f} reference={r['_reference']:.3f}"
+            for r in bad.head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"fidelity: {bad.height} QCEW values differ from the reference "
+            f"beyond {abs_tol}+{rel_tol:.0e}*|ref|:\n" + "\n".join(ex)
+        )
+
+    # Rows present on only one side (coverage / vintage difference) — SOFT.
+    only_rebuilt = left.join(right, on=key, how="anti")
+    only_reference = right.join(left, on=key, how="anti")
+    for frame, where in ((only_rebuilt, "rebuilt"), (only_reference, "reference")):
+        if frame.is_empty():
+            continue
+        missing_side = "reference" if where == "rebuilt" else "rebuilt"
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']} "
+            f"(rev,bmr)=({r['revision']},{r['benchmark_revision']})"
+            for r in frame.sort(key).head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"SOFT: fidelity {frame.height} rows present in {where} but missing "
+            f"in {missing_side}:\n" + "\n".join(ex)
         )
 
     return gaps

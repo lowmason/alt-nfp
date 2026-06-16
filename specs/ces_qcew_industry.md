@@ -208,11 +208,39 @@ Sum the QCEW measure columns (e.g. `month3_emplvl` for a CES-comparable employme
 
 ## 8. Coverage caveats (CES vs QCEW universe)
 
-These rules align the *classification*. Residual differences remain because CES is a sample survey
-benchmarked annually to QCEW, not QCEW itself:
+These rules align the *classification*. Residual differences remain because CES and QCEW measure
+*different universes*: QCEW counts only **UI-covered** employment, while CES estimates **all** nonfarm
+payroll (incl. UI-exempt employers). So the rebuilt QCEW sits systematically **below** CES, and the
+QCEW-minus-CES residual is **negative**, series-specific, and *definitional* — not a reconstruction
+error. Verified medians (settled, non-COVID, headline level, 2026-06-16): `05` ≈ **−2.5%**, `08` ≈
+**−2.9%**, Other Services `80` / `81` ≈ **−22.5%**. The reconstruction gate
+(`gate_reconstruction_accuracy`) therefore expects `QCEW ≤ CES` within per-series bands; a positive or
+out-of-band median is a hard failure.
 
-- **Religious organizations (NAICS 8131):** CES *Other services* (`81`) omits 8131; QCEW NAICS 81 includes
-  whatever is UI-covered. Expect a small positive residual in `81` / `80` / `08` / `05`.
+The bands are **per-series**, sized to the magnitude of each definitional gap — a single uniform band
+would straddle the −22.5% `80`/`81` series and the −2.9% `08` series and silently admit a `0%`
+residual on the shallow series (a coverage bug that pulled CES-universe data or UI-exempt orgs, erasing
+the gap). Calibration (`gate_reconstruction_accuracy`, recalibrated 2026-06-16): half-width band ≈
+**2pp** for `05`/`08` (well above the observed <1pp p10-p90 spread, tight enough to fail the `0%`
+regression) and **8pp** for `80`/`81`. Two further hard rails guard the median:
+- a **per-month implausible-collapse floor** — a clean month whose residual is more than 15pp below its
+  expected value is a reconstruction error, not the definitional gap, and fails hard (the median alone
+  would absorb a single-month collapse);
+- the **incomplete-frontier exclusion is date-scoped** to the 2025-Q1 window (`ref_date ≥ 2025-01-01`)
+  in addition to the data-relative collapse test, so a collapse in *settled* history cannot be
+  downgraded to a soft exclusion and dropped from the band.
+
+`gate_qcew_fidelity` (rebuilt-QCEW vs published-QCEW, a same-source to-the-unit reproduction) uses a
+flat absolute rail (`abs_tol = 0.05` = 50 jobs, `rel_tol = 0`); a magnitude-scaling `rel_tol` is
+rejected because at `1e-4` it would admit ~13,050 jobs at a 130,000 level.
+
+- **Religious / membership organizations (NAICS 813):** CES *Other Services* (`80`/`81`) estimates
+  all-payroll employment in NAICS 813 — including the large religious/membership component that is
+  **UI-exempt** and therefore absent from QCEW's UI-covered universe. That coverage difference (CES
+  includes it; QCEW does not) is the **first-order** driver of the ≈−22.5% `80`/`81` gap, QCEW below
+  CES. An earlier draft claimed a *small positive* residual from QCEW *including* 8131; that is
+  empirically wrong — it described a 2nd-order classification detail and inverted the 1st-order coverage
+  effect.
 - **Private households (NAICS 814):** effectively excluded by both (UI-exempt); not a material gap.
 - **Agriculture beyond Logging:** excluded by construction (Exception A).
 - **Benchmark vs sample:** between March benchmarks CES is model/sample-based, so monthly QCEW-derived sums
