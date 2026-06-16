@@ -479,6 +479,39 @@ class TestComposeQ1HeadlineCarriesAreaTotal:
         assert zero("05") == pytest.approx(100.0)
         assert zero("05") == pytest.approx(zero("06") + zero("08"))
 
+    def test_multi_revision_area_aligns_to_size_revision(self):
+        """With multi-revision qcew_levels, the override picks the area value at
+        the size row's OWN revision — deterministically, not an arbitrary pick.
+
+        The sibling anti-join (and ``test_different_revision_still_deduped``) is
+        designed to tolerate multi-revision qcew_levels.  The value-override must
+        be consistent: a rev-0 size '0' row aligns to the rev-0 area row, so the
+        additive closure the fix restores can't be broken by mixing revisions
+        across a parent and its children.  (A bare ``unique`` on the 6-col series
+        identity would keep an arbitrary revision's employment — verified
+        non-deterministic across physical orderings.)
+        """
+        q1 = date(2024, 1, 12)
+        ces = _make_ces([])
+        # Same series-month at three revisions with DIFFERENT area totals.
+        qcew = _make_qcew_levels([
+            _qcew_level_row(ref_date=q1, revision=0, vintage_date=_VINT, employment=100.0),
+            _qcew_level_row(ref_date=q1, revision=1, vintage_date=_VINT2, employment=110.0),
+            _qcew_level_row(ref_date=q1, revision=2, vintage_date=date(2025, 2, 1), employment=120.0),
+        ])
+        # The size '0' row is rev-0 (Decision A: QCEW size is rev-0) with a
+        # bucket-sum that undercounts.
+        size = _make_size([
+            _size_row(ref_date=q1, revision=0, vintage_date=_VINT,
+                      size_class_type="total", size_class_code="0", employment=90.0),
+        ])
+        result = compose_rebuild_panel(ces, qcew, size)
+        zero = result.filter(pl.col("size_class_code") == "0")
+        assert zero.height == 1
+        # Must be the rev-0 area total (100), never 110/120 or the bucket-sum 90.
+        assert zero["employment"][0] == pytest.approx(100.0)
+        assert zero["revision"][0] == 0
+
     def test_non_zero_buckets_not_overridden(self):
         """Only the '0' row is overridden; small/medium/large/native are not."""
         q1 = date(2024, 1, 12)

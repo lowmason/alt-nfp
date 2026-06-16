@@ -491,20 +491,32 @@ def compose_rebuild_panel(
         # untouched, so vintage-integrity is unchanged; buckets legitimately need
         # not sum to the total under suppression).  Area totals nest by BLS
         # construction, so this restores additive closure at Q1.
+        # Align on series identity + ``revision``, not the 6-col identity alone.
+        # QCEW per-industry is rev-0 single-vintage today (Decision A;
+        # ``_prep_area_raw`` stamps revision=0), so this is a no-op on every input
+        # the system produces.  But the sibling anti-join below is deliberately
+        # multi-revision-tolerant (see ``_SERIES_IDENTITY_KEY``'s note and
+        # ``test_different_revision_still_deduped``); a *value*-carrying dedup on
+        # the 6-col key alone would use ``unique``'s arbitrary ``keep="any"`` and
+        # pick some revision's employment at random — non-deterministic, and able
+        # to break the §3 additive closure this override restores (parent and
+        # children landing on different revisions).  Keying on ``revision`` aligns
+        # each size ``'0'`` row to the area total at its *own* revision.
+        # ``vintage_date`` is intentionally NOT in the key: size and area share it
+        # by construction today, but coupling on it would risk a join miss (→
+        # silent fallback to the undercounting bucket-sum) if they ever diverged.
+        _AREA_JOIN_KEY = [*_SERIES_IDENTITY_KEY, "revision"]
         area_lvl = (
-            qcew_levels.select([*_SERIES_IDENTITY_KEY, "employment"])
-            # QCEW per-industry is rev-0 single-vintage (Decision A) → one row per
-            # series identity; ``unique`` is defensive against any future fan-out
-            # (a left-join multiplying the size rows would silently corrupt them).
-            .unique(subset=_SERIES_IDENTITY_KEY)
+            qcew_levels.select([*_AREA_JOIN_KEY, "employment"])
+            .unique(subset=_AREA_JOIN_KEY)
             .rename({"employment": "_area_emp"})
         )
         size = (
-            size.join(area_lvl, on=_SERIES_IDENTITY_KEY, how="left")
+            size.join(area_lvl, on=_AREA_JOIN_KEY, how="left")
             .with_columns(
                 employment=pl.when(pl.col("size_class_code") == "0")
                 # coalesce: keep the bucket-sum if the area endpoint lacked the
-                # series (never null the headline).
+                # series at this revision (never null the headline).
                 .then(pl.coalesce("_area_emp", "employment"))
                 .otherwise(pl.col("employment"))
             )
