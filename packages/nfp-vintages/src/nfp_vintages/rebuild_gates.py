@@ -1,0 +1,804 @@
+"""The four §10 store-rebuild acceptance gates.
+
+Replaces the retired frozen-reference parity gate (``specs/store_rebuild.md``
+§10, ``plans/10-store_rebuild.md`` T6).  Each gate is a **pure gap-collector**:
+it takes Polars frame(s) and returns a ``list[str]`` of human-readable gap
+descriptions.  An empty list means the gate PASSES; a non-empty list means it
+FAILS, and each entry names the specific problem.  This mirrors the
+``_check_*``-style functions in
+``packages/nfp-ingest/tests/test_store_coverage.py`` — gates are tests, not
+prose.
+
+All four gates key on ``industry_type + industry_code + ownership +
+(revision, benchmark_revision) + values``.  ``industry_type`` MUST stay in the
+key: code ``55`` is the lone cross-level collision (supersector ``55``
+Financial Activities vs sector ``55`` Management of companies) that
+``industry_code + ownership`` alone cannot disambiguate.
+
+Two cross-cutting invariants every gate respects:
+
+* **All-sizes selection.** The rebuilt store carries the QCEW Q1 size
+  cross-product (``size_class_*`` non-null bucket rows plus a ``total``/``'0'``
+  all-sizes row).  Before *any* aggregation, join, or duplicate check, frames
+  must be reduced to the headline (all-sizes) level via
+  ``size_class_type IS NULL OR size_class_code == '0'``
+  (``nfp_ingest.size_class.all_sizes_predicate``); otherwise buckets +
+  total double-count and every sum / residual / dup check is wrong.
+* **Soft vs hard.** Some checks are launch-blocking ("hard"); others are
+  "reconstruct-and-validate" diagnostics the caller weighs ("soft", per §10).
+  Because the signature only returns gaps (empty = pass), soft findings are
+  prefixed ``"SOFT: "`` and a missing sector-month is silently skipped (never a
+  gap).  A good frame yields ``[]``.  A soft-only finding yields a *non-empty*
+  list whose entries are all ``"SOFT: "``-prefixed; callers MUST filter out
+  ``"SOFT: "`` entries before deciding pass/fail
+  (``hard = [g for g in gaps if not g.startswith("SOFT:")]``), so soft findings
+  never block the hard gate.
+
+Gate functions are **pure** (frames in, gaps out) — no I/O.  Only the
+``@pytest.mark.real_store`` test wrappers touch the store, and they self-skip
+when it is unavailable.  No gate or test writes any store.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import polars as pl
+from nfp_ingest.size_class import all_sizes_predicate
+from nfp_lookups.industry import (
+    QCEW_SUPERSECTOR,
+    get_domain_supersectors,
+    remap_industry_type,
+)
+
+# ---------------------------------------------------------------------------
+# Shared keys / helpers
+# ---------------------------------------------------------------------------
+
+# The disambiguating industry key (``industry_type`` keeps code 55 unambiguous).
+_INDUSTRY_KEY = ["industry_type", "industry_code", "ownership"]
+
+# Full per-series key (geography + industry).  National is the only geography
+# in this rebuild, but we never assume it.
+_SERIES_KEY = ["geographic_type", "geographic_code", *_INDUSTRY_KEY]
+
+# The four legitimate (revision, benchmark_revision) cohorts.
+_REQUIRED_REV_BMR: set[tuple[int, int]] = {(0, 0), (1, 0), (2, 0), (2, 1)}
+
+# Stored private supersector codes (industry_type='supersector').
+_SUPERSECTOR_CODES: tuple[str, ...] = (
+    "10", "20", "30", "40", "50", "55", "60", "65", "70", "80",
+)
+
+# The 10 supersectors plus 05 (total private) — the hard-gate frontier set.
+_FRONTIER_INDUSTRIES: list[tuple[str, str, str]] = [
+    ("total", "05", "private"),
+    *[("supersector", c, "private") for c in _SUPERSECTOR_CODES],
+]
+
+
+def _all_sizes(df: pl.DataFrame) -> pl.DataFrame:
+    """Reduce to the headline (all-sizes) level (store_rebuild §7).
+
+    Drops the QCEW Q1 size-bucket rows so sums / joins / dup checks see exactly
+    one employment value per (series, ref_date, rev, bmr).
+    """
+    if "size_class_type" not in df.columns:
+        return df
+    return df.filter(all_sizes_predicate())
+
+
+def _best_available(df: pl.DataFrame) -> pl.DataFrame:
+    """One row per (series, ref_date): the most-revised, most-recent print.
+
+    Selection order: highest ``revision``, then highest ``benchmark_revision``,
+    then latest ``vintage_date`` — the published/benchmarked value the
+    reconstruction gate compares.  Callers must reduce to the all-sizes level
+    first so the single retained row is a headline level, not a size bucket.
+    """
+    return (
+        df.sort(
+            ["revision", "benchmark_revision", "vintage_date"], descending=True
+        )
+        .unique(subset=[*_SERIES_KEY, "ref_date"], keep="first")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gate 1 — History consistency
+# ---------------------------------------------------------------------------
+
+
+def gate_history_consistency(
+    rebuilt_ces: pl.DataFrame,
+    existing_store: pl.DataFrame,
+    *,
+    cutoff: date = date(2024, 1, 1),
+    abs_tol: float = 0.5,
+    rel_tol: float = 1e-6,
+) -> list[str]:
+    """Rebuilt CES prints reproduce the current store on the ≤2023 known-good core.
+
+    For ``ref_date < cutoff``:
+
+    * Apply :func:`remap_industry_type` to the *existing* store's
+      ``(industry_type, industry_code)`` so it keys on the rebuilt axes
+      (``national/00 → (total, total)``, ``domain/05 → (total, private)``,
+      supersectors/sectors unchanged with ``ownership='private'``).  The
+      *rebuilt* store already carries those axes — leave it alone.
+    * For (series, ref_date, revision, benchmark_revision) rows present in
+      BOTH stores, ``employment`` must match within ``abs_tol + rel_tol * |old|``.
+      A rebuilt store reproducing the old core should match to rounding, so the
+      tolerance is deliberately tight: ``abs_tol=0.5`` covers thousands-precision
+      rounding and ``rel_tol=1e-6`` is a near-zero relative rail (at a 130 000
+      total-private level the admitted slack is ≈0.63, not the ~13 500 a looser
+      ``rel_tol`` would permit — a single-digit-thousands reconstruction drift
+      must FAIL this gate, not slip through as "rounding").
+    * The four ``(revision, benchmark_revision)`` cohorts
+      ``{(0,0),(1,0),(2,0),(2,1)}`` must all appear in the rebuilt CES for the
+      private hierarchy **and** the ``00`` anchor.
+
+    The rebuilt store legitimately carries EXTRA per-benchmark ``(2,1)`` rows
+    the old store lacks.  Because each annual benchmark revises prior history,
+    two ``(2,1)`` rows for the same ref_date but different benchmark cohorts
+    (``vintage_date``) hold legitimately different levels — comparing
+    "latest-on-each-side" would align mismatched cohorts and spuriously fail.
+    So the ``(2,1)`` comparison is keyed on ``vintage_date`` as well: a rebuilt
+    ``(2,1)`` row is checked only against the existing store's ``(2,1)`` row for
+    the *same* benchmark cohort, and rebuilt ``(2,1)`` cohorts the old store
+    never held are not flagged.  The ``(0,0)/(1,0)/(2,0)`` cohorts carry one
+    vintage per series-month and join on the plain key.
+
+    Parameters
+    ----------
+    rebuilt_ces, existing_store : pl.DataFrame
+        ``VINTAGE_STORE_SCHEMA``-conformant CES frames (rebuilt = new axes;
+        existing = legacy axes with null ``ownership``).
+    cutoff : date
+        Exclusive upper bound on ``ref_date`` for the history join.
+    abs_tol, rel_tol : float
+        Employment match tolerance (absolute + relative).  Defaults
+        (``abs_tol=0.5``, ``rel_tol=1e-6``) admit only rounding slack; the gate
+        is the parity replacement, so a realistic reconstruction error of a few
+        thousand jobs must fail it.
+    """
+    gaps: list[str] = []
+
+    rebuilt = _all_sizes(rebuilt_ces).filter(pl.col("ref_date") < cutoff)
+    existing = _all_sizes(existing_store).filter(pl.col("ref_date") < cutoff)
+
+    # --- (rev, bmr) cohort population on the rebuilt CES -------------------
+    # Private hierarchy + the 00 anchor; each must carry all four cohorts.
+    # The existence check is intentionally scoped to the private root (05) +
+    # the 00 anchor — a defensible reading of §10's "private hierarchy AND the
+    # 00 anchor"; the value-match join below keys on the full _SERIES_KEY and so
+    # already compares every overlapping series across the whole hierarchy.
+    for itype, icode, own in [("total", "00", "total"), ("total", "05", "private")]:
+        sub = rebuilt.filter(
+            (pl.col("industry_type") == itype)
+            & (pl.col("industry_code") == icode)
+            & (pl.col("ownership") == own)
+        )
+        if sub.is_empty():
+            gaps.append(
+                f"history: rebuilt CES missing the {itype}/{icode} "
+                f"(ownership={own}) series entirely"
+            )
+            continue
+        present = set(
+            sub.select("revision", "benchmark_revision").unique().iter_rows()
+        )
+        missing = _REQUIRED_REV_BMR - present
+        if missing:
+            gaps.append(
+                f"history: rebuilt CES {itype}/{icode} (ownership={own}) "
+                f"missing (rev,bmr) cohorts {sorted(missing)}"
+            )
+
+    if existing.is_empty():
+        gaps.append(f"history: existing store has no CES rows before {cutoff}")
+        return gaps
+
+    # --- remap the existing store onto the rebuilt axes -------------------
+    # Compute the remap over the distinct legacy pairs, then join back (avoids
+    # a row-wise map over the whole frame).
+    legacy_pairs = (
+        existing.select("industry_type", "industry_code").unique()
+    )
+    remap_rows: list[dict[str, str]] = []
+    for itype, icode in legacy_pairs.iter_rows():
+        try:
+            new_type, ownership = remap_industry_type(itype, icode)
+        except ValueError:
+            # Deferred government / out-of-taxonomy codes: skip — never our gate.
+            continue
+        remap_rows.append(
+            {
+                "industry_type": itype,
+                "industry_code": icode,
+                "_new_industry_type": new_type,
+                "_new_ownership": ownership,
+            }
+        )
+    if not remap_rows:
+        gaps.append("history: no existing-store industries remapped to rebuilt axes")
+        return gaps
+
+    remap_df = pl.DataFrame(remap_rows)
+    # The remap only rewrites ``industry_type`` and ``ownership``; ``industry_code``
+    # is carried through unchanged, so drop only the two columns being replaced.
+    existing_remapped = (
+        existing.join(remap_df, on=["industry_type", "industry_code"], how="inner")
+        .drop("industry_type", "ownership")
+        .rename(
+            {
+                "_new_industry_type": "industry_type",
+                "_new_ownership": "ownership",
+            }
+        )
+    )
+
+    # --- value-match join, cohort-aligned -------------------------------
+    # The (0,0)/(1,0)/(2,0) cohorts carry one vintage per series-month, so they
+    # join on the plain (series, ref_date, rev, bmr) key.  The (2,1) cohort fans
+    # out across annual benchmarks (each revising prior history), so it joins on
+    # ``vintage_date`` too — a rebuilt (2,1) is compared only against the
+    # existing store's same-benchmark (2,1), never a different cohort.
+    matched = _cohort_aligned_match(rebuilt, existing_remapped)
+    if matched.is_empty():
+        gaps.append(
+            "history: no overlapping (series, ref_date, rev, bmr) rows between "
+            "rebuilt and existing CES on the ≤2023 core"
+        )
+        return gaps
+
+    mismatched = matched.filter(
+        (pl.col("employment") - pl.col("_employment_old")).abs()
+        > (abs_tol + rel_tol * pl.col("_employment_old").abs())
+    )
+    if not mismatched.is_empty():
+        examples = [
+            f"  {r['industry_type']}/{r['industry_code']} "
+            f"(own={r['ownership']}) ref={r['ref_date']} "
+            f"(rev,bmr)=({r['revision']},{r['benchmark_revision']}): "
+            f"rebuilt={r['employment']} old={r['_employment_old']}"
+            for r in mismatched.head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"history: {mismatched.height} CES employment values diverge from "
+            f"the existing store on the ≤2023 core:\n" + "\n".join(examples)
+        )
+
+    return gaps
+
+
+def _cohort_aligned_match(
+    rebuilt: pl.DataFrame, existing: pl.DataFrame
+) -> pl.DataFrame:
+    """Inner-join rebuilt vs existing CES, cohort-aligning the (2,1) fan-out.
+
+    Returns the rebuilt rows that overlap the existing store, carrying the
+    existing employment as ``_employment_old`` for the divergence check.
+
+    The ``(0,0)/(1,0)/(2,0)`` cohorts carry a single vintage per series-month,
+    so they join on the plain ``(series, ref_date, rev, bmr)`` key.  The
+    ``(2,1)`` cohort fans out across annual benchmarks (each revising prior
+    history); aligning "latest-on-each-side" would compare a newer rebuilt
+    benchmark against the older existing one and report a spurious divergence.
+    So ``(2,1)`` adds ``vintage_date`` to the join key — a rebuilt ``(2,1)`` is
+    matched only to the existing store's ``(2,1)`` for the *same* benchmark
+    cohort, and rebuilt ``(2,1)`` cohorts the old store never held drop out of
+    the inner join (not flagged).
+    """
+    is_2_1 = (pl.col("revision") == 2) & (pl.col("benchmark_revision") == 1)
+
+    base_key = [*_SERIES_KEY, "ref_date", "revision", "benchmark_revision"]
+
+    def _join(left: pl.DataFrame, right: pl.DataFrame, key: list[str]) -> pl.DataFrame:
+        return left.join(
+            right.select([*key, "employment"]).rename(
+                {"employment": "_employment_old"}
+            ),
+            on=key,
+            how="inner",
+        )
+
+    # ``vintage_date`` is already a column on both sides (store schema), so
+    # adding it to the (2,1) join key introduces no new column — both result
+    # frames share the same schema and concat cleanly.
+    non21 = _join(
+        rebuilt.filter(~is_2_1), existing.filter(~is_2_1), base_key
+    )
+    only21 = _join(
+        rebuilt.filter(is_2_1), existing.filter(is_2_1), [*base_key, "vintage_date"]
+    )
+    return pl.concat([non21, only21])
+
+
+# ---------------------------------------------------------------------------
+# Gate 2 — Gap fill
+# ---------------------------------------------------------------------------
+
+
+def gate_gap_fill(
+    rebuilt: pl.DataFrame,
+    *,
+    frontier_ref_date: date,
+    dec_cohort_years: tuple[int, ...] = (2024, 2025),
+    nesting_tol: float = 1.0,
+) -> list[str]:
+    """Gap-fill gate (priority-ordered, store_rebuild §10).
+
+    **Hard** (failing entries):
+
+    * ``total/05`` (total private) and the 10 supersectors must each have a
+      row current to ``frontier_ref_date`` (the level the nowcast + supersector
+      narrative read today).
+    * The December ``(2,1)`` cohorts for ``dec_cohort_years`` must be complete
+      for that same frontier set (one ``Dec-YYYY`` (2,1) row per industry).
+
+    **Soft** (``"SOFT: "``-prefixed, caller decides; a missing component row is
+    never a gap): the three §10 additive-nesting identities where all needed
+    rows exist — ``05 == 06 + 08``, each domain summing its supersectors, and
+    each supersector summing its stored sectors — within ``nesting_tol``
+    (thousands of jobs).  Checked per ``(geography, ownership, ref_date,
+    revision, benchmark_revision)`` group (the full series context) after
+    collapsing the ``(2,1)`` per-benchmark fan-out to one row per cohort, and
+    skipped where any component row is absent.
+    """
+    gaps: list[str] = []
+    df = _all_sizes(rebuilt)
+    if df.is_empty():
+        return ["gap_fill: rebuilt frame is empty"]
+
+    # --- HARD: frontier currency -----------------------------------------
+    frontier = df.filter(pl.col("ref_date") == frontier_ref_date)
+    present_frontier = set(
+        frontier.select(_INDUSTRY_KEY).unique().iter_rows()
+    )
+    missing_frontier = [
+        (it, ic, ow) for (it, ic, ow) in _FRONTIER_INDUSTRIES
+        if (it, ic, ow) not in present_frontier
+    ]
+    if missing_frontier:
+        gaps.append(
+            f"gap_fill: {len(missing_frontier)} hard-gate industries missing at "
+            f"frontier ref_date {frontier_ref_date}: {missing_frontier}"
+        )
+
+    # --- HARD: December (2,1) cohorts complete ----------------------------
+    dec_2_1 = df.filter(
+        (pl.col("revision") == 2)
+        & (pl.col("benchmark_revision") == 1)
+        & (pl.col("ref_date").dt.month() == 12)
+    )
+    for year in dec_cohort_years:
+        year_rows = dec_2_1.filter(pl.col("ref_date").dt.year() == year)
+        present_dec = set(year_rows.select(_INDUSTRY_KEY).unique().iter_rows())
+        missing_dec = [
+            (it, ic, ow) for (it, ic, ow) in _FRONTIER_INDUSTRIES
+            if (it, ic, ow) not in present_dec
+        ]
+        if missing_dec:
+            gaps.append(
+                f"gap_fill: December {year} (2,1) cohort incomplete — "
+                f"{len(missing_dec)} industries missing: {missing_dec}"
+            )
+
+    # --- SOFT: additive nesting where present -----------------------------
+    gaps.extend(_check_additive_nesting(df, nesting_tol))
+
+    return gaps
+
+
+# Nesting group key: the FULL series context.  Geography + ownership are
+# constant on today's national/private rebuild, but keying on them keeps the
+# identity correct if a second geography or the deferred government ownership
+# axis (§11) ever lands — a government supersector must not sum into a private
+# parent.
+_NESTING_GROUP_KEY = [
+    "geographic_type", "geographic_code", "ownership",
+    "ref_date", "revision", "benchmark_revision",
+]
+
+
+def _check_additive_nesting(df: pl.DataFrame, tol: float) -> list[str]:
+    """Soft nesting validation of the three §10 additive identities.
+
+    Validates, per ``_NESTING_GROUP_KEY`` group (full series context):
+
+    * ``05 == 06 + 08``;
+    * each domain (``06``/``08``) == sum of its stored supersectors;
+    * each supersector == sum of its stored sectors (``QCEW_SUPERSECTOR``).
+
+    The rebuilt store fans the ``(2,1)`` cohort out across annual benchmarks
+    (multiple ``vintage_date`` rows per series-month-cohort); those are
+    collapsed to one row per cohort (latest ``vintage_date``) BEFORE summing, so
+    a parent and its components are never summed across mismatched benchmark
+    depth (which would spuriously break the identity on exactly the benchmarked
+    cohort the gate most wants to validate).
+
+    Each identity is *skipped* (no gap) for any group where a component row is
+    absent — a missing sector/supersector-month does not block promotion (§10).
+    """
+    gaps: list[str] = []
+
+    # Collapse the (2,1) fan-out: one row per (series, ref_date, rev, bmr).
+    df = (
+        df.sort("vintage_date", descending=True)
+        .unique(
+            subset=[*_SERIES_KEY, "ref_date", "revision", "benchmark_revision"],
+            keep="first",
+        )
+    )
+    group_key = _NESTING_GROUP_KEY
+
+    def _level(industry_type: str, industry_code: str) -> pl.DataFrame:
+        return (
+            df.filter(
+                (pl.col("industry_type") == industry_type)
+                & (pl.col("industry_code") == industry_code)
+            )
+            .group_by(group_key)
+            .agg(pl.col("employment").sum().alias("_emp"))
+        )
+
+    def _parent_vs_components(
+        parent_type: str,
+        parent_code: str,
+        comp_type: str,
+        comp_codes: list[str],
+        label: str,
+    ) -> None:
+        """Append a SOFT gap if parent != sum(components) where all present."""
+        parent = _level(parent_type, parent_code).rename({"_emp": "_parent"})
+        comp = (
+            df.filter(
+                (pl.col("industry_type") == comp_type)
+                & (pl.col("industry_code").is_in(comp_codes))
+            )
+            .group_by(group_key)
+            .agg(
+                pl.col("employment").sum().alias("_comp_sum"),
+                pl.col("industry_code").n_unique().alias("_n_comp"),
+            )
+            # Only groups where every stored component is present.
+            .filter(pl.col("_n_comp") == len(comp_codes))
+        )
+        bad = (
+            parent.join(comp, on=group_key, how="inner")
+            .filter((pl.col("_parent") - pl.col("_comp_sum")).abs() > tol)
+        )
+        if not bad.is_empty():
+            ex = bad.head(3).select(group_key + ["_parent", "_comp_sum"]).to_dicts()
+            gaps.append(
+                f"SOFT: gap_fill nesting {label} in {bad.height} groups: {ex}"
+            )
+
+    # (1) 05 == 06 + 08
+    tot = _level("total", "05").rename({"_emp": "_tot"})
+    goods = _level("domain", "06").rename({"_emp": "_goods"})
+    svc = _level("domain", "08").rename({"_emp": "_svc"})
+    joined = (
+        tot.join(goods, on=group_key, how="inner")
+        .join(svc, on=group_key, how="inner")
+        .with_columns((pl.col("_goods") + pl.col("_svc")).alias("_sum"))
+        .filter((pl.col("_tot") - pl.col("_sum")).abs() > tol)
+    )
+    if not joined.is_empty():
+        ex = joined.head(3).select(group_key + ["_tot", "_sum"]).to_dicts()
+        gaps.append(
+            f"SOFT: gap_fill nesting 05 != 06+08 in {joined.height} groups: {ex}"
+        )
+
+    # (2) 06 == sum(goods supersectors); 08 == sum(service supersectors)
+    for domain_code in ("06", "08"):
+        components = [
+            c for c in get_domain_supersectors(domain_code) if c in _SUPERSECTOR_CODES
+        ]
+        _parent_vs_components(
+            "domain", domain_code, "supersector", components,
+            f"{domain_code} != sum(supersectors)",
+        )
+
+    # (3) each supersector == sum of its stored sectors.  QCEW_SUPERSECTOR is the
+    # authoritative stored-taxonomy parent map (e.g. 30 -> {31, 32} durable+
+    # nondurable, 10 -> {11, 21}); get_supersector_components() is the CES
+    # modeling hierarchy and is MISALIGNED with the stored sectors, so it must
+    # NOT be used here.
+    for ss_code, info in QCEW_SUPERSECTOR.items():
+        sector_codes = [str(s) for s in info["sectors"]]
+        _parent_vs_components(
+            "supersector", ss_code, "sector", sector_codes,
+            f"supersector {ss_code} != sum(sectors)",
+        )
+
+    return gaps
+
+
+# ---------------------------------------------------------------------------
+# Gate 3 — Reconstruction accuracy + Q1 continuity
+# ---------------------------------------------------------------------------
+
+# Industries where the 8131 (religious orgs) inclusion predicts a small,
+# non-negative QCEW-minus-CES residual (store_rebuild §10; ces_qcew_industry §8).
+_RESIDUAL_CODES: tuple[str, ...] = ("81", "80", "08", "05")
+
+
+def gate_reconstruction_accuracy(
+    rebuilt_qcew: pl.DataFrame,
+    published_ces: pl.DataFrame,
+    *,
+    rel_tol: float = 0.10,
+) -> list[str]:
+    """Rebuilt-QCEW vs published-CES residual gate (store_rebuild §10).
+
+    At shared ``(industry_type, industry_code, ownership, ref_date)`` the
+    residual ``= rebuilt_qcew.employment - published_ces.employment`` for
+    ``industry_code in {81, 80, 08, 05}``:
+
+    * **Hard:** residual must be ``>= 0`` (non-negative).  A negative residual
+      FAILS — it contradicts the 8131 religious-org inclusion direction (CES
+      ``81`` omits NAICS 8131, QCEW includes it).
+    * **Soft** (``"SOFT: "``): residual ``<= rel_tol * published_ces.employment``
+      (relative bound).
+
+    Tolerance decision: ``rel_tol`` defaults to ``0.10`` — an initial generous
+    bound.  Tighten it from observed benchmark-month residuals per spec §10
+    after the first real run: the spec defers the numeric magnitude to this
+    plan, requiring only a *bound*, not exact equality.  The hard
+    non-negativity check carries the real semantic weight; the relative bound
+    is a sanity rail.
+
+    Both sides are reduced to the all-sizes level before the residual is taken.
+    Compare at benchmark months / annual averages (the caller selects those
+    ref_dates); month-to-month QCEW-vs-CES differences are expected and not a
+    gate concern.
+    """
+    gaps: list[str] = []
+    qcew = _all_sizes(rebuilt_qcew).filter(
+        pl.col("industry_code").is_in(_RESIDUAL_CODES)
+    )
+    ces = _all_sizes(published_ces).filter(
+        pl.col("industry_code").is_in(_RESIDUAL_CODES)
+    )
+    if qcew.is_empty() or ces.is_empty():
+        return ["reconstruction: no rows for residual codes {81,80,08,05}"]
+
+    # Compare the best-available SINGLE cohort per (series, ref_date) on each
+    # side — NEVER sum across (revision, benchmark_revision).  CES carries up to
+    # five cohorts per series-month ((2,1)×benchmarks + (2,0) + (1,0) + (0,0));
+    # summing them inflates the level ~5× and makes every residual meaningless.
+    # "Best available" = highest revision, then highest benchmark_revision, then
+    # latest vintage_date — the published/benchmarked print the gate keys on.
+    # The join key matches _best_available's uniqueness key (full _SERIES_KEY,
+    # incl. geography) so a second geography never turns the inner join into a
+    # multi-geo cross-join that inflates the residual rows.
+    join_key = [*_SERIES_KEY, "ref_date"]
+    merged = (
+        _best_available(qcew).select([*join_key, "employment"]).rename(
+            {"employment": "_qcew"}
+        )
+        .join(
+            _best_available(ces).select([*join_key, "employment"]).rename(
+                {"employment": "_ces"}
+            ),
+            on=join_key,
+            how="inner",
+        )
+        .with_columns((pl.col("_qcew") - pl.col("_ces")).alias("_resid"))
+    )
+    if merged.is_empty():
+        return ["reconstruction: no shared (industry, ref_date) rows to compare"]
+
+    # HARD: non-negative residual (the 8131 direction).
+    negative = merged.filter(pl.col("_resid") < 0)
+    if not negative.is_empty():
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
+            f"resid={r['_resid']:.3f} (qcew={r['_qcew']:.1f} ces={r['_ces']:.1f})"
+            for r in negative.head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"reconstruction: {negative.height} NEGATIVE residuals "
+            f"(QCEW < CES contradicts 8131 inclusion):\n" + "\n".join(ex)
+        )
+
+    # SOFT: relative bound.
+    over = merged.filter(pl.col("_resid").abs() > rel_tol * pl.col("_ces").abs())
+    if not over.is_empty():
+        ex = [
+            f"  {r['industry_type']}/{r['industry_code']} ref={r['ref_date']}: "
+            f"resid={r['_resid']:.3f} > {rel_tol:.0%} of ces={r['_ces']:.1f}"
+            for r in over.head(5).iter_rows(named=True)
+        ]
+        gaps.append(
+            f"SOFT: reconstruction {over.height} residuals exceed "
+            f"{rel_tol:.0%} relative bound:\n" + "\n".join(ex)
+        )
+
+    return gaps
+
+
+def gate_q1_continuity(
+    rebuilt: pl.DataFrame,
+    *,
+    clean_supersectors: tuple[str, ...] = _SUPERSECTOR_CODES,
+    tol: float = 0.05,
+) -> list[str]:
+    """Q1 headline continuity for suppression-free supersectors (T5 carry-over).
+
+    **Diagnostic-only / never hard.** This gate emits only ``"SOFT: "``-prefixed
+    findings — it can never block promotion.  The promotion caller MUST
+    partition findings on the prefix
+    (``hard = [g for g in gaps if not g.startswith("SOFT:")]``) before deciding
+    pass/fail, or every real run with a genuine Q1 discontinuity would
+    spuriously fail.
+
+    **Divergence from the literal T6 instruction (plans/10:148).** T6 asks to
+    "compare the Q1 ``total``/``'0'`` against the area-endpoint all-sizes level
+    within tolerance".  That same-row diff is **impossible** on the composed
+    store: compose has already *replaced* the Q1 area all-sizes row with the
+    size-endpoint ``total``/``'0'`` (§7/§8), so the area-endpoint Q1 level no
+    longer exists in this gate's input.  This gate therefore substitutes a
+    deliberately weaker **temporal** proxy — each Q1 month vs the interpolation
+    of its immediate non-Q1 neighbours — which catches a Q1 size/area coverage
+    mismatch only insofar as it shows up as a month-over-month discontinuity; a
+    size-endpoint sum that diverges *smoothly* from the area endpoint would pass.
+
+    For each clean supersector, take the all-sizes level
+    (``size_class_type IS NULL OR size_class_code == '0'``) per ref_date, and
+    require each Q1 month's level to be within ``tol`` (fractional) of the
+    interpolation of its immediate, **calendar-adjacent** non-Q1 neighbours.  A
+    Q1 month with no surrounding non-Q1 months (frontier / store edge), or whose
+    nearest non-Q1 neighbour is not the adjacent calendar month (a gap in the
+    series), is skipped — as is February (both neighbours are Q1).
+
+    ``clean_supersectors`` defaults to all 10 stored supersectors.  Per
+    plans/10:136 suppression is contained to sectors ``31``/``32``/``11``
+    (3-/4-digit NAICS); the supersector level (size agglvl 23 = area agglvl 13)
+    is exact for **all** 10, so all 10 are certified clean and validated here.
+    These are **stored** supersector codes (``'20'``, ``'30'``, …) — not QCEW
+    aggregate codes (``'1012'``).
+    """
+    gaps: list[str] = []
+    df = _all_sizes(rebuilt).filter(
+        (pl.col("industry_type") == "supersector")
+        & (pl.col("industry_code").is_in(list(clean_supersectors)))
+    )
+    if df.is_empty():
+        return []
+
+    # Use the latest available level per (series, ref_date) so we compare
+    # apples-to-apples across the size/area boundary.
+    latest = (
+        df.sort("vintage_date", descending=True)
+        .unique(subset=[*_SERIES_KEY, "ref_date"], keep="first")
+    )
+
+    for key_vals, series in latest.group_by(_SERIES_KEY):
+        s = series.sort("ref_date")
+        ref = s["ref_date"]
+        emp = s["employment"]
+        is_q1 = ref.dt.month().is_in([1, 2, 3])
+        month_idx = (ref.dt.year() * 12 + ref.dt.month()).to_list()
+        emp_list = emp.to_list()
+        q1_flags = is_q1.to_list()
+
+        for i, q1 in enumerate(q1_flags):
+            if not q1:
+                continue
+            # Only use a neighbour that is non-Q1 AND the adjacent calendar month
+            # (a month gap in the series makes the positional neighbour 2+ months
+            # away, so its level is not a valid interpolation target).
+            prev_i = (
+                i - 1
+                if i - 1 >= 0
+                and not q1_flags[i - 1]
+                and month_idx[i] - month_idx[i - 1] == 1
+                else None
+            )
+            next_i = (
+                i + 1
+                if i + 1 < len(q1_flags)
+                and not q1_flags[i + 1]
+                and month_idx[i + 1] - month_idx[i] == 1
+                else None
+            )
+            if prev_i is None and next_i is None:
+                continue  # isolated Q1 (store edge / gap) — nothing to compare
+            neighbours = [emp_list[j] for j in (prev_i, next_i) if j is not None]
+            expected = sum(neighbours) / len(neighbours)
+            if expected <= 0:
+                continue
+            actual = emp_list[i]
+            if abs(actual - expected) > tol * expected:
+                key = key_vals if isinstance(key_vals, tuple) else (key_vals,)
+                month = month_idx[i]
+                gaps.append(
+                    f"SOFT: q1_continuity {key[2]}/{key[3]} "
+                    f"ref={ref[i]}: Q1 all-sizes level {actual:.1f} deviates "
+                    f">{tol:.0%} from neighbour mean {expected:.1f} "
+                    f"(month_idx={month})"
+                )
+
+    return gaps
+
+
+# ---------------------------------------------------------------------------
+# Gate 4 — Vintage integrity (as-of slice)
+# ---------------------------------------------------------------------------
+
+
+def gate_vintage_integrity(as_of_slice: pl.DataFrame) -> list[str]:
+    """``_validate_censored_selection``-style checks on an as-of-censored slice.
+
+    Mirrors the *style* of
+    ``nfp_ingest.vintage_store._validate_censored_selection`` (vintage_store.py)
+    — but collects gaps into a ``list[str]`` instead of raising, and is a pure
+    function (the private fn is **not** imported).
+
+    Checks (all hard):
+
+    1. **No duplicate (series, ref_date).** One row per series-month after
+       censoring.
+    2. **No cross-vintage sums.** Exactly one ``vintage_date`` per (series,
+       ref_date) — a censored slice must not mix vintages within a series-month.
+    3. **No null/zero/NaN employment.**
+
+    The per-series key includes the size dimension so QCEW Q1 size-bucket rows
+    are not mistaken for duplicate series-months.
+    """
+    gaps: list[str] = []
+    if as_of_slice.is_empty():
+        return ["vintage_integrity: as-of slice is empty"]
+
+    # Size dims are part of the series identity (Q1 buckets are distinct series).
+    size_cols = [
+        c for c in ("size_class_type", "size_class_code")
+        if c in as_of_slice.columns
+    ]
+    series_month = [*_SERIES_KEY, *size_cols, "ref_date"]
+
+    # 1. No duplicate (series, ref_date).
+    dup = (
+        as_of_slice.group_by(series_month)
+        .len()
+        .filter(pl.col("len") > 1)
+    )
+    if not dup.is_empty():
+        ex = dup.head(3).to_dicts()
+        gaps.append(
+            f"vintage_integrity: {dup.height} duplicate (series, ref_date) "
+            f"keys: {ex}"
+        )
+
+    # 2. No cross-vintage sums — one vintage_date per (series, ref_date).
+    multi_vintage = (
+        as_of_slice.group_by(series_month)
+        .agg(pl.col("vintage_date").n_unique().alias("_n_vintage"))
+        .filter(pl.col("_n_vintage") > 1)
+    )
+    if not multi_vintage.is_empty():
+        ex = multi_vintage.head(3).to_dicts()
+        gaps.append(
+            f"vintage_integrity: {multi_vintage.height} (series, ref_date) keys "
+            f"mix multiple vintage_dates (cross-vintage sum risk): {ex}"
+        )
+
+    # 3. No null/zero/NaN employment.
+    bad_emp = as_of_slice.filter(
+        pl.col("employment").is_null()
+        | pl.col("employment").is_nan()
+        | (pl.col("employment") <= 0)
+    )
+    if not bad_emp.is_empty():
+        ex = bad_emp.head(3).select(
+            [*_INDUSTRY_KEY, "ref_date", "employment"]
+        ).to_dicts()
+        gaps.append(
+            f"vintage_integrity: {bad_emp.height} rows with null/zero/NaN "
+            f"employment: {ex}"
+        )
+
+    return gaps
