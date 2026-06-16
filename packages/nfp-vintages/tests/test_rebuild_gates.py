@@ -1631,26 +1631,20 @@ class TestGatesAgainstRealStore:
             pytest.skip(f"area endpoint unreachable: {exc}")
         reference = build_qcew_panel(raw)
 
-        # Scope to Q2–Q4, NSA, bmr=0.  The area-levels reference is BLS's real,
+        # All four quarters, NSA, bmr=0.  The area-levels reference is BLS's real,
         # un-suppressed all-sizes total (agglvl 13–16 is not suppressed) — the
-        # CORRECT oracle for the headline.  Q2–Q4 reproduce it to the unit
-        # (verified 2026-06-16: 0/297).  Q1 is excluded NOT because the oracle is
-        # wrong but because the store has a KNOWN DEFECT there: per the §7
-        # compose, the Q1 all-sizes row is the size-cross-product total/'0' (size
-        # buckets summed with disclosure-'N' cells dropped), which UNDERCOUNTS the
-        # published area total for suppression-heavy sectors (2024-Q1: nondurable
-        # mfg 32 ~32k jobs; Logging chain 11→10→06→05 ~0.8k).  Tracked as an open
-        # finding in plans/10-store_rebuild.md T6 — the maintainer must rule on it
-        # (fix: have the Q1 all-sizes headline carry the area-levels total, not the
-        # disclosed-bucket sum) BEFORE T7 re-baselines goldens from the store, or
-        # this scoping would silently bless the undercount as "truth".
-        # (The bmr=0 filter also drops stored (2,1) rows the reference lacks.)
+        # CORRECT oracle for the headline.  Q1 was formerly excluded because the
+        # §7 compose made the Q1 all-sizes row the size-cross-product total/'0'
+        # (buckets summed with disclosure-'N' dropped), which UNDERCOUNT the
+        # published area total; the §7 fix (compose_rebuild_panel now overrides
+        # the Q1 '0' headline to the area-levels total) closes that, so all four
+        # quarters must now reproduce the area endpoint to the unit.  Requires a
+        # scratch rebuild with the fix in place.  (The bmr=0 filter drops the
+        # stored (2,1) rows the single-benchmark reference lacks.)
         stored = qcew.filter(
             (pl.col("ref_date").dt.year() == year)
             & (pl.col("benchmark_revision") == 0)
-            & (pl.col("ref_date").dt.month() > 3)
         )
-        reference = reference.filter(pl.col("ref_date").dt.month() > 3)
         gaps = gate_qcew_fidelity(stored, reference)
         # Value mismatches are hard; missing-row reports are SOFT diagnostics.
         hard = [g for g in gaps if not g.startswith("SOFT:")]

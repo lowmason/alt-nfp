@@ -460,7 +460,10 @@ def compose_rebuild_panel(
         ``size_class_type``/``size_class_code``.  When provided, QCEW level rows
         whose series-month has size coverage are replaced by the size frame's
         ``total``/``'0'`` (all-sizes) + bucket rows — preventing double-counting
-        under the §7 ``IS NULL OR size_class_code='0'`` selector.
+        under the §7 ``IS NULL OR size_class_code='0'`` selector.  The all-sizes
+        ``'0'`` row's *value* is overridden to the area-levels total (the
+        published un-suppressed headline) — the size bucket-sum undercounts it
+        under suppression; see the §7 fix below.
 
     Returns
     -------
@@ -478,9 +481,40 @@ def compose_rebuild_panel(
     null-size level row (partial coverage).
     """
     if size is not None:
+        # §7 Q1 headline fix (store_rebuild §7/§8): the size frame's all-sizes
+        # ``'0'`` row is a sum over native buckets with suppressed
+        # (``disclosure_code='N'``) cells dropped, so it UNDERCOUNTS the
+        # published, un-suppressed area-levels total — uneven per industry, which
+        # also breaks §3 additive closure (``05 = 06 + 08``) at Q1.  The area
+        # endpoint publishes the un-suppressed total at agglvl 13–16, so override
+        # ONLY the ``'0'`` row's *employment* with it (metadata/vintage/revision
+        # untouched, so vintage-integrity is unchanged; buckets legitimately need
+        # not sum to the total under suppression).  Area totals nest by BLS
+        # construction, so this restores additive closure at Q1.
+        area_lvl = (
+            qcew_levels.select([*_SERIES_IDENTITY_KEY, "employment"])
+            # QCEW per-industry is rev-0 single-vintage (Decision A) → one row per
+            # series identity; ``unique`` is defensive against any future fan-out
+            # (a left-join multiplying the size rows would silently corrupt them).
+            .unique(subset=_SERIES_IDENTITY_KEY)
+            .rename({"employment": "_area_emp"})
+        )
+        size = (
+            size.join(area_lvl, on=_SERIES_IDENTITY_KEY, how="left")
+            .with_columns(
+                employment=pl.when(pl.col("size_class_code") == "0")
+                # coalesce: keep the bucket-sum if the area endpoint lacked the
+                # series (never null the headline).
+                .then(pl.coalesce("_area_emp", "employment"))
+                .otherwise(pl.col("employment"))
+            )
+            .drop("_area_emp")
+        )
+
         # Derive the "has size coverage" key set from size total/'0' rows only.
         # These are exactly the rows that would double-count against a null-size
-        # qcew_levels row under the §7 all-sizes predicate.
+        # qcew_levels row under the §7 all-sizes predicate.  (Built AFTER the
+        # value override above, which only touches employment — not the keys.)
         coverage_keys = (
             size.filter(pl.col("size_class_code") == "0")
             .select(_SERIES_IDENTITY_KEY)

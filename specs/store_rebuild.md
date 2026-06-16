@@ -258,6 +258,20 @@ all-sizes), `small` (codes `'1'`–`'3'`), `medium` (codes `'1'`–`'5'`), and `
 stored value). `geographic_type == 'national'` for now. Size-class rows inherit
 their industry parent's QCEW `(rev, vintage_date)` and `ownership='private'`.
 
+**The `total`/`'0'` headline carries the area-levels total, not the bucket sum.**
+The `small`/`medium`/`large` buckets are sums over native `size_code`s with
+suppressed (`disclosure_code='N'`) cells dropped, so a bucket-sum `'0'` would
+*undercount* the published, un-suppressed all-sizes total — unevenly per
+industry, which also breaks §3 additive closure (`05 = 06 + 08`) at Q1. The
+build therefore **overrides the `'0'` row's value to the area-levels total**
+(the un-suppressed agglvl 13–16 figure the area endpoint publishes), keeping the
+row's `(rev, vintage_date)` and size metadata untouched. The buckets legitimately
+need **not** sum to `'0'` under suppression — exactly how BLS presents the two
+products (un-suppressed total; suppressed size detail). Area totals nest by BLS
+construction, so this restores additive closure at Q1. (Compose-layer override in
+`compose_rebuild_panel`; the size builder still emits the bucket-sum as the
+pre-override value / fallback when the area endpoint lacks the series.)
+
 The **provider store** (separate repo/object-store) bins its microdata to the
 *same* scheme (March/third-month employment) so the two line up.
 
@@ -282,7 +296,11 @@ The **provider store** (separate repo/object-store) bins its microdata to the
    never source or join `small`/`medium` codes directly from raw QCEW. On Q1 the
    all-sizes level is the `total`/`'0'` row **only** — emit **no** null-size row
    for Q1 (else it double-counts under §7's `IS NULL OR size_class_code='0'`
-   selector).
+   selector). **Then override the `'0'` value to the area-levels total** (§8): the
+   bucket-sum drops suppressed cells and would undercount the published headline,
+   so `compose_rebuild_panel` replaces the `'0'` employment with the area-endpoint
+   all-sizes figure (bucket-sum kept only as the fallback when the area row is
+   absent).
 4. **Write** both to `NFP_STORE_URI=s3://alt-nfp/store-rebuild` (the canonical guard
    refuses `…/store`; `is_canonical_store` from the audit branch).
 

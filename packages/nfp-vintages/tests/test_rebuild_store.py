@@ -363,6 +363,141 @@ class TestAntiJoinKey:
         )
 
 
+class TestComposeQ1HeadlineCarriesAreaTotal:
+    """§7 fix: the Q1 all-sizes ``'0'`` headline carries the area-levels total,
+    not the disclosed-bucket sum.
+
+    The size frame's ``'0'`` row is a sum over native buckets with suppressed
+    (``disclosure_code='N'``) cells dropped, so it undercuts the published,
+    un-suppressed area-levels total.  The compose overrides only the ``'0'``
+    row's *employment* (metadata/vintage untouched) to the area value — buckets
+    legitimately need not sum to it under suppression.
+    """
+
+    def test_suppressed_headline_overridden_to_area_total(self):
+        q1 = date(2024, 1, 12)
+        ces = _make_ces([])
+        # Area-levels total = 100; bucket-sum '0' = 90 (10 suppressed).
+        qcew = _make_qcew_levels([
+            _qcew_level_row(ref_date=q1, industry_type="sector",
+                            industry_code="32", employment=100.0),
+        ])
+        size = _make_size([
+            _size_row(ref_date=q1, industry_type="sector", industry_code="32",
+                      size_class_type="total", size_class_code="0", employment=90.0),
+            _size_row(ref_date=q1, industry_type="sector", industry_code="32",
+                      size_class_type="large", size_class_code="9", employment=90.0),
+        ])
+        result = compose_rebuild_panel(ces, qcew, size)
+
+        zero = result.filter(
+            (pl.col("industry_code") == "32") & (pl.col("size_class_code") == "0")
+        )
+        assert zero.height == 1
+        # The headline is the area total (100), NOT the disclosed-bucket sum (90).
+        assert zero["employment"][0] == pytest.approx(100.0)
+        # Bucket rows are untouched (they legitimately undercount under suppression).
+        large = result.filter(
+            (pl.col("industry_code") == "32") & (pl.col("size_class_code") == "9")
+        )
+        assert large["employment"][0] == pytest.approx(90.0)
+        # Still exactly one all-sizes QCEW row for the month.
+        alls = result.filter(
+            all_sizes_predicate()
+            & (pl.col("source") == "qcew")
+            & (pl.col("ref_date") == q1)
+        )
+        assert alls.height == 1
+
+    def test_unsuppressed_headline_unchanged(self):
+        """When no cells are suppressed (bucket-sum == area), '0' is unchanged."""
+        q1 = date(2024, 1, 12)
+        ces = _make_ces([])
+        qcew = _make_qcew_levels([_qcew_level_row(ref_date=q1, employment=100.0)])
+        size = _make_size([
+            _size_row(ref_date=q1, size_class_type="total", size_class_code="0",
+                      employment=100.0),
+            _size_row(ref_date=q1, size_class_type="large", size_class_code="9",
+                      employment=100.0),
+        ])
+        result = compose_rebuild_panel(ces, qcew, size)
+        zero = result.filter(pl.col("size_class_code") == "0")
+        assert zero.height == 1
+        assert zero["employment"][0] == pytest.approx(100.0)
+
+    def test_no_area_row_falls_back_to_bucket_sum(self):
+        """A size '0' row whose series-month has no area-levels row keeps its sum.
+
+        Fallback (``coalesce``): if the area endpoint did not return the series,
+        the disclosed-bucket sum is the best available headline — never null it.
+        """
+        q1 = date(2024, 1, 12)
+        ces = _make_ces([])
+        qcew = _make_qcew_levels([])  # no area row at all
+        size = _make_size([
+            _size_row(ref_date=q1, size_class_type="total", size_class_code="0",
+                      employment=90.0),
+        ])
+        result = compose_rebuild_panel(ces, qcew, size)
+        zero = result.filter(pl.col("size_class_code") == "0")
+        assert zero.height == 1
+        assert zero["employment"][0] == pytest.approx(90.0)
+
+    def test_additive_nesting_restored_at_q1(self):
+        """'0'(05) == '0'(06) + '0'(08) after the override (area totals nest).
+
+        The bucket-sum '0' rows break §3 additive closure at Q1 because
+        suppression is uneven per industry; the area-levels totals nest by BLS
+        construction, so carrying them restores ``05 = 06 + 08``.
+        """
+        q1 = date(2024, 1, 12)
+        ces = _make_ces([])
+        qcew = _make_qcew_levels([
+            _qcew_level_row(ref_date=q1, industry_type="total", industry_code="05",
+                            employment=100.0),
+            _qcew_level_row(ref_date=q1, industry_type="domain", industry_code="06",
+                            employment=30.0),
+            _qcew_level_row(ref_date=q1, industry_type="domain", industry_code="08",
+                            employment=70.0),
+        ])
+        # Bucket sums undercount unevenly (05=95, 06=28, 08=66 → 28+66=94 ≠ 95).
+        size = _make_size([
+            _size_row(ref_date=q1, industry_type="total", industry_code="05",
+                      size_class_code="0", employment=95.0),
+            _size_row(ref_date=q1, industry_type="domain", industry_code="06",
+                      size_class_code="0", employment=28.0),
+            _size_row(ref_date=q1, industry_type="domain", industry_code="08",
+                      size_class_code="0", employment=66.0),
+        ])
+        result = compose_rebuild_panel(ces, qcew, size)
+
+        def zero(code: str) -> float:
+            return result.filter(
+                (pl.col("industry_code") == code) & (pl.col("size_class_code") == "0")
+            )["employment"][0]
+
+        assert zero("05") == pytest.approx(100.0)
+        assert zero("05") == pytest.approx(zero("06") + zero("08"))
+
+    def test_non_zero_buckets_not_overridden(self):
+        """Only the '0' row is overridden; small/medium/large/native are not."""
+        q1 = date(2024, 1, 12)
+        ces = _make_ces([])
+        qcew = _make_qcew_levels([_qcew_level_row(ref_date=q1, employment=100.0)])
+        size = _make_size([
+            _size_row(ref_date=q1, size_class_type="total", size_class_code="0",
+                      employment=90.0),
+            _size_row(ref_date=q1, size_class_type="small", size_class_code="S",
+                      employment=40.0),
+            _size_row(ref_date=q1, size_class_type="large", size_class_code="9",
+                      employment=50.0),
+        ])
+        result = compose_rebuild_panel(ces, qcew, size)
+        assert result.filter(pl.col("size_class_code") == "S")["employment"][0] == pytest.approx(40.0)
+        assert result.filter(pl.col("size_class_code") == "9")["employment"][0] == pytest.approx(50.0)
+        assert result.filter(pl.col("size_class_code") == "0")["employment"][0] == pytest.approx(100.0)
+
+
 # ---------------------------------------------------------------------------
 # write_rebuild_store — guard + local write
 # ---------------------------------------------------------------------------

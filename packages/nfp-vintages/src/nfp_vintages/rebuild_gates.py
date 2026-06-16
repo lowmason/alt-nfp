@@ -1049,14 +1049,13 @@ def gate_q1_continuity(
 
     **Divergence from the literal T6 instruction (plans/10:148).** T6 asks to
     "compare the Q1 ``total``/``'0'`` against the area-endpoint all-sizes level
-    within tolerance".  That same-row diff is **impossible** on the composed
-    store: compose has already *replaced* the Q1 area all-sizes row with the
-    size-endpoint ``total``/``'0'`` (§7/§8), so the area-endpoint Q1 level no
-    longer exists in this gate's input.  This gate therefore substitutes a
-    deliberately weaker **temporal** proxy — each Q1 month vs the interpolation
-    of its immediate non-Q1 neighbours — which catches a Q1 size/area coverage
-    mismatch only insofar as it shows up as a month-over-month discontinuity; a
-    size-endpoint sum that diverges *smoothly* from the area endpoint would pass.
+    within tolerance".  That same-row diff is **moot** on the composed store: the
+    §7 fix overrides the Q1 ``total``/``'0'`` headline *to* the area-levels total
+    (``compose_rebuild_panel``), so the headline now **is** the area level —
+    ``gate_qcew_fidelity`` checks that to the unit across all four quarters.  This
+    gate therefore keeps a deliberately weaker **temporal** proxy — each Q1 month
+    vs the interpolation of its immediate non-Q1 neighbours — as a light
+    month-over-month continuity check; it remains diagnostic-only.
 
     For each clean supersector, take the all-sizes level
     (``size_class_type IS NULL OR size_class_code == '0'``) per ref_date, and
