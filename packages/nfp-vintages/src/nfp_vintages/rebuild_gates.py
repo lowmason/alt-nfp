@@ -88,6 +88,27 @@ def _all_sizes(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(all_sizes_predicate())
 
 
+def _nsa_only(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop SA rows for the NSA-hierarchy gates (plans/11 T3).
+
+    The §10 rebuild reproduces the NSA private hierarchy + the NSA ``00``
+    anchor; SA is a NEW parallel series (build_ces_panel emits both after T1).
+    The NSA rails — additive nesting, the legacy-store history splice, and the
+    QCEW (NSA) ≤ CES residual — are defined on NSA only: SA does not nest
+    additively (``05 != 06 + 08`` in SA), its first-prints are not verified
+    against the legacy splice, and the QCEW side is NSA.  Summing or comparing
+    SA into those rails would spuriously fail.  ``gate_ces_fidelity`` is the SA
+    accuracy rail (it keys on ``seasonally_adjusted``), so SA fidelity is not
+    lost by this filter.
+
+    No-op when the column is absent (synthetic frames lacking it pass through);
+    a frame whose rows are all ``seasonally_adjusted=False`` is also unchanged.
+    """
+    if "seasonally_adjusted" not in df.columns:
+        return df
+    return df.filter(~pl.col("seasonally_adjusted"))
+
+
 def _best_available(df: pl.DataFrame) -> pl.DataFrame:
     """One row per (series, ref_date): the most-revised, most-recent print.
 
@@ -173,8 +194,13 @@ def gate_history_consistency(
     """
     gaps: list[str] = []
 
-    rebuilt = _all_sizes(rebuilt_ces).filter(pl.col("ref_date") < cutoff)
-    existing = _all_sizes(existing_store).filter(pl.col("ref_date") < cutoff)
+    # NSA-only (plans/11 T3): the legacy-core reproduction is the NSA hierarchy +
+    # the NSA ``00`` anchor; the HARD (0,0)/(1,0) rail was verified on NSA
+    # (0/2520), and SA fidelity is ``gate_ces_fidelity``'s job — comparing
+    # unverified SA first-prints against the legacy splice (on a key that omits
+    # ``seasonally_adjusted``) would spuriously HARD-fail.
+    rebuilt = _nsa_only(_all_sizes(rebuilt_ces)).filter(pl.col("ref_date") < cutoff)
+    existing = _nsa_only(_all_sizes(existing_store)).filter(pl.col("ref_date") < cutoff)
 
     # --- (rev, bmr) cohort population on the rebuilt CES -------------------
     # Private hierarchy + the 00 anchor; each must carry all four cohorts.
@@ -400,6 +426,20 @@ def gate_ces_fidelity(
     key = [*_SERIES_KEY, "ref_date", "revision", "benchmark_revision", "vintage_date"]
     rebuilt = _all_sizes(rebuilt_ces)
     reference = _all_sizes(reference_ces)
+    # SA rail (plans/11 T3): SA and NSA share the same ``vintage_date`` per
+    # (series, ref, rev, bmr) (Decision A) but hold different employment, so
+    # ``seasonally_adjusted`` MUST be in the join key — otherwise an NSA row
+    # inner-joins BOTH the NSA and the SA cohort at that shared vintage (a
+    # many-to-many fan-out) and pairs the SA value against the NSA reference,
+    # spuriously HARD-failing.  Keyed, SA↔SA and NSA↔NSA align cohort-for-cohort,
+    # so this both fixes the false fail AND is the SA fidelity rail (build_ces_panel
+    # emits the column; the store partition carries it).  Guarded: only added when
+    # BOTH frames carry it, so synthetic frames lacking it still compare.
+    if (
+        "seasonally_adjusted" in rebuilt.columns
+        and "seasonally_adjusted" in reference.columns
+    ):
+        key = [*key, "seasonally_adjusted"]
     if rebuilt.is_empty() or reference.is_empty():
         return ["fidelity: rebuilt or reference CES frame is empty"]
 
@@ -474,7 +514,13 @@ def gate_gap_fill(
     skipped where any component row is absent.
     """
     gaps: list[str] = []
-    df = _all_sizes(rebuilt)
+    # NSA-only (plans/11 T3): SA does NOT nest additively (``05 != 06 + 08`` in
+    # SA), so summing SA into the §10 identities would break them; and the
+    # frontier-currency / December-(2,1) hard checks are defined on the NSA
+    # hierarchy the §10 rebuild reproduces.  Filtering here covers BOTH the
+    # frontier checks below and ``_check_additive_nesting`` (which also filters
+    # defensively, so it is self-contained too).
+    df = _nsa_only(_all_sizes(rebuilt))
     if df.is_empty():
         return ["gap_fill: rebuilt frame is empty"]
 
@@ -549,6 +595,11 @@ def _check_additive_nesting(df: pl.DataFrame, tol: float) -> list[str]:
     absent — a missing sector/supersector-month does not block promotion (§10).
     """
     gaps: list[str] = []
+
+    # SA does NOT nest additively (``05 != 06 + 08`` in SA); exclude it
+    # defensively so this helper is self-contained even if a caller forgets to
+    # pre-filter (gate_gap_fill already does — plans/11 T3).
+    df = _nsa_only(df)
 
     # Collapse the (2,1) fan-out: one row per (series, ref_date, rev, bmr).
     df = (
@@ -663,6 +714,17 @@ _EXPECTED_QCEW_CES_RESIDUAL: dict[str, float] = {
     "08": -0.029,
     "80": -0.225,
     "81": -0.225,
+    # ============================ PROVISIONAL ============================
+    # ``00`` = QCEW total-covered (UI-covered employment, INCLUDING government)
+    # vs CES total-nonfarm (all nonfarm payroll, NSA).  QCEW total-covered
+    # ≈ 152.4M (Jan-2024) vs CES total-nonfarm ~158-159M NSA → roughly -3% to
+    # -5%.  This is the UI-coverage gap (CES counts UI-exempt orgs QCEW does
+    # not), but it is SMALLER than the private 05 gap because the QCEW total
+    # ADDS government back in.  **PROVISIONAL — plans/11 T4 calibrates this from
+    # the observed rebuilt residual at benchmark months; do NOT treat as
+    # verified.**  The generous band below reflects that.
+    "00": -0.04,
+    # ====================================================================
 }
 
 # Per-series acceptance band (half-width, fraction) around the expected residual.
@@ -679,6 +741,15 @@ _QCEW_CES_RESIDUAL_BAND: dict[str, float] = {
     "08": 0.02,
     "80": 0.08,
     "81": 0.08,
+    # ============================ PROVISIONAL ============================
+    # Generous ±3pp around the provisional -0.04 ``00`` expectation (the
+    # total-covered-vs-total-nonfarm definitional gap is not yet calibrated; the
+    # -3% to -5% reasoning spans 2pp on its own).  Tight enough to still catch a
+    # 0% residual (a coverage bug erasing the gap: |0 - (-0.04)| = 0.04 > 0.03).
+    # **PROVISIONAL — plans/11 T4 re-seeds this from the observed rebuilt
+    # residual.**
+    "00": 0.03,
+    # ====================================================================
 }
 
 # A residual more negative than ``expected - _IMPLAUSIBLE_COLLAPSE_MARGIN`` is an
@@ -700,6 +771,11 @@ _CES_RESIDUAL_TARGET: dict[tuple[str, str], tuple[str, str]] = {
     ("domain", "08"): ("domain", "08"),
     ("supersector", "80"): ("supersector", "80"),
     ("sector", "81"): ("supersector", "80"),
+    # PROVISIONAL (plans/11 T3): the QCEW ``00`` total-covered track maps to CES
+    # ``total/00`` total-nonfarm.  Its expected residual + band are PROVISIONAL
+    # (see _EXPECTED_QCEW_CES_RESIDUAL['00'] / _QCEW_CES_RESIDUAL_BAND['00']) and
+    # plans/11 T4 calibrates them from the observed rebuilt residual.
+    ("total", "00"): ("total", "00"),
 }
 
 # COVID years dropped from the median (employment levels were anomalous).
@@ -779,10 +855,16 @@ def gate_reconstruction_accuracy(
     gaps: list[str] = []
     band = band if band is not None else _QCEW_CES_RESIDUAL_BAND
     codes = {c for (_it, c) in _CES_RESIDUAL_TARGET}
-    qcew = _all_sizes(rebuilt_qcew).filter(pl.col("industry_code").is_in(codes))
-    ces = _all_sizes(published_ces)
+    # NSA-only (plans/11 T3): QCEW is NSA, so the CES side MUST be NSA too —
+    # comparing NSA-QCEW against an SA-CES level would inject a seasonal wobble
+    # into the residual.  The QCEW side is already NSA in the store; applying
+    # ``_nsa_only`` to it as well is harmless and keeps both rails consistent.
+    qcew = _nsa_only(_all_sizes(rebuilt_qcew)).filter(
+        pl.col("industry_code").is_in(codes)
+    )
+    ces = _nsa_only(_all_sizes(published_ces))
     if qcew.is_empty() or ces.is_empty():
-        return ["reconstruction: no rows for residual codes {05,08,80,81}"]
+        return ["reconstruction: no rows for residual codes {00,05,08,80,81}"]
 
     # Best-available single cohort per (series, ref_date) on each side.
     qcew_ba = _best_available(qcew)
@@ -1169,7 +1251,15 @@ def gate_vintage_integrity(as_of_slice: pl.DataFrame) -> list[str]:
         c for c in ("size_class_type", "size_class_code")
         if c in as_of_slice.columns
     ]
-    series_month = [*_SERIES_KEY, *size_cols, "ref_date"]
+    # ``seasonally_adjusted`` is also part of the series identity (plans/11 T3):
+    # SA and NSA of one series-month share ``vintage_date`` (Decision A) but are
+    # distinct series, so an as-of slice carrying both must not be flagged as a
+    # duplicate / cross-vintage sum.  Guarded (membership) like ``size_cols`` so
+    # synthetic slices lacking the column still work.
+    sa_cols = [
+        "seasonally_adjusted"
+    ] if "seasonally_adjusted" in as_of_slice.columns else []
+    series_month = [*_SERIES_KEY, *size_cols, *sa_cols, "ref_date"]
 
     # 1. No duplicate (series, ref_date).
     dup = (
