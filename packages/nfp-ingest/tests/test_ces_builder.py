@@ -9,8 +9,8 @@ Three layers, all offline:
 2. *Taxonomy* — ``00``→``(total,total)``, ``05``→``(total,private)``, a sector →
    ``(sector,private)``; dropped government/total-services codes are absent.
 3. *Local cesvinall cross-check* — reads the read-only cached ``cesvinall`` dir
-   and asserts the known ``00`` NSA anchors for ref_date 2023-06-12. Self-skips
-   when the local data is unavailable (CI has no ``data/``).
+   and asserts the known ``00`` NSA and SA anchors for ref_date 2023-06-12.
+   Self-skips when the local data is unavailable (CI has no ``data/``).
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def _write_triangle(
         ref-month ``(year, month)`` → one value per vintage row (column read
         top-to-bottom). ``None`` ⇒ blank cell.
     sa : bool
-        Write the ``_SA`` (ignored-by-builder) variant instead of ``_NSA``.
+        Write the ``_SA`` variant instead of ``_NSA``.
     """
     data: dict[str, list] = {
         "year": [v[0] for v in vintages],
