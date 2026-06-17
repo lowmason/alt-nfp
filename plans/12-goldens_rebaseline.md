@@ -21,9 +21,13 @@
 
 ---
 
-## The 9 as-of dates (all valid against the 2017+ store)
+## The 9 as-of success dates + 1 expected-failure (against the 2017+ store)
 
-`2020-05-12, 2023-07-12, 2024-09-12, 2024-12-12, 2025-02-12, 2025-03-12, 2025-07-12, 2025-11-12, 2026-01-12` — all ≥ 2020, so no date-trimming. Expected-failure date `2026-02-12` ("ref_date gap") is re-verified in T1/T3. `start_year` changes **2012 → 2017** (the rebuilt store's coverage); `end_year` stays 2026.
+`2020-05-12, 2023-07-12, 2024-09-12, 2024-12-12, 2025-02-12, 2025-03-12, 2025-07-12, 2025-11-12, 2026-02-12` build clean censored panels — all ≥ 2020, so no date-trimming. The expected-failure is **`2026-01-12`** ("ref_date gap").
+
+> **Shutdown correction (T7, 2026-06-17 — diverges from this plan's original premise).** The plan first inherited the frozen-reference expected-failure `2026-02-12` and listed `2026-01-12` as a success. Probed against the **rebuilt** store, the failure moves one month earlier: the Oct-2025 government shutdown delayed the **Sep+Oct** CES prints (September's real release was 2025-11-20), so at `2026-01-12` ref-month 2025-11 is back but the delayed 2025-10 print is not yet knowable → a real **interior** hole (gap 2025-09→2025-11, ces SA) that `_validate_censored_selection` refuses to build through. By `2026-02-12` the 2025-10 value is backfilled, so it now *builds* (frontier contiguous through 2026-01). At `2025-11-12` both Sep+Oct are unknowable, so the frontier simply truncates at 2025-08 — no interior hole, builds clean. So the swap (`2026-01-12` → EF, `2026-02-12` → success) keeps the same 10-date set with the correct partition. Confirmed against the raw store: SA ref-month 2025-09 has zero `employment>0` rows with `vintage_date ≤ 2025-11-12`. See memory `ces-oct2025-shutdown`.
+
+`start_year` changes **2012 → 2017** (the rebuilt store's coverage); `end_year` stays 2026.
 
 ---
 

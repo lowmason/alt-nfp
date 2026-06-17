@@ -34,6 +34,10 @@ except Exception:
 
 os.environ.setdefault("NFP_STORE_URI", "s3://alt-nfp/store-rebuild")  # default to scratch
 
+# Success dates — each builds a complete, gap-free censored panel. 2026-02-12 sits
+# AFTER the Oct-2025 shutdown backfill (the delayed Sep+Oct CES prints have landed
+# by then), so its frontier runs contiguously through 2026-01 — strictly better
+# coverage than the pre-backfill 2026-01-12, which cannot build (see below).
 AS_OF_DATES = [
     date(2020, 5, 12),
     date(2023, 7, 12),
@@ -43,9 +47,16 @@ AS_OF_DATES = [
     date(2025, 3, 12),
     date(2025, 7, 12),
     date(2025, 11, 12),
-    date(2026, 1, 12),
+    date(2026, 2, 12),
 ]
-EXPECTED_FAILURE = (date(2026, 2, 12), "ref_date gap")
+# Expected-failures — horizons where the Oct-2025 government shutdown leaves a real
+# INTERIOR ref_date hole the validator refuses to build through. At 2026-01-12,
+# ref-month 2025-11 is released but the delayed 2025-10 print is not yet knowable
+# → gap 2025-09 → 2025-11 (ces SA). The frozen-reference goldens pinned 2026-02-12
+# (its canonical-store condition); probed against the rebuilt store the failure
+# moves one month earlier and 2026-02-12 builds (backfilled). build_model_data
+# skips these — the A2 section iterates AS_OF_DATES (successes) only.
+EXPECTED_FAILURES = [(date(2026, 1, 12), "ref_date gap")]
 START_YEAR, END_YEAR = 2017, 2026
 GLOBAL_ARRAYS = [
     "month_of_year",
@@ -111,7 +122,9 @@ def main() -> None:
         "divergence": (
             "rebuilt store (s3://alt-nfp/store-rebuild): 2017+ history (vs frozen-ref 2012+), "
             "QCEW reconstructed crosswalk values, ownership/00-anchor/NSA store schema normalized "
-            "to PANEL_SCHEMA by transform_to_panel (panel columns unchanged; values + row counts differ)."
+            "to PANEL_SCHEMA by transform_to_panel (panel columns unchanged; values + row counts differ). "
+            "Oct-2025 shutdown delayed the Sep+Oct CES prints, shifting the ref_date-gap "
+            "expected-failure from 2026-02-12 (frozen ref) to 2026-01-12 (rebuilt; 2026-02-12 backfills)."
         ),
     }
 
@@ -141,19 +154,23 @@ def main() -> None:
             "provider_config": dataclasses.asdict(cfg),
         }
 
-    ef_date, ef_msg = EXPECTED_FAILURE
-    try:
-        build_panel(providers=[], start_year=START_YEAR, end_year=END_YEAR, as_of_ref=ef_date)
-        raise SystemExit(
-            f"FAIL: expected ValueError({ef_msg!r}) at {ef_date}, but build_panel succeeded"
-        )
-    except ValueError as e:
-        assert ef_msg in str(e), f"expected-failure message changed: {e!r}"
+    ef_records = []
+    for ef_date, ef_msg in EXPECTED_FAILURES:
+        try:
+            build_panel(
+                providers=[], start_year=START_YEAR, end_year=END_YEAR, as_of_ref=ef_date
+            )
+            raise SystemExit(
+                f"FAIL: expected ValueError({ef_msg!r}) at {ef_date}, but build_panel succeeded"
+            )
+        except ValueError as e:
+            assert ef_msg in str(e), f"expected-failure message changed at {ef_date}: {e!r}"
+        ef_records.append({"as_of_ref": ef_date.isoformat(), "error_contains": ef_msg})
 
     a1_manifest = {
         "provenance": prov,
         "fixtures": a1,
-        "expected_failures": [{"as_of_ref": ef_date.isoformat(), "error_contains": ef_msg}],
+        "expected_failures": ef_records,
     }
     (a1_dir / "a1_manifest.json").write_text(json.dumps(a1_manifest, indent=2) + "\n")
 
