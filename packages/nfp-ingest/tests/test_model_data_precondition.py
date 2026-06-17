@@ -77,10 +77,15 @@ class TestPanelToModelDataBenchmarkRevisionWarning:
         df = _make_panel(rows)
         df = df.with_columns(pl.lit(0).cast(pl.Int32).alias("benchmark_revision"))
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", UserWarning)
-            # Should not raise — benchmark_revision == 0 everywhere
+        # Scope the assertion to the benchmark_revision precondition warning under
+        # test — record all warnings and assert none mention it.  A blanket
+        # ``simplefilter("error", UserWarning)`` would also trip on the unrelated,
+        # env-dependent "cyclical indicator missing" warning panel_to_model_data
+        # emits when the (gitignored) indicators dir is empty (e.g. in CI).
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             panel_to_model_data(df, providers=[])
+        assert not [w for w in caught if "benchmark_revision" in str(w.message)]
 
     def test_no_warning_without_benchmark_revision_column(self):
         """Normal PANEL_SCHEMA panel (no benchmark_revision) should NOT warn."""
@@ -88,9 +93,12 @@ class TestPanelToModelDataBenchmarkRevisionWarning:
         df = _make_panel(rows)
         assert "benchmark_revision" not in df.columns
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", UserWarning)
+        # See the note above: only the benchmark_revision warning is in scope here,
+        # not the env-dependent cyclical-indicator warning.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             panel_to_model_data(df, providers=[])
+        assert not [w for w in caught if "benchmark_revision" in str(w.message)]
 
     def test_warning_message_mentions_build_model_data(self):
         """Warning text should guide callers toward build_model_data."""
