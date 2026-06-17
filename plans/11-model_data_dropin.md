@@ -25,7 +25,7 @@
 
 **Finding (2026-06-17): SA `(rev,bmr)` mirrors NSA exactly — proceed with the mirror (A).** Verified against the canonical store + the `_SA` triangle:
 - Canonical SA and NSA `00` carry the **identical** cohort set `{(0,0),(1,0),(2,0),(2,1)}`, identical row counts (1088 each), **max 4 rows per ref-month** (no extra SA-only vintages).
-- Jun-2023 `00`: SA and NSA have the **same four `vintage_date`s** (2023-07-07, -08-07, -09-07, 2024-02-02) — only the *values* differ (SA 156204/156155/156075/155880 vs NSA 156963/156945/156905/156701). The Feb benchmark re-seasonal-adjustment lands on the **same** `(2,1)` vintage as NSA; it does **not** introduce non-benchmark vintage steps.
+- Jun-2023 `00`: SA and NSA have the **same four `vintage_date`s** (2023-07-07, -08-07, -09-07, 2024-02-02) — only the *values* differ — prints SA 156204/156155/156075 vs NSA 156963/156945/156905, and the 2024-02-02 `(2,1)` benchmark SA 156027 vs NSA 156842. *(Corrected after T1's primary-source read: the earlier `…/155880` quoted SA's 2026-benchmark cell at vintage 2026-02-11, which a 2026-01 frontier filters out — not the 2024-02-02 value.)* The Feb benchmark re-seasonal-adjustment lands on the **same** `(2,1)` vintage as NSA; it does **not** introduce non-benchmark vintage steps.
 - `tri_000000_SA.csv` is structurally identical to `_NSA` (1047 cols, same column grid).
 
 ⟹ **T1 reuses `_diagonals` unchanged**; only the file suffix (`_SA`) + the `seasonally_adjusted=True` flag change. No SA-specific diagonal path needed.
@@ -40,7 +40,9 @@
 
 ---
 
-## T1 — SA CES builder (`nfp-ingest`) `[depends: T0]`
+## T1 — SA CES builder (`nfp-ingest`) `[depends: T0]` — ✅ DONE (eb7cd7f + docs 051dffb)
+
+**Done (2026-06-17).** `build_ces_panel` loops over `(("NSA", False), ("SA", True))`, reuses `_diagonals` unchanged (Decision A), carries `seasonally_adjusted` per-part, adds it to the sort key. Regression guard (NSA subset == NSA-only build) + SA anchor cross-check (SA `00` 2023-06-12: 156204/156155/156075, `(2,1)` {(156027,2024-02-02),(155871,2025-02-07)}) both green. Spec ✅ + code-quality ✅ (12 tests, ruff clean).
 
 **Files:**
 - Modify: `packages/nfp-ingest/src/nfp_ingest/ces_builder.py` (the `tri_*_NSA.csv` glob + the `seasonally_adjusted=pl.lit(False)` literal)
@@ -86,7 +88,9 @@ for adj_suffix, is_sa in (("NSA", False), ("SA", True)):
 
 ---
 
-## T2 — QCEW `00` total (`nfp-vintages` acquire + `nfp-ingest` crosswalk) `[depends: none]`
+## T2 — QCEW `00` total (`nfp-vintages` acquire + `nfp-ingest` crosswalk) `[depends: none]` — ✅ DONE (d904a73 + cq 552c7f5)
+
+**Done (2026-06-17).** `_prep_area_raw` keeps `own_code ∈ {'5','0'}` (drops govt 1/2/3); `industry.py` carries `QCEW_OWN_TOTAL='0'` + `QCEW_TOTAL_PULL` (industry='10', agglvl='10' — **primary-source verified**: `own_code=0` is exactly one area row at those coords, Jan-2024 = 152,393,725 persons). `build_qcew_panel` emits a parallel `('total','00','total')` track (÷1000, NSA, bmr=0) via shared `_cast_raw`/`_explode_monthly`; `ownership` now flows from a column. Dual-context safe: size-path (own_code=5-only) → empty total, private tree byte-identical (regression guard green). No sort-key change. Spec ✅ + code-quality ✅ (397 tests, ruff clean).
 
 **Files:**
 - Modify: `packages/nfp-vintages/src/nfp_vintages/rebuild_store.py` (`_prep_area_raw` — the `own_code == "5"` filter)
@@ -121,7 +125,9 @@ def test_qcew_total_maps_to_00():
 
 ---
 
-## T3 — Compose SA + gate updates (`nfp-ingest`, `nfp-vintages`) `[depends: T1, T2]`
+## T3 — Compose SA + gate updates (`nfp-ingest`, `nfp-vintages`) `[depends: T1, T2]` — ✅ DONE (c8a1cc1 + cq 6ce2697)
+
+**Done (2026-06-17).** Added shared `_nsa_only` guard. **Filter-vs-key by gate intent:** SA *excluded* from the summing/NSA-compare rails (`gate_history_consistency`, `gate_gap_fill`/`_check_additive_nesting`, `gate_reconstruction_accuracy` CES side — SA doesn't nest, QCEW is NSA); SA *added to the identity key* in `gate_ces_fidelity` (SA↔SA, NSA↔NSA — the SA rail; fixes a false HARD fail from the shared-vintage_date 1×2 fan-out) and `gate_vintage_integrity` dup key. Added a **PROVISIONAL** `'00'` residual band to all three reconstruction constants (T4 calibrates). `compose_rebuild_panel` needed **no change** (unions CES wholesale; §7 is QCEW-size-only) — verified by `TestComposeCarriesSaAndTotal`. `_row` test default flipped True→False so the filters are genuine no-ops on existing NSA frames; negative-control tests prove each filter load-bearing. Spec ✅ + code-quality ✅ (148 vintages tests, ruff clean).
 
 **Files:**
 - Verify/Modify: `packages/nfp-vintages/src/nfp_vintages/rebuild_store.py` (`compose_rebuild_panel`)
