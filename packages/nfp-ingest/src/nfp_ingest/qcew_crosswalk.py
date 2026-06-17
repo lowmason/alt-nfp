@@ -240,6 +240,10 @@ def build_qcew_panel(raw: pl.DataFrame) -> pl.DataFrame:
     # _to_monthly_total returns zero rows when no own_code='0' row is present
     # (size-path context), so this is unconditionally safe to concat.
     monthly_total = _to_monthly_total(raw)
+    # group_by(_VINTAGE_GROUP).agg projects the total row to the private tree's
+    # post-_pull shape (drops agglvl_code/industry_code) so the two tracks concat
+    # cleanly; numerically a no-op over the single total row (and an empty,
+    # correctly-shaped frame in the size path).
     total00 = (
         _tag(
             monthly_total.group_by(_VINTAGE_GROUP).agg(

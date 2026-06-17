@@ -584,11 +584,12 @@ QCEW_OWN_TOTAL: str = '0'
 # exactly one area row at (agglvl 10, industry '10'). Total-covered ≠ CES nonfarm
 # (incl. agriculture / UI-covered); the reconstruction gate bands the residual (T3/T4).
 QCEW_TOTAL_PULL: dict[str, str] = {
-    'own_code': '0',
     'industry_code': '10',
     'agglvl_code': '10',
 }
-"""Selector triple for the QCEW total-covered area row → CES '00' anchor."""
+"""Industry/agglvl coordinates of the QCEW total-covered area row → CES '00'
+anchor. ``own_code`` is :data:`QCEW_OWN_TOTAL` (kept separate to mirror
+:data:`QCEW_OWN_PRIVATE`, the private-track own_code filter)."""
 
 QCEW_AREA_NATIONAL: str = 'US000'
 """QCEW ``area_fips`` for the national total."""
