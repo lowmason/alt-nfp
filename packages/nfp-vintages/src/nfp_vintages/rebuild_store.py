@@ -216,7 +216,7 @@ def _acquire_qcew_levels(
                     logger.info("  skipped (404)")
                     continue
                 prepped = _prep_area_raw(raw)
-                logger.info("  %d rows after private filter", prepped.height)
+                logger.info("  %d rows after private+total filter", prepped.height)
                 slices.append(prepped)
 
     if not slices:
