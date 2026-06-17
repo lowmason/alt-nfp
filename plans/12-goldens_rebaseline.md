@@ -206,8 +206,8 @@ if __name__ == "__main__":
 
 Rebuilt panels are ~31–53% of frozen: 2017+ start (vs 2012+) plus the rebuilt store's lower per-month series density. The 2026-01-12/2026-02-12 rows swap success↔EF (Oct-2025 shutdown — see the shutdown-correction note above). A2 `T` (month count) confirms date coverage exactly: 2020-05-12→T=40 (2017-01…2020-04), 2026-02-12→T=109 (2017-01…2026-01).
 - [x] **Step 2 — close plans/10 T7.** DONE — plans/10 T7 header, status table (T7→DONE, T8→awaiting GO), top-line status paragraph, and the T7 checklist item all flipped to DONE with the result (scratch prefixes, rewritten manifests, A1 11/11 + A2 9/9 green). T8 promotes the scratch goldens → canonical `…/golden/a1|a2` (copy) **alongside** the store cutover, and flips the test env defaults.
-- [ ] **Step 3 — PR (held for T8).** Open a PR for the `goldens-rebaseline` branch (manifest changes + generator). It does NOT merge until T8 (promotion), so main's frozen-reference goldens stay authoritative until cutover. State this in the PR.
-- [ ] **Acceptance:** T7 closed in plans/10; divergences documented; branch PR open and explicitly gated on T8.
+- [x] **Step 3 — PR (held for T8).** [PR #4](https://github.com/lowmason/alt-nfp/pull/4) opened as a **draft**, base `main`, explicitly "HELD for T8 — do not merge until the store cutover". Bundles the generator + uploader + rewritten manifests + the two execution fixes (QCEW Q1 size `2b37c60`, shutdown EF swap `be06cc3`). CI skips the `real_store` goldens (no creds) → green.
+- [x] **Acceptance:** T7 closed in plans/10 (header, status table, top-line para, checklist item); divergences documented (manifest `provenance.divergence` + T4 results table); [PR #4](https://github.com/lowmason/alt-nfp/pull/4) open as draft, explicitly gated on T8.
 
 ---
 
