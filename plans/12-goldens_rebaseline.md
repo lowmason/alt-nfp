@@ -187,8 +187,25 @@ if __name__ == "__main__":
 - Modify: `plans/10-store_rebuild.md` (T7 → DONE)
 - Modify: `plans/12-goldens_rebaseline.md` (this file — record results)
 
-- [ ] **Step 1 — record divergences.** The manifests' `provenance.divergence` already states them; add the measured row-count deltas (frozen vs rebuilt) here under T4.
-- [ ] **Step 2 — close plans/10 T7.** Flip the T7 checklist item ("regenerate A1/A2 fixtures…") to `[x]` with the result (staged to `…/a1-rebuild`+`…/a2-rebuild`, manifests committed, suites green). Note T8 promotes the scratch goldens → canonical `…/golden/a1|a2` (copy) **alongside** the store cutover, and flips the test env defaults.
+- [x] **Step 1 — record divergences.** The manifests' `provenance.divergence` state them; measured results below.
+
+**Execution results (2026-06-17).** A1 **11/11** + A2 **9/9** green against `s3://alt-nfp/store-rebuild` + the scratch goldens. `start_year` 2012→2017; A2 BD arrays (`birth_rate`/`bd_proxy`/`bd_qcew_lagged`) dropped (v3); panel columns unchanged (15-col `PANEL_SCHEMA`). A1 censored-panel row counts (frozen → rebuilt):
+
+| as-of | frozen | rebuilt | Δ |
+|---|---|---|---|
+| 2020-05-12 | 11020 | 3469 | −7551 |
+| 2023-07-12 | 15390 | 7077 | −8313 |
+| 2024-09-12 | 17024 | 8427 | −8597 |
+| 2024-12-12 | 17366 | 8709 | −8657 |
+| 2025-02-12 | 17518 | 8836 | −8682 |
+| 2025-03-12 | 17634 | 8998 | −8636 |
+| 2025-07-12 | 17756 | 9340 | −8416 |
+| 2025-11-12 | 17874 | 9562 | −8312 |
+| 2026-01-12 | 17996 (success) | — (**expected-failure**) | shutdown swap |
+| 2026-02-12 | — (expected-failure) | 9964 (success) | shutdown swap |
+
+Rebuilt panels are ~31–53% of frozen: 2017+ start (vs 2012+) plus the rebuilt store's lower per-month series density. The 2026-01-12/2026-02-12 rows swap success↔EF (Oct-2025 shutdown — see the shutdown-correction note above). A2 `T` (month count) confirms date coverage exactly: 2020-05-12→T=40 (2017-01…2020-04), 2026-02-12→T=109 (2017-01…2026-01).
+- [x] **Step 2 — close plans/10 T7.** DONE — plans/10 T7 header, status table (T7→DONE, T8→awaiting GO), top-line status paragraph, and the T7 checklist item all flipped to DONE with the result (scratch prefixes, rewritten manifests, A1 11/11 + A2 9/9 green). T8 promotes the scratch goldens → canonical `…/golden/a1|a2` (copy) **alongside** the store cutover, and flips the test env defaults.
 - [ ] **Step 3 — PR (held for T8).** Open a PR for the `goldens-rebaseline` branch (manifest changes + generator). It does NOT merge until T8 (promotion), so main's frozen-reference goldens stay authoritative until cutover. State this in the PR.
 - [ ] **Acceptance:** T7 closed in plans/10; divergences documented; branch PR open and explicitly gated on T8.
 
