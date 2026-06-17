@@ -150,6 +150,17 @@ def test_qcew_total_maps_to_00():
 
 **Files:** none (run + record). Network + scratch write.
 
+**Pre-handoff (controller, 2026-06-17): T1–T3 code-complete + locally de-risked.**
+Full fast suite green (661 passed, all packages). Local drop-in seam confirmed
+**without network/S3**: real `build_ces_panel(CESVINALL_DIR)` + a synthetic QCEW
+(`own_code=0` total + a private sector) through `compose_rebuild_panel` yields a
+composed frame carrying `source=ces` **SA** `00` (741 rows), `source=ces` NSA `00`
+(562), and `source=qcew` `00`/`total` (3). `00` cohort breakdown: prints
+`(0,0)/(1,0)/(2,0)` **identical** SA↔NSA (109/108/107); the SA surplus is entirely
+in `(2,1)` (SA 417 vs NSA 238) — expected (SA re-bases each February). So the
+maintainer's scratch build will write exactly the two previously-missing series;
+Steps 1/3/4 below are the operational confirmation on real S3 data.
+
 - [ ] **Step 1 — rebuild to scratch.** `NFP_STORE_URI=s3://alt-nfp/store-rebuild uv run alt-nfp build-rebuild`. Confirm CES row count ≈ doubles (SA + NSA) and a QCEW `00` total appears; canonical untouched (guard holds).
 - [ ] **Step 2 — calibrate the `00` band (T3 Step 4).** Read the rebuilt `00` QCEW vs CES `00` SA residual at benchmark months; set `_EXPECTED_QCEW_CES_RESIDUAL['00']` + band from the observed value; commit the calibration.
 - [ ] **Step 3 — drop-in check.** `NFP_STORE_URI=s3://alt-nfp/store-rebuild` →
