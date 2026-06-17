@@ -21,9 +21,16 @@
 
 ---
 
-## T0 — SA vintage-structure spike (read-only) `[depends: none]`
+## T0 — SA vintage-structure spike (read-only) `[depends: none]` — ✅ DONE → **Decision A**
 
-The NSA builder assigns `(rev,bmr)` by reading down each ref-month column: first three prints → `(0,0)/(1,0)/(2,0)`; subsequent January-vintage benchmark restatements → per-benchmark `(2,1)`. **SA is re-seasonally-adjusted every February**, so an SA ref-month column may change value *without* a benchmark (a seasonal-factor revision), which the NSA `(rev,bmr)` model does not represent. Resolve the convention before building.
+**Finding (2026-06-17): SA `(rev,bmr)` mirrors NSA exactly — proceed with the mirror (A).** Verified against the canonical store + the `_SA` triangle:
+- Canonical SA and NSA `00` carry the **identical** cohort set `{(0,0),(1,0),(2,0),(2,1)}`, identical row counts (1088 each), **max 4 rows per ref-month** (no extra SA-only vintages).
+- Jun-2023 `00`: SA and NSA have the **same four `vintage_date`s** (2023-07-07, -08-07, -09-07, 2024-02-02) — only the *values* differ (SA 156204/156155/156075/155880 vs NSA 156963/156945/156905/156701). The Feb benchmark re-seasonal-adjustment lands on the **same** `(2,1)` vintage as NSA; it does **not** introduce non-benchmark vintage steps.
+- `tri_000000_SA.csv` is structurally identical to `_NSA` (1047 cols, same column grid).
+
+⟹ **T1 reuses `_diagonals` unchanged**; only the file suffix (`_SA`) + the `seasonally_adjusted=True` flag change. No SA-specific diagonal path needed.
+
+*(Original concern, now retired:)* The NSA builder assigns `(rev,bmr)` by reading down each ref-month column: first three prints → `(0,0)/(1,0)/(2,0)`; subsequent January-vintage benchmark restatements → per-benchmark `(2,1)`. The worry was that SA's February re-seasonal-adjustment might change an SA column *without* a benchmark — but the canonical store shows it does not (SA revises on the same vintage cadence as NSA).
 
 - [ ] Read one `tri_000000_SA.csv` triangle and compare its diagonal/benchmark structure to the canonical store's SA rows (`read_vintage_store(source='ces', seasonally_adjusted=True)` against `s3://alt-nfp/store`): how does the canonical pipeline assign `(revision, benchmark_revision)` to SA, and do SA columns step at non-benchmark vintages?
 - [ ] **Decide + record** (in this file under T0) one of:
