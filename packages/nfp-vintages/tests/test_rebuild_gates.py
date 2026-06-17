@@ -1055,7 +1055,7 @@ class TestGateReconstructionAccuracy:
         return _frame(qcew_rows), _frame(ces_rows)
 
     def test_00_band_in_band_passes(self) -> None:
-        """A QCEW ``00`` total within the provisional band passes."""
+        """A QCEW ``00`` total at the expected (calibrated) residual passes."""
         qcew, ces = self._pair_at_residuals_00(_EXPECTED_QCEW_CES_RESIDUAL["00"])
         gaps = gate_reconstruction_accuracy(qcew, ces)
         hard = [g for g in gaps if not g.startswith("SOFT:")]
@@ -1064,9 +1064,10 @@ class TestGateReconstructionAccuracy:
     def test_00_band_out_of_band_fails_hard(self) -> None:
         """A QCEW ``00`` total at 0% (coverage bug erasing the gap) HARD-fails.
 
-        0% is well outside the provisional band around the expected UI-coverage
-        gap, and 0.0 is not > pos_margin, so it reaches the out-of-band check and
-        fails — naming total/00.
+        0% is well outside the calibrated band around the expected UI-coverage
+        gap (and by design the band stays narrower than the gap so 0% can't sit
+        inside it), and 0.0 is not > pos_margin, so it reaches the out-of-band
+        check and fails — naming total/00.
         """
         qcew, ces = self._pair_at_residuals_00(0.0)
         gaps = gate_reconstruction_accuracy(qcew, ces)

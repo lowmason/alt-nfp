@@ -716,17 +716,14 @@ _EXPECTED_QCEW_CES_RESIDUAL: dict[str, float] = {
     "08": -0.029,
     "80": -0.225,
     "81": -0.225,
-    # ============================ PROVISIONAL ============================
     # ``00`` = QCEW total-covered (UI-covered employment, INCLUDING government)
-    # vs CES total-nonfarm (all nonfarm payroll, NSA).  QCEW total-covered
-    # ≈ 152.4M (Jan-2024) vs CES total-nonfarm ~158-159M NSA → roughly -3% to
-    # -5%.  This is the UI-coverage gap (CES counts UI-exempt orgs QCEW does
-    # not), but it is SMALLER than the private 05 gap because the QCEW total
-    # ADDS government back in.  **PROVISIONAL — plans/11 T4 calibrates this from
-    # the observed rebuilt residual at benchmark months; do NOT treat as
-    # verified.**  The generous band below reflects that.
-    "00": -0.04,
-    # ====================================================================
+    # vs CES total-nonfarm (all nonfarm payroll, NSA): the UI-coverage gap (CES
+    # counts UI-exempt orgs QCEW does not).  SHALLOWER than the private 05 gap
+    # because the QCEW total adds government (fully UI-covered, ~0 residual) back
+    # in, diluting the gap.  Calibrated 2026-06-17 against the scratch rebuild:
+    # median -0.0182 over the 7 non-COVID March benchmarks 2017-2025 (range
+    # [-0.0191, -0.0174], <0.2pp spread).
+    "00": -0.018,
 }
 
 # Per-series acceptance band (half-width, fraction) around the expected residual.
@@ -743,15 +740,14 @@ _QCEW_CES_RESIDUAL_BAND: dict[str, float] = {
     "08": 0.02,
     "80": 0.08,
     "81": 0.08,
-    # ============================ PROVISIONAL ============================
-    # Generous ±3pp around the provisional -0.04 ``00`` expectation (the
-    # total-covered-vs-total-nonfarm definitional gap is not yet calibrated; the
-    # -3% to -5% reasoning spans 2pp on its own).  Tight enough to still catch a
-    # 0% residual (a coverage bug erasing the gap: |0 - (-0.04)| = 0.04 > 0.03).
-    # **PROVISIONAL — plans/11 T4 re-seeds this from the observed rebuilt
-    # residual.**
-    "00": 0.03,
-    # ====================================================================
+    # ``00`` band (calibrated 2026-06-17): ±1.2pp around -0.018.  MUST stay below
+    # the residual's magnitude so the upper bound is negative and a 0% coverage
+    # bug is caught: expected -0.018 + band 0.012 = -0.006 < 0, so a 0% residual
+    # is out of band.  A naive ±2pp (like 05/08) would ADMIT 0% here because 00's
+    # gap is shallower than its band — band/|expected| ~0.67 keeps the rail's
+    # 0%-regression guard meaningful.  Comfortably contains the observed
+    # [-0.0191, -0.0174] (<0.2pp spread).
+    "00": 0.012,
 }
 
 # A residual more negative than ``expected - _IMPLAUSIBLE_COLLAPSE_MARGIN`` is an
@@ -773,10 +769,9 @@ _CES_RESIDUAL_TARGET: dict[tuple[str, str], tuple[str, str]] = {
     ("domain", "08"): ("domain", "08"),
     ("supersector", "80"): ("supersector", "80"),
     ("sector", "81"): ("supersector", "80"),
-    # PROVISIONAL (plans/11 T3): the QCEW ``00`` total-covered track maps to CES
-    # ``total/00`` total-nonfarm.  Its expected residual + band are PROVISIONAL
-    # (see _EXPECTED_QCEW_CES_RESIDUAL['00'] / _QCEW_CES_RESIDUAL_BAND['00']) and
-    # plans/11 T4 calibrates them from the observed rebuilt residual.
+    # The QCEW ``00`` total-covered track maps to CES ``total/00`` total-nonfarm
+    # (calibrated 2026-06-17 from the rebuilt residual — see the band comment on
+    # _EXPECTED_QCEW_CES_RESIDUAL['00'] / _QCEW_CES_RESIDUAL_BAND['00']).
     ("total", "00"): ("total", "00"),
 }
 
