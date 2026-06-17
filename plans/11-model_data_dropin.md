@@ -146,7 +146,14 @@ def test_qcew_total_maps_to_00():
 
 ---
 
-## T4 — Scratch rebuild + drop-in verification (maintainer-run) `[depends: T1, T2, T3]`
+## T4 — Scratch rebuild + drop-in verification (maintainer-run) `[depends: T1, T2, T3]` — ✅ DONE (2026-06-17)
+
+**DONE — drop-in verified on the real scratch rebuild.**
+- **Step 1 (maintainer):** `alt-nfp build-rebuild` → `store-rebuild` wrote `ces` SA (22,876) + `ces` NSA (16,408) + `qcew` NSA (17,988); both `seasonally_adjusted` partitions present, canonical untouched.
+- **Step 2 (calibration):** `00` band re-seeded from the observed residual — median **−0.0182** over 7 non-COVID March benchmarks (2017–2025, range [−0.0191,−0.0174]); set `_EXPECTED_QCEW_CES_RESIDUAL['00']=-0.018`, band `0.012` (kept < |residual| so a 0% coverage bug is still caught). Commit `<calib>`.
+- **Step 3 (drop-in, read-only):** `build_model_data` **non-degenerate** at as-of 2023-07-12 (`qcew_obs=71`, `g_ces_sa=77`, `g_ces_nsa=77`; was `0`/`0`/`77`), 2021-07-12 (47/53/53), 2024-01-12 (77/83/83). `qcew_obs=71` vs canonical 131 = documented 2017+ truncation.
+- **Step 4 (gates):** all **7 `real_store` wrappers green** against scratch + legacy (incl. the SA `ces_fidelity` rail + the calibrated `00` band).
+- **Step 5:** `plans/10` T7 flipped BLOCKED → ✅ UNBLOCKED; T8 awaits the goldens re-baseline + maintainer cutover GO.
 
 **Files:** none (run + record). Network + scratch write.
 
