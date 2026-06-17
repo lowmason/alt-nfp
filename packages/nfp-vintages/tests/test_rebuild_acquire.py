@@ -271,15 +271,17 @@ class TestPrepAreaRaw:
 
         return _prep_area_raw(_make_area_raw(rows))
 
-    def test_private_filter_keeps_own5(self):
+    def test_filter_keeps_private_and_total(self):
         rows = [
             _area_csv_row(own_code="5"),   # private — keep
-            _area_csv_row(own_code="1"),   # all ownership — drop
-            _area_csv_row(own_code="0"),   # total — drop
+            _area_csv_row(own_code="0"),   # total-covered — keep (T2)
+            _area_csv_row(own_code="1"),   # federal govt — drop
+            _area_csv_row(own_code="2"),   # state govt — drop
+            _area_csv_row(own_code="3"),   # local govt — drop
         ]
         result = self._prep(rows)
-        assert result.height == 1
-        assert result["own_code"][0] == "5"
+        assert result.height == 2
+        assert set(result["own_code"].to_list()) == {"5", "0"}
 
     def test_required_columns_present(self):
         from nfp_vintages.rebuild_store import _QCEW_LEVELS_REQUIRED
@@ -620,7 +622,7 @@ class TestAcquireLevelsNetwork:
         ]:
             assert col in raw.columns, f"missing column {col!r} in real area CSV"
 
-    def test_prep_private_only(self):
+    def test_prep_private_and_total(self):
         from nfp_download.client import create_client
         from nfp_vintages.rebuild_store import _fetch_qcew_csv, _prep_area_raw
 
@@ -630,7 +632,9 @@ class TestAcquireLevelsNetwork:
         assert raw is not None
         prepped = _prep_area_raw(raw)
         assert prepped.height > 0
-        assert prepped["own_code"].unique().to_list() == ["5"]
+        # After T2: both private (own_code='5') and total-covered (own_code='0') are kept;
+        # government (own_code='1'/'2'/'3') is dropped.
+        assert set(prepped["own_code"].unique().to_list()) == {"0", "5"}
 
     def test_expected_agglvls_present(self):
         from nfp_download.client import create_client
@@ -642,7 +646,8 @@ class TestAcquireLevelsNetwork:
         assert raw is not None
         prepped = _prep_area_raw(raw)
         agglvls = set(prepped["agglvl_code"].unique().to_list())
-        for expected in ["13", "14", "15", "16"]:
+        # Private tree uses agglvl 13–16; total-covered anchor uses agglvl 10.
+        for expected in ["10", "13", "14", "15", "16"]:
             assert expected in agglvls, f"agglvl_code {expected!r} missing from real area slice"
 
     def test_404_on_future_year_returns_none(self):

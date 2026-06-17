@@ -576,6 +576,20 @@ def qcew_to_sector() -> dict[str, str]:
 QCEW_OWN_PRIVATE: str = '5'
 """QCEW ``own_code`` for private establishments (ces_qcew_industry.md §3.1)."""
 
+QCEW_OWN_TOTAL: str = '0'
+"""QCEW ``own_code`` for total-covered (all ownerships) employment."""
+
+# Single published total-covered area row (own_code=0, industry '10' all-industries,
+# agglvl 10) → CES '00' total-nonfarm anchor. Verified 2026-06-17: own_code=0 returns
+# exactly one area row at (agglvl 10, industry '10'). Total-covered ≠ CES nonfarm
+# (incl. agriculture / UI-covered); the reconstruction gate bands the residual (T3/T4).
+QCEW_TOTAL_PULL: dict[str, str] = {
+    'own_code': '0',
+    'industry_code': '10',
+    'agglvl_code': '10',
+}
+"""Selector triple for the QCEW total-covered area row → CES '00' anchor."""
+
 QCEW_AREA_NATIONAL: str = 'US000'
 """QCEW ``area_fips`` for the national total."""
 

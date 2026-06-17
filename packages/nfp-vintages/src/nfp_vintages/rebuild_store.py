@@ -133,8 +133,9 @@ def _fetch_qcew_csv(session: Any, url: str) -> pl.DataFrame | None:
 def _prep_area_raw(df: pl.DataFrame) -> pl.DataFrame:
     """Prepare a raw area-endpoint CSV slice for :func:`~nfp_ingest.qcew_crosswalk.build_qcew_panel`.
 
-    Filters to private establishments (``own_code == '5'``), selects the
-    columns required by ``build_qcew_panel``, casts the three
+    Filters to private establishments (``own_code == '5'``) and the total-covered
+    row (``own_code == '0'``); drops government rows (``own_code`` in ``{'1','2','3'}``).
+    Selects the columns required by ``build_qcew_panel``, casts the three
     ``month{1,2,3}_emplvl`` columns to ``Int64`` (the CSV is read as all-string
     to preserve codes like ``'44-45'`` and ``'US000'``), and attaches
     ``revision = 0`` (QCEW area-endpoint rows are revision-0 only for the
@@ -149,14 +150,15 @@ def _prep_area_raw(df: pl.DataFrame) -> pl.DataFrame:
     -------
     pl.DataFrame
         Frame with exactly :data:`_QCEW_LEVELS_REQUIRED` columns, private rows
-        only, ``month*_emplvl`` as ``Int64``, ``revision`` as ``Int64``.
+        and the total-covered (``own_code='0'``) row only, ``month*_emplvl``
+        as ``Int64``, ``revision`` as ``Int64``.
     """
     # No disclosure filter here (unlike the size path): the area endpoint's
-    # all-sizes national aggregates at agglvl 13–16 are large cells BLS does not
-    # suppress. Suppression only bites the finer size×industry cells (see
+    # all-sizes national aggregates at agglvl 10/13–16 are large cells BLS does
+    # not suppress. Suppression only bites the finer size×industry cells (see
     # _size_raw_to_native step 2).
     return (
-        df.filter(pl.col("own_code") == "5")
+        df.filter(pl.col("own_code").is_in(["5", "0"]))
         .select(
             [c for c in _QCEW_LEVELS_REQUIRED if c != "revision"]
         )

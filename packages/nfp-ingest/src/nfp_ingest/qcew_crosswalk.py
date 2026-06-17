@@ -1,19 +1,26 @@
-"""Reconstruct CES private series from QCEW bulk data (store_rebuild T3).
+"""Reconstruct CES private and total-covered series from QCEW bulk data (store_rebuild T2/T3).
 
-Maps QCEW national, private (``own_code=='5'``) employment to the CES private
-industry hierarchy (``specs/ces_qcew_industry.md``), explodes the quarterly
+Maps QCEW national employment to the CES industry hierarchy
+(``specs/ces_qcew_industry.md``), explodes the quarterly
 ``month{1,2,3}_emplvl`` columns to monthly rows in CES-comparable thousands, and
-emits ``VINTAGE_STORE_SCHEMA``-shaped rows (``source='qcew'``, ``ownership=
-'private'``, ``benchmark_revision=0``).
+emits ``VINTAGE_STORE_SCHEMA``-shaped rows (``source='qcew'``, ``benchmark_revision=0``).
+
+Two ownership tracks:
+
+* **Private** (``own_code=='5'``): the bottom-up private tree — leaf sectors →
+  supersectors (agglvl-13 direct pull, except ``10`` which sums its sectors) →
+  domains ``06``/``08`` → total ``05`` (``ownership='private'``).
+
+* **Total-covered** (``own_code=='0'``): the single agglvl-10 / industry-``'10'``
+  area row → CES ``'00'`` anchor (``ownership='total'``). Total-covered ≠ CES
+  nonfarm (includes agriculture / UI-covered); the reconstruction gate bands the
+  residual (T3/T4). Emits zero rows (no error) when no ``own_code='0'`` row is
+  present in the input (size-path context).
 
 Aggregation is **per QCEW vintage**: every CES-code sum stays within one
 ``(revision, vintage_date)`` (spec §4.2/§5) — mixing vintages would corrupt the
 level. ``vintage_date`` comes from
 :func:`nfp_lookups.revision_schedules.get_qcew_vintage_date`.
-
-The build order (spec §7) is bottom-up so the private tree is additively closed:
-leaf sectors → supersectors (agglvl-13 direct pull, except ``10`` which sums its
-sectors) → domains ``06``/``08`` → total ``05``.
 """
 
 from __future__ import annotations
@@ -23,8 +30,10 @@ from nfp_lookups.industry import (
     QCEW_AREA_NATIONAL,
     QCEW_DOMAIN,
     QCEW_OWN_PRIVATE,
+    QCEW_OWN_TOTAL,
     QCEW_SECTOR_PULLS,
     QCEW_SUPERSECTOR,
+    QCEW_TOTAL_PULL,
 )
 from nfp_lookups.revision_schedules import get_qcew_vintage_date
 
@@ -47,13 +56,9 @@ _REQUIRED_COLUMNS = (
 )
 
 
-def _to_monthly(raw: pl.DataFrame) -> pl.DataFrame:
-    """Filter to national private, explode month1/2/3 → monthly, ÷1000.
-
-    Returns one row per ``(agglvl_code, industry_code, ref_date, year, qtr,
-    revision)`` with ``employment`` in thousands of persons.
-    """
-    df = raw.with_columns(
+def _cast_raw(raw: pl.DataFrame) -> pl.DataFrame:
+    """Cast raw QCEW columns to their target dtypes (shared by both ownership tracks)."""
+    return raw.with_columns(
         pl.col("own_code").cast(pl.Utf8),
         pl.col("area_fips").cast(pl.Utf8),
         pl.col("agglvl_code").cast(pl.Utf8),
@@ -61,11 +66,16 @@ def _to_monthly(raw: pl.DataFrame) -> pl.DataFrame:
         pl.col("year").cast(pl.Int32),
         pl.col("qtr").cast(pl.Int32),
         pl.col("revision").cast(pl.Int32),
-    ).filter(
-        (pl.col("own_code") == QCEW_OWN_PRIVATE)
-        & (pl.col("area_fips") == QCEW_AREA_NATIONAL)
     )
 
+
+def _explode_monthly(df: pl.DataFrame) -> pl.DataFrame:
+    """Unpivot month1/2/3 → monthly rows, map to ref_date, ÷1000.
+
+    Input must already be cast (via :func:`_cast_raw`). Returns one row per
+    ``(agglvl_code, industry_code, ref_date, year, qtr, revision)`` with
+    ``employment`` in thousands of persons.
+    """
     return (
         df.unpivot(
             ["month1_emplvl", "month2_emplvl", "month3_emplvl"],
@@ -90,6 +100,35 @@ def _to_monthly(raw: pl.DataFrame) -> pl.DataFrame:
             "ref_date", "employment",
         )
     )
+
+
+def _to_monthly(raw: pl.DataFrame) -> pl.DataFrame:
+    """Filter to national private, explode month1/2/3 → monthly, ÷1000.
+
+    Returns one row per ``(agglvl_code, industry_code, ref_date, year, qtr,
+    revision)`` with ``employment`` in thousands of persons.
+    """
+    df = _cast_raw(raw).filter(
+        (pl.col("own_code") == QCEW_OWN_PRIVATE)
+        & (pl.col("area_fips") == QCEW_AREA_NATIONAL)
+    )
+    return _explode_monthly(df)
+
+
+def _to_monthly_total(raw: pl.DataFrame) -> pl.DataFrame:
+    """Filter to the national total-covered row (own_code=0, agglvl 10, industry '10').
+
+    Returns zero rows when no ``own_code='0'`` rows are present (size-path
+    context — clean no-op). Returns one monthly row per reference month otherwise.
+    Schema is identical to :func:`_to_monthly` so the two can be safely concatenated.
+    """
+    df = _cast_raw(raw).filter(
+        (pl.col("own_code") == QCEW_OWN_TOTAL)
+        & (pl.col("area_fips") == QCEW_AREA_NATIONAL)
+        & (pl.col("industry_code") == QCEW_TOTAL_PULL["industry_code"])
+        & (pl.col("agglvl_code") == QCEW_TOTAL_PULL["agglvl_code"])
+    )
+    return _explode_monthly(df)
 
 
 def _pull(monthly: pl.DataFrame, industry_codes: tuple[str, ...], agglvl: str) -> pl.DataFrame:
@@ -133,12 +172,23 @@ def _vintage_dates(combos: pl.DataFrame) -> pl.DataFrame:
 
 
 def build_qcew_panel(raw: pl.DataFrame) -> pl.DataFrame:
-    """Build CES private vintage-store rows from a raw QCEW bulk frame.
+    """Build CES vintage-store rows from a raw QCEW bulk frame.
+
+    Builds two ownership tracks and concatenates them:
+
+    * **Private** (``ownership='private'``): 20 sectors, 10 supersectors,
+      domains ``06``/``08``, and total ``05``. Built bottom-up from
+      ``own_code='5'`` rows so the private tree is additively closed.
+
+    * **Total-covered** (``ownership='total'``): the single ``own_code='0'``
+      area row at ``agglvl_code='10'`` / ``industry_code='10'`` → CES ``'00'``
+      anchor. Emits **zero rows** (no error) when no ``own_code='0'`` rows are
+      present (the size-path context, where the input is ``own_code='5'`` only).
 
     Parameters
     ----------
     raw : pl.DataFrame
-        QCEW ``singlefile`` rows carrying at least :data:`_REQUIRED_COLUMNS`.
+        QCEW rows carrying at least :data:`_REQUIRED_COLUMNS`.
         ``revision`` tags the vintage of each ``(year, qtr)`` cell (assigned by
         the acquisition/orchestration layer).
 
@@ -146,14 +196,15 @@ def build_qcew_panel(raw: pl.DataFrame) -> pl.DataFrame:
     -------
     pl.DataFrame
         ``VINTAGE_STORE_SCHEMA``-conformant rows (minus the Hive partition cols,
-        which are carried as plain ``source``/``seasonally_adjusted`` columns):
-        20 sectors, 10 supersectors, domains ``06``/``08``, and total ``05``,
-        all ``ownership='private'``, monthly, in thousands.
+        which are carried as plain ``source``/``seasonally_adjusted`` columns),
+        monthly, in thousands. Sorted on
+        ``(industry_type, industry_code, ref_date, revision)``.
     """
     missing = [c for c in _REQUIRED_COLUMNS if c not in raw.columns]
     if missing:
         raise ValueError(f"raw QCEW frame missing columns: {missing}")
 
+    # --- Private tree (own_code='5') ---
     monthly = _to_monthly(raw)
 
     # 1. Leaf sectors (agglvl 14/15/16).
@@ -181,7 +232,26 @@ def build_qcew_panel(raw: pl.DataFrame) -> pl.DataFrame:
     domains = pl.concat([dom06, dom08])
     total05 = _tag(_sum_children(domains, QCEW_DOMAIN["05"]), "total", "05")
 
-    allrows = pl.concat([sectors, supersectors, domains, total05])
+    private_rows = pl.concat([sectors, supersectors, domains, total05]).with_columns(
+        ownership=pl.lit("private", pl.Utf8)
+    )
+
+    # --- Total-covered track (own_code='0') → CES '00' ---
+    # _to_monthly_total returns zero rows when no own_code='0' row is present
+    # (size-path context), so this is unconditionally safe to concat.
+    monthly_total = _to_monthly_total(raw)
+    total00 = (
+        _tag(
+            monthly_total.group_by(_VINTAGE_GROUP).agg(
+                employment=pl.col("employment").sum()
+            ),
+            "total",
+            "00",
+        )
+        .with_columns(ownership=pl.lit("total", pl.Utf8))
+    )
+
+    allrows = pl.concat([private_rows, total00])
 
     vdates = _vintage_dates(allrows.select("year", "qtr", "revision").unique())
     result = allrows.join(vdates, on=["year", "qtr", "revision"], how="left")
@@ -189,7 +259,7 @@ def build_qcew_panel(raw: pl.DataFrame) -> pl.DataFrame:
     return result.select(
         geographic_type=pl.lit("national", pl.Utf8),
         geographic_code=pl.lit("00", pl.Utf8),
-        ownership=pl.lit("private", pl.Utf8),
+        ownership=pl.col("ownership"),
         industry_type=pl.col("industry_type"),
         industry_code=pl.col("industry_code"),
         ref_date=pl.col("ref_date"),
