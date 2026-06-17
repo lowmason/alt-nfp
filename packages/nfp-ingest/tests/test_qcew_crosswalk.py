@@ -63,10 +63,10 @@ _SS13 = {
 }
 
 
-def _row(industry_code, agglvl, m, *, year, qtr, revision):
+def _row(industry_code, agglvl, m, *, year, qtr, revision, own_code: str = "5"):
     return {
         "area_fips": "US000",
-        "own_code": "5",
+        "own_code": own_code,
         "industry_code": industry_code,
         "agglvl_code": agglvl,
         "year": year,
@@ -249,3 +249,96 @@ def test_missing_required_column_raises():
     bad = pl.DataFrame({"area_fips": ["US000"], "own_code": ["5"]})
     with pytest.raises(ValueError, match="missing columns"):
         build_qcew_panel(bad)
+
+
+# ---------------------------------------------------------------------------
+# T2: QCEW own_code=0 total → CES '00' (ownership='total')
+# ---------------------------------------------------------------------------
+
+
+def _total_row(*, year=2024, qtr=1, revision=0, emp=160_000_000):
+    """One own_code=0 national all-industries row (agglvl 10, industry '10')."""
+    return _row("10", "10", emp, year=year, qtr=qtr, revision=revision, own_code="0")
+
+
+def test_qcew_total_maps_to_00():
+    """own_code=0 (agglvl 10, industry '10') → CES ('total','00', ownership='total').
+
+    Verified primary source 2026-06-17: own_code=0 returns exactly one area row
+    (agglvl_code='10', industry_code='10') at US000.  Jan-2024 = 152,393,725 persons
+    = 152,393.725 thousand.  Our fixture uses 160,000,000 persons = 160,000.0 thousand.
+    """
+    raw = pl.DataFrame(_make_qcew() + [_total_row(emp=160_000_000)])
+    panel = build_qcew_panel(raw)
+
+    # 3 monthly rows (Q1 → Jan/Feb/Mar 2024, day 12).
+    total_rows = panel.filter(
+        (pl.col("industry_type") == "total")
+        & (pl.col("industry_code") == "00")
+        & (pl.col("ownership") == "total")
+    )
+    assert total_rows.height == 3, (
+        f"expected 3 monthly rows for '00' total, got {total_rows.height}"
+    )
+
+    # All three months have the same employment value (fixture uses same m for all months).
+    jan = date(2024, 1, 12)
+    total_jan = panel.filter(
+        (pl.col("industry_type") == "total")
+        & (pl.col("industry_code") == "00")
+        & (pl.col("ownership") == "total")
+        & (pl.col("ref_date") == jan)
+    )
+    assert total_jan.height == 1
+    assert total_jan["employment"].item() == pytest.approx(160_000.0)
+
+    # The '00' total is distinct from the private '05' total.
+    priv05 = panel.filter(
+        (pl.col("industry_code") == "05") & (pl.col("ref_date") == jan)
+    )
+    assert priv05.height == 1
+    assert priv05["ownership"].item() == "private"
+    assert total_jan["employment"].item() != pytest.approx(priv05["employment"].item())
+
+
+def test_qcew_total_private_tree_regression_guard():
+    """Private outputs must be byte-identical with vs. without a total row in input.
+
+    This is the size-path robustness guard: build_qcew_panel is called on
+    own_code=5-only data in _size_raw_to_native; the total path must be a
+    clean no-op in that context, emitting zero '00' rows and never perturbing
+    the private sums.
+    """
+    raw_private_only = pl.DataFrame(_make_qcew())
+    raw_with_total = pl.DataFrame(_make_qcew() + [_total_row(emp=160_000_000)])
+
+    panel_private_only = build_qcew_panel(raw_private_only)
+    panel_with_total = build_qcew_panel(raw_with_total)
+
+    # Filter to private ownership in both — '00' total row only in panel_with_total.
+    priv_only = panel_private_only.filter(pl.col("ownership") == "private")
+    priv_with_total = panel_with_total.filter(pl.col("ownership") == "private")
+
+    # Column order and row order must be identical so .equals() is meaningful.
+    priv_only_sorted = priv_only.sort("industry_type", "industry_code", "ref_date", "revision")
+    priv_with_total_sorted = priv_with_total.sort(
+        "industry_type", "industry_code", "ref_date", "revision"
+    )
+
+    assert priv_only_sorted.equals(priv_with_total_sorted), (
+        "private tree changed when a total row was added to input — "
+        "the total path is leaking into the private sums"
+    )
+
+
+def test_qcew_total_absent_when_no_own_code_0_rows():
+    """Private-only input (size path) emits zero '00' rows — no error, no '00' leak."""
+    raw = pl.DataFrame(_make_qcew())  # own_code='5' only
+    panel = build_qcew_panel(raw)
+
+    total_rows = panel.filter(
+        (pl.col("industry_type") == "total") & (pl.col("industry_code") == "00")
+    )
+    assert total_rows.height == 0, (
+        f"expected 0 '00' rows for private-only input, got {total_rows.height}"
+    )

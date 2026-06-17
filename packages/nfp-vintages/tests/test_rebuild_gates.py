@@ -57,13 +57,19 @@ def _row(
     benchmark_revision: int = 0,
     vintage_date: date | None = None,
     source: str = "ces",
-    seasonally_adjusted: bool = True,
+    seasonally_adjusted: bool = False,
     size_class_type: str | None = None,
     size_class_code: str | None = None,
     geographic_type: str = "national",
     geographic_code: str = "00",
 ) -> dict:
-    """One VINTAGE_STORE_SCHEMA-conformant row as a dict."""
+    """One VINTAGE_STORE_SCHEMA-conformant row as a dict.
+
+    ``seasonally_adjusted`` defaults to ``False`` (NSA): the §10 gates reproduce
+    the NSA private hierarchy + the NSA ``00`` anchor, so an unspecified row is
+    NSA and the plans/11 T3 ``_nsa_only`` filter is a no-op on it.  SA-rail tests
+    pass ``seasonally_adjusted=True`` explicitly.
+    """
     return {
         "geographic_type": geographic_type,
         "geographic_code": geographic_code,
@@ -96,49 +102,54 @@ def _empty_store_frame() -> pl.DataFrame:
 # ===========================================================================
 
 
+# The history + fidelity gates operate on the NSA hierarchy/anchor, so these
+# helpers stamp ``seasonally_adjusted=False`` explicitly — redundant with the
+# ``_row`` default (now ``False``) but kept for local clarity.  The plans/11 T3
+# ``_nsa_only`` filter on the history gate must be a no-op on these NSA frames;
+# SA-specific coverage lives in dedicated tests.
 def _legacy_total_private_rows(ref: date, emp: float) -> list[dict]:
-    """Legacy-axis (domain/05, null ownership) rows for the four cohorts."""
+    """Legacy-axis (domain/05, null ownership) NSA rows for the four cohorts."""
     return [
         _row(
             industry_type="domain", industry_code="05", ownership=None,
             ref_date=ref, employment=emp, revision=r, benchmark_revision=b,
-            vintage_date=date(2024, 2, 1),
+            vintage_date=date(2024, 2, 1), seasonally_adjusted=False,
         )
         for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]
     ]
 
 
 def _rebuilt_total_private_rows(ref: date, emp: float) -> list[dict]:
-    """Rebuilt-axis (total/05, private) rows for the four cohorts."""
+    """Rebuilt-axis (total/05, private) NSA rows for the four cohorts."""
     return [
         _row(
             industry_type="total", industry_code="05", ownership="private",
             ref_date=ref, employment=emp, revision=r, benchmark_revision=b,
-            vintage_date=date(2024, 2, 1),
+            vintage_date=date(2024, 2, 1), seasonally_adjusted=False,
         )
         for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]
     ]
 
 
 def _rebuilt_anchor_rows(ref: date, emp: float) -> list[dict]:
-    """Rebuilt-axis (total/00, total) anchor rows for the four cohorts."""
+    """Rebuilt-axis (total/00, total) NSA anchor rows for the four cohorts."""
     return [
         _row(
             industry_type="total", industry_code="00", ownership="total",
             ref_date=ref, employment=emp, revision=r, benchmark_revision=b,
-            vintage_date=date(2024, 2, 1),
+            vintage_date=date(2024, 2, 1), seasonally_adjusted=False,
         )
         for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]
     ]
 
 
 def _legacy_anchor_rows(ref: date, emp: float) -> list[dict]:
-    """Legacy-axis (national/00, null ownership) anchor rows for four cohorts."""
+    """Legacy-axis (national/00, null ownership) NSA anchor rows for four cohorts."""
     return [
         _row(
             industry_type="national", industry_code="00", ownership=None,
             ref_date=ref, employment=emp, revision=r, benchmark_revision=b,
-            vintage_date=date(2024, 2, 1),
+            vintage_date=date(2024, 2, 1), seasonally_adjusted=False,
         )
         for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]
     ]
@@ -181,11 +192,13 @@ class TestGateHistoryConsistency:
                     industry_type="total", industry_code="05", ownership="private",
                     ref_date=self._REF, employment=129_111.0, revision=2,
                     benchmark_revision=1, vintage_date=date(2023, 2, 1),
+                    seasonally_adjusted=False,
                 ),
                 _row(
                     industry_type="total", industry_code="05", ownership="private",
                     ref_date=self._REF, employment=130_000.0, revision=2,
                     benchmark_revision=1, vintage_date=date(2025, 2, 1),
+                    seasonally_adjusted=False,
                 ),
             ]
         )
@@ -223,13 +236,13 @@ class TestGateHistoryConsistency:
                             industry_type="total", industry_code="05",
                             ownership="private", ref_date=self._REF,
                             employment=130_000.0, revision=2, benchmark_revision=1,
-                            vintage_date=date(2024, 2, 1),
+                            vintage_date=date(2024, 2, 1), seasonally_adjusted=False,
                         ),
                         _row(
                             industry_type="total", industry_code="05",
                             ownership="private", ref_date=self._REF,
                             employment=130_250.0, revision=2, benchmark_revision=1,
-                            vintage_date=date(2025, 2, 1),
+                            vintage_date=date(2025, 2, 1), seasonally_adjusted=False,
                         ),
                     ]
                 ),
@@ -378,9 +391,11 @@ class TestGateHistoryConsistency:
             + _rebuilt_anchor_rows(ref, 158_000.0)
             + [
                 _row(industry_type="supersector", industry_code="55",
-                     ownership="private", ref_date=ref, employment=9_500.0),
+                     ownership="private", ref_date=ref, employment=9_500.0,
+                     seasonally_adjusted=False),
                 _row(industry_type="sector", industry_code="55",
-                     ownership="private", ref_date=ref, employment=2_400.0),
+                     ownership="private", ref_date=ref, employment=2_400.0,
+                     seasonally_adjusted=False),
             ]
         )
         existing = _frame(
@@ -389,15 +404,59 @@ class TestGateHistoryConsistency:
             + [
                 # supersector 55 matches; sector 55 DIVERGES.
                 _row(industry_type="supersector", industry_code="55",
-                     ownership=None, ref_date=ref, employment=9_500.0),
+                     ownership=None, ref_date=ref, employment=9_500.0,
+                     seasonally_adjusted=False),
                 _row(industry_type="sector", industry_code="55",
-                     ownership=None, ref_date=ref, employment=8_888.0),
+                     ownership=None, ref_date=ref, employment=8_888.0,
+                     seasonally_adjusted=False),
             ]
         )
         gaps = gate_history_consistency(rebuilt, existing)
         assert gaps
         # The sector-55 mismatch surfaces; supersector-55 did not mask it.
         assert any("sector/55" in g for g in gaps)
+
+    def test_sa_rows_excluded_from_nsa_history(self) -> None:
+        """SA rows are filtered before the legacy-store history comparison.
+
+        The legacy-core reproduction is the NSA hierarchy + NSA ``00`` anchor; the
+        HARD (0,0)/(1,0) rail was verified on NSA, and SA fidelity is
+        ``gate_ces_fidelity``'s job.  Here the rebuilt store also carries SA
+        ``00`` first-prints that diverge wildly from the legacy SA value (which
+        the rebuilt+legacy frames here share the same NSA values).  Because the
+        legacy wrapper loads NSA only but the rebuilt frame may carry SA, an
+        unfiltered NSA-rebuilt↔SA-legacy (or SA-rebuilt↔NSA-legacy) pairing on a
+        key lacking ``seasonally_adjusted`` would spuriously HARD-fail.  With the
+        ``_nsa_only`` filter the SA rows drop out and only the NSA core is
+        compared — no HARD gap.
+        """
+        rebuilt, existing = self._good_pair()
+        # Add SA anchor rows to the rebuilt store with a wildly different value.
+        sa = _frame(
+            [
+                _row(industry_type="total", industry_code="00", ownership="total",
+                     ref_date=self._REF, employment=99_999.0, revision=r,
+                     benchmark_revision=b, vintage_date=date(2024, 2, 1),
+                     seasonally_adjusted=True)
+                for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]
+            ]
+        )
+        rebuilt = pl.concat([rebuilt, sa])
+        # Existing (legacy) store also carries SA rows that diverge (the legacy
+        # store may load SA+NSA in the wrapper) — both must be filtered.
+        existing_sa = _frame(
+            [
+                _row(industry_type="national", industry_code="00", ownership=None,
+                     ref_date=self._REF, employment=42_000.0, revision=r,
+                     benchmark_revision=b, vintage_date=date(2024, 2, 1),
+                     seasonally_adjusted=True)
+                for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]
+            ]
+        )
+        existing = pl.concat([existing, existing_sa])
+        gaps = gate_history_consistency(rebuilt, existing)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard == [], hard
 
     def test_ref_dates_at_or_after_cutoff_ignored(self) -> None:
         """Rows on/after the cutoff are outside the known-good core."""
@@ -504,6 +563,64 @@ class TestGateCesFidelity:
         hard = [g for g in gaps if not g.startswith("SOFT:")]
         assert hard == [], hard
         assert any(g.startswith("SOFT:") for g in gaps)
+
+    def _sa_nsa_pair(self) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """A rebuilt+reference pair carrying BOTH SA and NSA rows.
+
+        SA and NSA share the same ``vintage_date`` per (series, ref, rev, bmr)
+        (Decision A) but differ in value: NSA 158_000, SA 156_000.  Both frames
+        carry ``seasonally_adjusted`` by construction.
+        """
+        rows: list[dict] = []
+        for (r, b) in [(0, 0), (1, 0), (2, 0), (2, 1)]:
+            rows.append(
+                _row(industry_type="total", industry_code="00", ownership="total",
+                     ref_date=self._REF, employment=158_000.0, revision=r,
+                     benchmark_revision=b, vintage_date=date(2024, 2, 1),
+                     seasonally_adjusted=False)
+            )
+            rows.append(
+                _row(industry_type="total", industry_code="00", ownership="total",
+                     ref_date=self._REF, employment=156_000.0, revision=r,
+                     benchmark_revision=b, vintage_date=date(2024, 2, 1),
+                     seasonally_adjusted=True)
+            )
+        frame = _frame(rows)
+        return frame, frame
+
+    def test_sa_and_nsa_match_cohort_for_cohort(self) -> None:
+        """SA↔SA and NSA↔NSA match when both carry seasonally_adjusted.
+
+        SA and NSA share ``vintage_date`` (Decision A) but hold different values.
+        Without ``seasonally_adjusted`` in the join key an NSA-reference row would
+        inner-join BOTH the NSA *and* the SA rebuilt row at the same vintage,
+        creating a ~2,000-thousand spurious mismatch (the false HARD fail this
+        change locks out).  With the key fix each rail matches itself and the
+        gate passes.
+        """
+        rebuilt, reference = self._sa_nsa_pair()
+        assert gate_ces_fidelity(rebuilt, reference) == []
+
+    def test_corrupted_sa_value_named_hard(self) -> None:
+        """Corrupting one SA value HARD-fails and the gap names the SA row.
+
+        Proves the SA rail is genuinely checked (not merely de-conflated): the
+        NSA values are untouched, only an SA cohort drifts, and the gate must
+        catch it.
+        """
+        rebuilt, reference = self._sa_nsa_pair()
+        rebuilt = rebuilt.with_columns(
+            pl.when(
+                pl.col("seasonally_adjusted")
+                & (pl.col("revision") == 0)
+            )
+            .then(pl.col("employment") + 50.0)
+            .otherwise(pl.col("employment"))
+            .alias("employment")
+        )
+        gaps = gate_ces_fidelity(rebuilt, reference)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("fidelity" in g and "total/00" in g for g in hard)
 
 
 # ===========================================================================
@@ -717,6 +834,62 @@ class TestGateGapFill:
         gaps = gate_gap_fill(df, frontier_ref_date=ref, dec_cohort_years=())
         assert not any("sum(sectors)" in g for g in gaps)
 
+    def test_sa_rows_excluded_from_nesting(self) -> None:
+        """SA rows do not enter the additive-nesting sums (plans/11 T3).
+
+        SA does NOT nest additively (``05 != 06 + 08`` in SA).  Build a frame
+        whose NSA ``05 == 06 + 08`` holds exactly (130k == 50k + 80k) and a
+        PARALLEL SA triple that does NOT nest (128k != 40k + 60k).  No
+        supersectors are supplied, so ``06/08 == sum(supersectors)`` is skipped
+        (missing components) and only ``05 == 06 + 08`` is checkable — it must
+        hold on NSA and must NOT be evaluated on the SA rows.  Without
+        ``_nsa_only`` the SA triple would emit a spurious ``SOFT: ... 05 !=
+        06+08``; with it, no nesting gap.  (The frontier hard-gate fires for the
+        absent supersectors — irrelevant here; we assert only on nesting.)
+        """
+        ref = date(2025, 6, 12)
+        nsa = [
+            _row(industry_type="total", industry_code="05", ownership="private",
+                 ref_date=ref, employment=130_000.0, seasonally_adjusted=False),
+            _row(industry_type="domain", industry_code="06", ownership="private",
+                 ref_date=ref, employment=50_000.0, seasonally_adjusted=False),
+            _row(industry_type="domain", industry_code="08", ownership="private",
+                 ref_date=ref, employment=80_000.0, seasonally_adjusted=False),
+        ]
+        sa = [
+            _row(industry_type="total", industry_code="05", ownership="private",
+                 ref_date=ref, employment=128_000.0, seasonally_adjusted=True),
+            _row(industry_type="domain", industry_code="06", ownership="private",
+                 ref_date=ref, employment=40_000.0, seasonally_adjusted=True),
+            _row(industry_type="domain", industry_code="08", ownership="private",
+                 ref_date=ref, employment=60_000.0, seasonally_adjusted=True),
+        ]
+        df = _frame(nsa + sa)
+        gaps = gate_gap_fill(df, frontier_ref_date=ref, dec_cohort_years=())
+        # The SA non-nesting must NOT produce a nesting gap; NSA nests cleanly.
+        assert not any("nesting" in g or "06+08" in g for g in gaps), gaps
+
+    def test_sa_breaks_nesting_when_not_filtered_is_caught(self) -> None:
+        """Control: an NSA-only frame whose 05 != 06 + 08 DOES flag SOFT nesting.
+
+        Pairs with ``test_sa_rows_excluded_from_nesting`` to prove the filter is
+        what suppresses the gap (not an inert check): the SAME non-nesting triple,
+        stamped NSA, must produce the ``05 != 06+08`` SOFT finding.
+        """
+        ref = date(2025, 6, 12)
+        broken = _frame(
+            [
+                _row(industry_type="total", industry_code="05", ownership="private",
+                     ref_date=ref, employment=128_000.0, seasonally_adjusted=False),
+                _row(industry_type="domain", industry_code="06", ownership="private",
+                     ref_date=ref, employment=40_000.0, seasonally_adjusted=False),
+                _row(industry_type="domain", industry_code="08", ownership="private",
+                     ref_date=ref, employment=60_000.0, seasonally_adjusted=False),
+            ]
+        )
+        gaps = gate_gap_fill(broken, frontier_ref_date=ref, dec_cohort_years=())
+        assert any("05 != 06+08" in g for g in gaps)
+
     def test_2_1_fan_out_not_summed_across_vintages(self) -> None:
         """The (2,1) per-benchmark fan-out is collapsed before nesting sums.
 
@@ -821,6 +994,85 @@ class TestGateReconstructionAccuracy:
     def test_good_frame_passes(self) -> None:
         qcew, ces = self._good_pair()
         assert gate_reconstruction_accuracy(qcew, ces) == []
+
+    def test_sa_ces_excluded_from_residual(self) -> None:
+        """SA CES rows must not enter the QCEW(NSA)-vs-CES residual (plans/11 T3).
+
+        QCEW is NSA; comparing NSA-QCEW to an SA-CES level would inject a seasonal
+        wobble into the residual.  Here the in-band NSA pair passes, but a
+        parallel set of SA CES rows at a DIFFERENT level (which, if
+        ``_best_available`` picked them, would shift the residual out of band) is
+        added.  ``_nsa_only`` on the CES side drops them, so the residual is taken
+        on NSA only and the gate still passes.
+        """
+        qcew, ces = self._good_pair()
+        # SA CES at half the NSA level — would wreck the residual if not filtered.
+        # Stamp a STRICTLY-LATER vintage_date so that, absent the NSA filter,
+        # ``_best_available`` (sorts by vintage_date desc, keys without
+        # seasonally_adjusted) would prefer the SA row over the NSA one — making
+        # the filter genuinely load-bearing, not order-of-rows luck.
+        sa_ces = _frame(
+            [
+                _row(industry_type=it, industry_code=ic, ownership="private",
+                     ref_date=ref, employment=base * 0.5, source="ces",
+                     seasonally_adjusted=True,
+                     vintage_date=date(ref.year + 1, 2, 1))
+                for ref in self._REFS
+                for (it, ic, base) in [
+                    ("total", "05", 130_000.0),
+                    ("domain", "08", 105_000.0),
+                    ("supersector", "80", 6_000.0),
+                ]
+            ]
+        )
+        ces = pl.concat([ces, sa_ces])
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert not hard, "\n".join(gaps)
+
+    def _pair_at_residuals_00(
+        self, resid: float, refs: list[date] | None = None
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """A QCEW ``('total','00','total')`` track + CES ``total/00`` at *resid*.
+
+        CES ``00`` is total nonfarm (NSA); QCEW ``00`` is the total-covered
+        track (UI-covered, incl. government).  The provisional expected residual
+        is ``_EXPECTED_QCEW_CES_RESIDUAL['00']`` (UI-coverage gap).
+        """
+        refs = refs or self._REFS
+        ces_base_00 = 158_000.0
+        ces_rows = [
+            _row(industry_type="total", industry_code="00", ownership="total",
+                 ref_date=ref, employment=ces_base_00, source="ces")
+            for ref in refs
+        ]
+        qcew_rows = [
+            _row(industry_type="total", industry_code="00", ownership="total",
+                 ref_date=ref, employment=ces_base_00 * (1.0 + resid),
+                 source="qcew")
+            for ref in refs
+        ]
+        return _frame(qcew_rows), _frame(ces_rows)
+
+    def test_00_band_in_band_passes(self) -> None:
+        """A QCEW ``00`` total at the expected (calibrated) residual passes."""
+        qcew, ces = self._pair_at_residuals_00(_EXPECTED_QCEW_CES_RESIDUAL["00"])
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert not hard, "\n".join(gaps)
+
+    def test_00_band_out_of_band_fails_hard(self) -> None:
+        """A QCEW ``00`` total at 0% (coverage bug erasing the gap) HARD-fails.
+
+        0% is well outside the calibrated band around the expected UI-coverage
+        gap (and by design the band stays narrower than the gap so 0% can't sit
+        inside it), and 0.0 is not > pos_margin, so it reaches the out-of-band
+        check and fails — naming total/00.
+        """
+        qcew, ces = self._pair_at_residuals_00(0.0)
+        gaps = gate_reconstruction_accuracy(qcew, ces)
+        hard = [g for g in gaps if not g.startswith("SOFT:")]
+        assert hard and any("total/00" in g and "out-of-band" in g for g in hard)
 
     def test_81_maps_to_ces_80_not_silently_skipped(self) -> None:
         """QCEW sector/81 is compared to CES supersector/80, not dropped.
@@ -1048,8 +1300,13 @@ class TestGateReconstructionAccuracy:
         assert gate_reconstruction_accuracy(qcew, ces) == []
 
     def test_expected_residual_constant_shape(self) -> None:
-        """The seeded expectations cover exactly {05, 08, 80, 81}."""
-        assert set(_EXPECTED_QCEW_CES_RESIDUAL) == {"05", "08", "80", "81"}
+        """The seeded expectations cover exactly {00, 05, 08, 80, 81}.
+
+        ``00`` (the QCEW total-covered track) was added in plans/11 T3 with a
+        PROVISIONAL expectation that T4 calibrates; all expectations stay
+        negative (QCEW sits below CES on the UI-coverage gap).
+        """
+        assert set(_EXPECTED_QCEW_CES_RESIDUAL) == {"00", "05", "08", "80", "81"}
         assert all(v < 0 for v in _EXPECTED_QCEW_CES_RESIDUAL.values())
 
     def test_band_constant_covers_every_expected_code(self) -> None:
@@ -1346,6 +1603,29 @@ class TestGateVintageIntegrity:
         assert gaps
         assert any("null/zero" in g for g in gaps)
 
+    def test_sa_and_nsa_of_one_series_month_not_duplicates(self) -> None:
+        """An as-of slice carrying BOTH SA and NSA of one series-month is OK.
+
+        SA and NSA share ``vintage_date`` (Decision A) but are distinct series
+        (different employment).  With ``seasonally_adjusted`` in the dup/vintage
+        key they are NOT flagged as a duplicate or a cross-vintage sum
+        (plans/11 T3 defensive widening).  Note: they also share a vintage_date,
+        so without the flag in the key they would trip BOTH check 1 (dup) and
+        check 2 (multi-vintage is False here since they share it — so only the
+        dup check) — the dup check is the one this pins.
+        """
+        ref = date(2024, 12, 12)
+        v = date(2025, 2, 1)
+        rows = [
+            _row(industry_type="total", industry_code="00", ownership="total",
+                 ref_date=ref, employment=158_000.0, vintage_date=v, source="ces",
+                 seasonally_adjusted=False),
+            _row(industry_type="total", industry_code="00", ownership="total",
+                 ref_date=ref, employment=156_000.0, vintage_date=v, source="ces",
+                 seasonally_adjusted=True),
+        ]
+        assert gate_vintage_integrity(_frame(rows)) == []
+
     def test_q1_size_buckets_not_treated_as_duplicates(self) -> None:
         """Q1 size-bucket rows share (series, ref_date) but differ in size dims.
 
@@ -1388,16 +1668,20 @@ def _store_available() -> bool:
 _REBUILT_CACHE: dict[tuple[str, bool], pl.DataFrame] = {}
 
 
-def _load_rebuilt(source: str) -> pl.DataFrame:
-    """Load the NSA partition of the rebuilt store (the rebuild is NSA, §7).
+def _load_rebuilt(source: str, *, seasonally_adjusted: bool = False) -> pl.DataFrame:
+    """Load one (source, adjustment) partition of the rebuilt store.
 
-    The maintainer points ``NFP_STORE_URI`` at the scratch rebuild prefix
-    (``s3://alt-nfp/store-rebuild``) before running these.
+    Defaults to the NSA partition (the §10 NSA-hierarchy gates read NSA only).
+    The SA partition (``seasonally_adjusted=True``) is the parallel rail that
+    plans/11 T1 adds; ``gate_ces_fidelity`` checks it.  The cache key is
+    ``(source, bool)`` so both partitions coexist.  The maintainer points
+    ``NFP_STORE_URI`` at the scratch rebuild prefix (``s3://alt-nfp/store-rebuild``)
+    before running these.
     """
-    key = (source, False)
+    key = (source, seasonally_adjusted)
     if key not in _REBUILT_CACHE:
         _REBUILT_CACHE[key] = read_vintage_store(
-            source=source, seasonally_adjusted=False
+            source=source, seasonally_adjusted=seasonally_adjusted
         ).collect()
     return _REBUILT_CACHE[key]
 
@@ -1484,9 +1768,18 @@ class TestGatesAgainstRealStore:
 
         The TRUE CES accuracy rail (the CES analogue of
         ``test_qcew_fidelity_real``).  Reference = ``build_ces_panel`` of the
-        local ``cesvinall`` CSVs; the stored rebuild must match it to the unit
-        on every overlapping ``(series, ref_date, rev, bmr, vintage_date)``.
-        Self-skips without the local triangle (gitignored proprietary input).
+        local ``cesvinall`` CSVs (after plans/11 T1 this emits BOTH SA + NSA);
+        the stored rebuild must match it to the unit on every overlapping
+        ``(series, ref_date, rev, bmr, vintage_date, seasonally_adjusted)``.
+        ``gate_ces_fidelity`` keys on ``seasonally_adjusted`` (plans/11 T3) so
+        SA↔SA and NSA↔NSA align cohort-for-cohort.  Self-skips without the local
+        triangle (gitignored proprietary input).
+
+        SA-partition tolerance: the SA store partition may be empty/absent on a
+        pre-T4 NSA-only rebuild.  We load it best-effort and concat what is
+        present; the SA-reference rows then surface as SOFT (present in reference,
+        missing in rebuilt), not HARD — so an NSA-only store still passes the hard
+        rail.
         """
         from nfp_ingest.ces_builder import CESVINALL_DIR, build_ces_panel
 
@@ -1495,9 +1788,17 @@ class TestGatesAgainstRealStore:
             pytest.skip("rebuilt-schema NSA CES store not available")
         if not CESVINALL_DIR.exists():
             pytest.skip("local cesvinall triangle not available")
+        # Add the SA partition if the rebuild carries one (plans/11 T1+T4).
+        try:
+            sa = _load_rebuilt("ces", seasonally_adjusted=True)
+        except Exception:
+            sa = None
+        if sa is not None and not sa.is_empty():
+            rebuilt = pl.concat([rebuilt, sa])
         reference = build_ces_panel(CESVINALL_DIR)
         gaps = gate_ces_fidelity(rebuilt, reference)
-        # Value mismatches are hard; coverage/frontier differences are SOFT.
+        # Value mismatches are hard; coverage/frontier differences (incl. an
+        # absent SA partition pre-T4) are SOFT.
         hard = [g for g in gaps if not g.startswith("SOFT:")]
         assert not hard, "\n".join(gaps)
 

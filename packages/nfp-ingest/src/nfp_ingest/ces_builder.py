@@ -1,9 +1,9 @@
 """CES triangular-revision builder for the store rebuild (store_rebuild T2).
 
-Parses the BLS CES ``cesvinall`` triangular CSVs (``tri_{code6}_NSA.csv``) into
-``VINTAGE_STORE_SCHEMA``-shaped rows for ``source='ces'``, **NSA only**. The
-``_SA`` companions are ignored. The function returns a DataFrame and **never**
-touches the vintage store.
+Parses the BLS CES ``cesvinall`` triangular CSVs (``tri_{code6}_NSA.csv`` and
+``tri_{code6}_SA.csv``) into ``VINTAGE_STORE_SCHEMA``-shaped rows for
+``source='ces'``, building **both** seasonal adjustments. The function returns
+a DataFrame and **never** touches the vintage store.
 
 Triangle layout
 ---------------
@@ -264,13 +264,15 @@ def _vintage_dates(combos: pl.DataFrame) -> pl.DataFrame:
 def build_ces_panel(
     cesvinall_dir: Path | None = None, *, as_of: date | None = None
 ) -> pl.DataFrame:
-    """Build CES NSA vintage-store rows from the triangular ``cesvinall`` CSVs.
+    """Build CES vintage-store rows (both NSA and SA) from the triangular ``cesvinall`` CSVs.
 
     Parameters
     ----------
     cesvinall_dir : Path or None
-        Directory holding ``tri_{code6}_NSA.csv`` files. Defaults to
-        :data:`CESVINALL_DIR` (``DOWNLOADS_DIR/ces/cesvinall``).
+        Directory holding ``tri_{code6}_NSA.csv`` **and** ``tri_{code6}_SA.csv``
+        files. Defaults to :data:`CESVINALL_DIR` (``DOWNLOADS_DIR/ces/cesvinall``).
+        Files for either adjustment are optional — if only one adjustment is
+        present only that adjustment is emitted.
     as_of : datetime.date or None
         Frontier cutoff for benchmark ``(2,1)`` rows: only those whose
         benchmark ``vintage_date`` is ``<= as_of`` are retained (the first-basis
@@ -282,11 +284,14 @@ def build_ces_panel(
     -------
     pl.DataFrame
         ``VINTAGE_STORE_SCHEMA``-conformant rows (partition cols carried as
-        plain ``source``/``seasonally_adjusted`` columns): NSA, ``source='ces'``,
-        national geography, null size class, for ref_date ≥ 2017-01-12. Each
-        retained industry/ref-month yields ``(0,0)``/``(1,0)``/``(2,0)`` plus one
-        ``(2,1)`` row **per distinct annual-benchmark basis** (value and date
-        both drawn from the same ``(Y, 1)`` benchmark release — no lookahead).
+        plain ``source``/``seasonally_adjusted`` columns): both NSA and SA,
+        ``source='ces'``, national geography, null size class, for
+        ref_date ≥ 2017-01-12. Each retained industry/ref-month/adjustment
+        yields ``(0,0)``/``(1,0)``/``(2,0)`` plus one ``(2,1)`` row **per
+        distinct annual-benchmark basis** (value and date both drawn from the
+        same ``(Y, 1)`` benchmark release — no lookahead). SA and NSA share the
+        same ``(revision, benchmark_revision)`` cohort set and ``vintage_date``
+        calendar; only the employment values differ.
 
     Raises
     ------
@@ -300,42 +305,44 @@ def build_ces_panel(
     if not path.exists():
         raise FileNotFoundError(f"cesvinall directory not found: {path}")
 
-    # NSA only — ignore _SA companions.
     entries_by_code = {e.ces_code: e for e in INDUSTRY_MAP}
 
     parts: list[pl.DataFrame] = []
-    for csv_path in sorted(path.glob("tri_*_NSA.csv")):
-        code6 = csv_path.stem[len("tri_") : -len("_NSA")]
-        if code6 in _DROPPED_CES_CODES:
-            continue
-        entry = entries_by_code.get(code6)
-        if entry is None:
-            continue  # unknown code (not in the canonical industry map)
+    # Process NSA before SA so the stable sort preserves NSA-first relative order.
+    for adj_suffix, is_sa in (("NSA", False), ("SA", True)):
+        for csv_path in sorted(path.glob(f"tri_*_{adj_suffix}.csv")):
+            code6 = csv_path.stem[len("tri_") : -len(f"_{adj_suffix}")]
+            if code6 in _DROPPED_CES_CODES:
+                continue
+            entry = entries_by_code.get(code6)
+            if entry is None:
+                continue  # unknown code (not in the canonical industry map)
 
-        industry_type, ownership, industry_code = _taxonomy_for(entry)
+            industry_type, ownership, industry_code = _taxonomy_for(entry)
 
-        # ``year``/``month`` are integer vintage keys; ref-month columns are
-        # mixed text in the raw files, so coerce every non-key column to Float64.
-        # Read only the header first (all Utf8) to discover columns without
-        # tripping type inference on a float-in-an-int-looking column.
-        header = pl.read_csv(csv_path, n_rows=0, infer_schema_length=0).columns
-        schema_overrides: dict[str, pl.DataType] = {
-            c: pl.Float64 for c in header if c not in ("year", "month")
-        }
-        schema_overrides.update({"year": pl.Int32, "month": pl.Int32})
-        tri = pl.read_csv(csv_path, schema_overrides=schema_overrides)
+            # ``year``/``month`` are integer vintage keys; ref-month columns are
+            # mixed text in the raw files, so coerce every non-key column to Float64.
+            # Read only the header first (all Utf8) to discover columns without
+            # tripping type inference on a float-in-an-int-looking column.
+            header = pl.read_csv(csv_path, n_rows=0, infer_schema_length=0).columns
+            schema_overrides: dict[str, pl.DataType] = {
+                c: pl.Float64 for c in header if c not in ("year", "month")
+            }
+            schema_overrides.update({"year": pl.Int32, "month": pl.Int32})
+            tri = pl.read_csv(csv_path, schema_overrides=schema_overrides)
 
-        diag = _diagonals(tri).filter(pl.col("ref_date") >= _MIN_REF_DATE)
-        if diag.height == 0:
-            continue
+            diag = _diagonals(tri).filter(pl.col("ref_date") >= _MIN_REF_DATE)
+            if diag.height == 0:
+                continue
 
-        parts.append(
-            diag.with_columns(
-                industry_type=pl.lit(industry_type, pl.Utf8),
-                industry_code=pl.lit(industry_code, pl.Utf8),
-                ownership=pl.lit(ownership, pl.Utf8),
+            parts.append(
+                diag.with_columns(
+                    industry_type=pl.lit(industry_type, pl.Utf8),
+                    industry_code=pl.lit(industry_code, pl.Utf8),
+                    ownership=pl.lit(ownership, pl.Utf8),
+                    seasonally_adjusted=pl.lit(is_sa, pl.Boolean),
+                )
             )
-        )
 
     if not parts:
         return pl.DataFrame(schema=_OUTPUT_SCHEMA)
@@ -378,7 +385,7 @@ def build_ces_panel(
         size_class_type=pl.lit(None, pl.Utf8),
         size_class_code=pl.lit(None, pl.Utf8),
         source=pl.lit("ces", pl.Utf8),
-        seasonally_adjusted=pl.lit(False, pl.Boolean),
+        seasonally_adjusted=pl.col("seasonally_adjusted"),
     ).sort(
         "industry_type",
         "industry_code",
@@ -388,4 +395,7 @@ def build_ces_panel(
         # Per-benchmark (2,1) rows share every other sort key; vintage_date
         # disambiguates them so output ordering is deterministic.
         "vintage_date",
+        # NSA (False) sorts before SA (True) — stable sort preserves NSA-first
+        # relative order within each (industry, ref_date, rev, bmr, vdate) group.
+        "seasonally_adjusted",
     )

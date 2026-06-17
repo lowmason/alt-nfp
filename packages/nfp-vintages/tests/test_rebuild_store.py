@@ -532,6 +532,107 @@ class TestComposeQ1HeadlineCarriesAreaTotal:
 
 
 # ---------------------------------------------------------------------------
+# compose_rebuild_panel — SA CES + QCEW '00' total flow through (plans/11 T3)
+# ---------------------------------------------------------------------------
+
+
+class TestComposeCarriesSaAndTotal:
+    """Regression guard: SA CES rows + the QCEW ``'00'`` total pass through the
+    §7 Q1 override untouched.
+
+    After plans/11 T1/T2, ``build_ces_panel`` emits SA rows (null size) and
+    ``build_qcew_panel`` emits a ``('total','00','total')`` total track (null
+    size, ``source='qcew'``).  ``compose_rebuild_panel`` unions ``ces``
+    wholesale and the §7 override anti-joins only on the size frame's ``'0'``
+    rows (private size cross-product), so neither SA CES nor the ``'00'`` total
+    is ever dropped or mutated.  **This test is expected to PASS without any
+    change to ``compose_rebuild_panel`` — it is the regression guard.**  If it
+    fails, the §7 override is wrongly reaching CES or the ``'00'`` total and must
+    be re-scoped to ``source='qcew'`` private size ``'0'`` rows.
+    """
+
+    def _setup(self):
+        q1 = date(2024, 1, 12)
+        # CES: an NSA + an SA row for total/00 (null size, share vintage_date).
+        ces = _make_ces([
+            _ces_row(industry_type="total", industry_code="00", ownership="total",
+                     ref_date=q1, employment=158_000.0, seasonally_adjusted=False),
+            _ces_row(industry_type="total", industry_code="00", ownership="total",
+                     ref_date=q1, employment=156_000.0, seasonally_adjusted=True),
+        ])
+        # QCEW levels: the '00' total track + a private sector/32 (which the size
+        # frame covers, so it is the one exercised by the §7 override/anti-join).
+        qcew = _make_qcew_levels([
+            _qcew_level_row(industry_type="total", industry_code="00",
+                            ownership="total", ref_date=q1, employment=152_000.0),
+            _qcew_level_row(industry_type="sector", industry_code="32",
+                            ownership="private", ref_date=q1, employment=100.0),
+        ])
+        # Size: private sector/32 cross-product. '0' bucket-sum undercounts (90)
+        # the area total (100) — so the §7 override must lift it to 100.
+        size = _make_size([
+            _size_row(ref_date=q1, industry_type="sector", industry_code="32",
+                      ownership="private", size_class_type="total",
+                      size_class_code="0", employment=90.0),
+            _size_row(ref_date=q1, industry_type="sector", industry_code="32",
+                      ownership="private", size_class_type="large",
+                      size_class_code="9", employment=90.0),
+        ])
+        return ces, qcew, size, q1
+
+    def test_sa_ces_rows_present_and_unchanged(self):
+        ces, qcew, size, q1 = self._setup()
+        result = compose_rebuild_panel(ces, qcew, size)
+        sa = result.filter(
+            (pl.col("source") == "ces") & pl.col("seasonally_adjusted")
+        )
+        assert sa.height == 1
+        # Value untouched (SA 00 == 156_000) and null size.
+        assert sa["employment"][0] == pytest.approx(156_000.0)
+        assert sa["size_class_type"][0] is None
+        # The NSA CES 00 row also survives unchanged.
+        nsa = result.filter(
+            (pl.col("source") == "ces")
+            & (pl.col("industry_code") == "00")
+            & ~pl.col("seasonally_adjusted")
+        )
+        assert nsa.height == 1
+        assert nsa["employment"][0] == pytest.approx(158_000.0)
+
+    def test_qcew_00_total_present_and_unchanged(self):
+        ces, qcew, size, q1 = self._setup()
+        result = compose_rebuild_panel(ces, qcew, size)
+        total = result.filter(
+            (pl.col("source") == "qcew")
+            & (pl.col("industry_code") == "00")
+            & (pl.col("ownership") == "total")
+        )
+        # The '00' total is a source='qcew' null-size row; the §7 anti-join keys
+        # off the size frame's private '0' rows, so '00' is never dropped.
+        assert total.height == 1
+        assert total["employment"][0] == pytest.approx(152_000.0)
+        assert total["size_class_type"][0] is None
+
+    def test_section_7_override_still_works_on_private_size_zero(self):
+        ces, qcew, size, q1 = self._setup()
+        result = compose_rebuild_panel(ces, qcew, size)
+        # The private size '0' headline is lifted to the area total (100), and the
+        # null-size private level row is anti-joined away.
+        zero = result.filter(
+            (pl.col("industry_code") == "32") & (pl.col("size_class_code") == "0")
+        )
+        assert zero.height == 1
+        assert zero["employment"][0] == pytest.approx(100.0)
+        # The null-size qcew_levels row for the covered private sector is dropped.
+        dropped = result.filter(
+            (pl.col("source") == "qcew")
+            & (pl.col("industry_code") == "32")
+            & pl.col("size_class_type").is_null()
+        )
+        assert dropped.height == 0
+
+
+# ---------------------------------------------------------------------------
 # write_rebuild_store — guard + local write
 # ---------------------------------------------------------------------------
 
