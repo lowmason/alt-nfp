@@ -76,6 +76,14 @@ def _sha256(p: Path) -> str:
 def main() -> None:
     out = Path(sys.argv[1]).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    # A1 and A2 both emit ``panel_asof_<D>.parquet`` — the A1 censored panel and
+    # the A2 model panel are DIFFERENT frames, read by the two suites from their
+    # OWN prefixes. Stage them in separate subdirs so the identical filename never
+    # clobbers across sections; T2 uploads a1/ -> golden/a1-rebuild, a2/ -> a2-rebuild.
+    a1_dir = out / "a1"
+    a2_dir = out / "a2"
+    a1_dir.mkdir(exist_ok=True)
+    a2_dir.mkdir(exist_ok=True)
 
     import numpy as np
     import polars as pl
@@ -112,24 +120,24 @@ def main() -> None:
     for d in AS_OF_DATES:
         panel = build_panel(providers=[], start_year=START_YEAR, end_year=END_YEAR, as_of_ref=d)
         fn = f"panel_asof_{d.isoformat()}.parquet"
-        panel.write_parquet(out / fn)
+        panel.write_parquet(a1_dir / fn)
         a1[fn] = {
             "kind": "censored_panel",
             "as_of_ref": d.isoformat(),
             "rows": panel.height,
             "columns": panel.columns,
-            "sha256": _sha256(out / fn),
+            "sha256": _sha256(a1_dir / fn),
         }
 
     for cfg in PROVIDERS_DEFAULT:
         df = ingest_provider(cfg)
         fn = f"provider_{cfg.name}.parquet"
-        df.write_parquet(out / fn)
+        df.write_parquet(a1_dir / fn)
         a1[fn] = {
             "kind": "provider_panel",
             "rows": df.height,
             "columns": df.columns,
-            "sha256": _sha256(out / fn),
+            "sha256": _sha256(a1_dir / fn),
             "provider_config": dataclasses.asdict(cfg),
         }
 
@@ -147,7 +155,7 @@ def main() -> None:
         "fixtures": a1,
         "expected_failures": [{"as_of_ref": ef_date.isoformat(), "error_contains": ef_msg}],
     }
-    (out / "a1_manifest.json").write_text(json.dumps(a1_manifest, indent=2) + "\n")
+    (a1_dir / "a1_manifest.json").write_text(json.dumps(a1_manifest, indent=2) + "\n")
 
     # ---- A2: build_model_data arrays + levels/panel frames ----
     a2: dict = {}
@@ -171,10 +179,10 @@ def main() -> None:
                 arrays[f"{n}__births_obs"] = np.asarray(pp["births_obs"])
             pp_meta.append({"name": n, "emp_col": pp["emp_col"], "has_births": hb})
         stem = f"asof_{d.isoformat()}"
-        npz = out / f"model_data_{stem}.npz"
+        npz = a2_dir / f"model_data_{stem}.npz"
         np.savez(npz, **arrays)
-        data["levels"].write_parquet(out / f"levels_{stem}.parquet")
-        data["panel"].write_parquet(out / f"panel_{stem}.parquet")
+        data["levels"].write_parquet(a2_dir / f"levels_{stem}.parquet")
+        data["panel"].write_parquet(a2_dir / f"panel_{stem}.parquet")
         a2[stem] = {
             "as_of_ref": d.isoformat(),
             "scalars": {k: int(data[k]) for k in SCALARS},
@@ -187,12 +195,12 @@ def main() -> None:
             "array_names": sorted(arrays),
             "panel_rows": data["panel"].height,
             "sha256_npz": _sha256(npz),
-            "sha256_levels": _sha256(out / f"levels_{stem}.parquet"),
-            "sha256_panel": _sha256(out / f"panel_{stem}.parquet"),
+            "sha256_levels": _sha256(a2_dir / f"levels_{stem}.parquet"),
+            "sha256_panel": _sha256(a2_dir / f"panel_{stem}.parquet"),
         }
         print(f"{stem}: T={data['T']}, {len(arrays)} arrays, panel {data['panel'].height:,} rows")
 
-    (out / "a2_manifest.json").write_text(
+    (a2_dir / "a2_manifest.json").write_text(
         json.dumps({"provenance": prov, "fixtures": a2}, indent=2) + "\n"
     )
     print(f"\nWrote A1 ({len(a1)}) + A2 ({len(a2)}) fixtures + manifests to {out}")
