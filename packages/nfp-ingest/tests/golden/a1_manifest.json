@@ -1,18 +1,23 @@
 {
   "provenance": {
-    "generator": "scripts/generate_golden_masters.py",
-    "generated_on": "2026-06-12",
-    "old_repo": "/Users/lowell/Projects/alt_nfp",
-    "old_repo_commit": "3cfe4caf6f9962b57410f3563f933f8ba3da6928",
-    "polars_version": "1.38.0",
-    "start_year": 2012,
-    "end_year": 2026
+    "generator": "scripts/regen_golden_rebuild.py",
+    "generated_on": "2026-06-17",
+    "store_uri": "s3://alt-nfp/store-rebuild",
+    "repo_commit": "2b37c60f2bbb2c1ad72337de8e6c830f291d41ae",
+    "polars_version": "1.41.2",
+    "numpy_version": "2.3.5",
+    "start_year": 2017,
+    "end_year": 2026,
+    "providers": [
+      "G"
+    ],
+    "divergence": "rebuilt store (s3://alt-nfp/store-rebuild): 2017+ history (vs frozen-ref 2012+), QCEW reconstructed crosswalk values, ownership/00-anchor/NSA store schema normalized to PANEL_SCHEMA by transform_to_panel (panel columns unchanged; values + row counts differ). Oct-2025 shutdown delayed the Sep+Oct CES prints, shifting the ref_date-gap expected-failure from 2026-02-12 (frozen ref) to 2026-01-12 (rebuilt; 2026-02-12 backfills)."
   },
   "fixtures": {
     "panel_asof_2020-05-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2020-05-12",
-      "rows": 11020,
+      "rows": 3469,
       "columns": [
         "period",
         "geographic_type",
@@ -30,12 +35,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "a14ab7c69aa91caf081df46e9bc8ac25908b798518b63aae4d0de8ffc4c2d963"
+      "sha256": "ed1869a6e84fe27253ca3624debf82a0263833f5e847075fa49526d14d17d4a9"
     },
     "panel_asof_2023-07-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2023-07-12",
-      "rows": 15390,
+      "rows": 7077,
       "columns": [
         "period",
         "geographic_type",
@@ -53,12 +58,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "ef5021644f0014aaec10f5f780112146692fe88b89aa04d55683e48608fbe511"
+      "sha256": "cec489136227c256c90d19fb3a351b24e052b54c34c50fbb907f07ee55d99571"
     },
     "panel_asof_2024-09-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2024-09-12",
-      "rows": 17024,
+      "rows": 8427,
       "columns": [
         "period",
         "geographic_type",
@@ -76,12 +81,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "07b6a51306db5a4afe7a2d1cae8294eabfea4040f8a387e2b84a2083f0a1d154"
+      "sha256": "04005f1623f72922d966eb76bbd7378e495d928d95c75dfac18c283dde180116"
     },
     "panel_asof_2024-12-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2024-12-12",
-      "rows": 17366,
+      "rows": 8709,
       "columns": [
         "period",
         "geographic_type",
@@ -99,12 +104,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "fdc8e9899ebf42f209b75f321017c4a23231bfee824f6274926b3e1efe719a44"
+      "sha256": "699d8ba5cbc27e467cdf15940be4aefaad007cacf3d86b6a36e35bb6f9a0451d"
     },
     "panel_asof_2025-02-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2025-02-12",
-      "rows": 17518,
+      "rows": 8836,
       "columns": [
         "period",
         "geographic_type",
@@ -122,12 +127,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "278563c73b95f5d3f8619f544cb6afa7c40b89687f644673a63a48217ed3f306"
+      "sha256": "fcc05a68d262b8cc6e8f146b7978b51b83f785471276057cbaa31b865595263d"
     },
     "panel_asof_2025-03-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2025-03-12",
-      "rows": 17634,
+      "rows": 8998,
       "columns": [
         "period",
         "geographic_type",
@@ -145,12 +150,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "4f34452ff2c830e4d91a1c1f72fff2887672ffdb188e1146d4a36e14b5ba636e"
+      "sha256": "c1ef0a334089c9763390626f25df4dfdd34345310b4d6bd669bcdedc8876fdd0"
     },
     "panel_asof_2025-07-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2025-07-12",
-      "rows": 17756,
+      "rows": 9340,
       "columns": [
         "period",
         "geographic_type",
@@ -168,12 +173,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "24d688d036b2e1f89b278b716381b6d3991eb2db5289cefc10b88d9607dec11a"
+      "sha256": "ba6980a623fba914c09dba022d0b9181e61bb11f3de27472218ac7b9738acd27"
     },
     "panel_asof_2025-11-12.parquet": {
       "kind": "censored_panel",
       "as_of_ref": "2025-11-12",
-      "rows": 17874,
+      "rows": 9562,
       "columns": [
         "period",
         "geographic_type",
@@ -191,12 +196,12 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "1cda85e68cf42bba3adbe3bc972e293b218b53db1bdd9f691701aad0f7035916"
+      "sha256": "b4db1cf25e3bafa2af3dca0eef68e337bfec9e797979e96c65e895b86a710e77"
     },
-    "panel_asof_2026-01-12.parquet": {
+    "panel_asof_2026-02-12.parquet": {
       "kind": "censored_panel",
-      "as_of_ref": "2026-01-12",
-      "rows": 17996,
+      "as_of_ref": "2026-02-12",
+      "rows": 9964,
       "columns": [
         "period",
         "geographic_type",
@@ -214,20 +219,10 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "201d24a5e63385b334f2f345310e4be3eb9d88a0cf5d8ab052307b5162178bec"
+      "sha256": "8003ee1efde6d18fe3b8213ffd8a719703e6835ebd460139454dc73132b0fa8f"
     },
     "provider_G.parquet": {
       "kind": "provider_panel",
-      "provider_config": {
-        "name": "G",
-        "file": "providers/g/g_provider.parquet",
-        "error_model": "iid",
-        "birth_file": "providers/g/g_births.parquet",
-        "industry_type": "national",
-        "industry_code": "00",
-        "geography_type": "national",
-        "geography_code": "00"
-      },
       "rows": 83,
       "columns": [
         "period",
@@ -246,12 +241,22 @@
         "publication_lag_months",
         "coverage_ratio"
       ],
-      "sha256": "551a8219a8e145c8aadbf97faae8d05dfe1c53c22845d02132c8ab22135d13fd"
+      "sha256": "677ae81bf9617845e9d9c046a4e9a0a816b7c8f772799305d85903a7d29eaf96",
+      "provider_config": {
+        "name": "G",
+        "file": "providers/g/g_provider.parquet",
+        "error_model": "iid",
+        "birth_file": "providers/g/g_births.parquet",
+        "industry_type": "national",
+        "industry_code": "00",
+        "geography_type": "national",
+        "geography_code": "00"
+      }
     }
   },
   "expected_failures": [
     {
-      "as_of_ref": "2026-02-12",
+      "as_of_ref": "2026-01-12",
       "error_contains": "ref_date gap"
     }
   ]
