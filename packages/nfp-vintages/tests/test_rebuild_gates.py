@@ -103,9 +103,10 @@ def _empty_store_frame() -> pl.DataFrame:
 
 
 # The history + fidelity gates operate on the NSA hierarchy/anchor, so these
-# helpers stamp ``seasonally_adjusted=False`` explicitly (the ``_row`` default is
-# True).  The plans/11 T3 ``_nsa_only`` filter on the history gate must be a
-# no-op on these NSA frames; SA-specific coverage lives in dedicated tests.
+# helpers stamp ``seasonally_adjusted=False`` explicitly — redundant with the
+# ``_row`` default (now ``False``) but kept for local clarity.  The plans/11 T3
+# ``_nsa_only`` filter on the history gate must be a no-op on these NSA frames;
+# SA-specific coverage lives in dedicated tests.
 def _legacy_total_private_rows(ref: date, emp: float) -> list[dict]:
     """Legacy-axis (domain/05, null ownership) NSA rows for the four cohorts."""
     return [

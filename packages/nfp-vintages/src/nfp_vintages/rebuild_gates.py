@@ -433,8 +433,10 @@ def gate_ces_fidelity(
     # many-to-many fan-out) and pairs the SA value against the NSA reference,
     # spuriously HARD-failing.  Keyed, SA↔SA and NSA↔NSA align cohort-for-cohort,
     # so this both fixes the false fail AND is the SA fidelity rail (build_ces_panel
-    # emits the column; the store partition carries it).  Guarded: only added when
-    # BOTH frames carry it, so synthetic frames lacking it still compare.
+    # emits the column; the store partition carries it).  Real inputs ALWAYS carry
+    # it (VINTAGE_STORE_SCHEMA + build_ces_panel), so the both-sides guard only
+    # relaxes for fully-synthetic frames that omit it on both sides — an asymmetric
+    # frame (one side only) can't occur in production.
     if (
         "seasonally_adjusted" in rebuilt.columns
         and "seasonally_adjusted" in reference.columns
