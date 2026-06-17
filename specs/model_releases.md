@@ -1,629 +1,413 @@
 # Staged Implementation Plan: Bayesian NFP Nowcasting System
 
+> **Revision note.** This document has been aligned to the model actually implemented in
+> `packages/nfp-model` (the JAX/NumPyro national state-space model). The originally separate
+> **Release 1** (national measurement error) and **Release 2** (national birth/death) are now
+> described together as a single implemented national model in **Part I**, because the code is one
+> unified model — there is no built intermediate without birth/death, QCEW, or seasonality.
+> **Releases 3–5** (cell-level estimation, nested hierarchy, QCEW forecasting + time-varying bias)
+> are **not implemented**; they are described as planned work in **Part II** and correspond to the
+> port plan's Phase B (`plans/0-port_and_staged_plan.md`).
+>
+> One deliberate exception to "match the code": the **provider priors are written as hierarchical**
+> (the multi-provider pooling design), even though the current code realizes the single-provider
+> *collapse* of that hierarchy with fixed weakly-informative priors. Hierarchical pooling remains the
+> plan; see Part I §7 for the implemented-vs-target mapping.
+
 ## Overview
 
-This document describes a staged release plan for a Bayesian state space NFP nowcasting system. Each release is a fully functional system capable of producing NFP forecasts. Subsequent releases add complexity while maintaining backward compatibility with earlier functionality.
+This document describes a Bayesian state-space NFP nowcasting system. The implemented system (Part I)
+produces a national NFP nowcast under strict as-of censoring, fusing CES survey prints, lagged QCEW
+administrative anchors, payroll-provider continuing-units microdata, and cyclical indicators. Planned
+extensions (Part II) add geographic/industry decomposition and real-time QCEW conditioning while
+maintaining backward compatibility with the national model.
 
 ### Design Principles
 
-1.  **Forecast accuracy before narrative:** Birth/death correction (the fundamental limitation of continuing-units data) is prioritized over geographic/industry decomposition.
+1.  **Forecast accuracy before narrative.** Birth/death correction (the fundamental limitation of
+    continuing-units data) is prioritized over geographic/industry decomposition. *Realized:* the
+    national model carries a structural birth/death component; decomposition is deferred to Part II.
 
-2.  **Multi-provider from the start:** The measurement error framework naturally accommodates multiple providers as independent noisy observations of latent truth. Designing for this from Release 2 avoids retrofitting.
+2.  **Multi-provider by construction.** The measurement-error framework treats each provider as an
+    independent noisy observation of latent truth, so additional providers slot in without
+    retrofitting. *Realized:* per-provider likelihoods with config-driven loading and an iid/AR(1)
+    error option. The hierarchical pooling over providers is the planned form (Part I §7); with a
+    single provider it collapses to weakly-informative per-provider priors.
 
-3.  **Coherent hierarchical forecasts:** Once cell-level estimation begins (Release 4), dual national/cell estimation with MinT reconciliation ensures cell contributions sum exactly to the national forecast.
+3.  **Coherent hierarchical forecasts (planned).** Once cell-level estimation begins (Release 3),
+    dual national/cell estimation with MinT reconciliation will ensure cell contributions sum exactly
+    to the national forecast.
 
-# Release 1: National Measurement Error Model (Multi-Payroll Provider)
+### Implementation status
+
+| Capability | Status |
+|---|---|
+| National latent state — non-centered AR(1) with era-specific means | **Implemented** |
+| Fourier seasonal (annually-evolving amplitudes) + SA/NSA decomposition | **Implemented** |
+| Structural birth/death with cyclical covariates (claims, JOLTS) | **Implemented** |
+| QCEW Student-t anchor (tiered base σ, per-obs revision multipliers) | **Implemented** |
+| CES likelihood — best-available print, vintage-indexed σ, shared bias/loading | **Implemented** |
+| Multi-provider measurement (iid/AR(1) errors) | **Implemented** (fixed priors; hierarchical pooling planned) |
+| Cell-level estimation + dual national/cell + MinT (Release 3) | Planned — Phase B |
+| Nested geo/industry hierarchy (Release 4) | Planned — Phase B |
+| Forecasted QCEW + time-varying provider bias (Release 5) | Planned — Phase B |
+
+### Notation and implementation mapping
+
+The model works in **monthly log-growth** units throughout. Latent paths and their composites map to
+the deterministic sites in `nfp_model.model`:
+
+| Symbol | Meaning | Code site |
+|---|---|---|
+| $g^{cont}_t$ | latent continuing-units (intensive-margin) growth, seasonally adjusted | `g_cont` |
+| $s_t$ | seasonal component | `seasonal` |
+| $BD_t$ | net birth/death contribution | `bd` |
+| $g^{cont,nsa}_t = g^{cont}_t + s_t$ | continuing-units growth, not seasonally adjusted | `g_cont_nsa` |
+| $g^{tot,sa}_t = g^{cont}_t + BD_t$ | total employment growth, seasonally adjusted | `g_total_sa` |
+| $g^{tot,nsa}_t = g^{cont}_t + s_t + BD_t$ | total employment growth, not seasonally adjusted | `g_total_nsa` |
+
+Every prior value below is pinned to `nfp_model.config` (the A3 parity contract). Change a prior only
+behind a new parity baseline.
+
+---
+
+# PART I — IMPLEMENTED: National State-Space Model
 
 ## Objective
 
-Produce a national NFP nowcast by treating each payroll provider's national aggregate as a noisy signal of true employment growth.
+Produce a national NFP nowcast by jointly estimating a latent continuing-units growth path, an
+annually-evolving seasonal, and a structural birth/death contribution, then reading those through the
+QCEW, CES, and payroll-provider observation equations. The target is the official **seasonally
+adjusted CES headline**, modeled as a biased, scaled, revision-dependent observation of latent total
+growth.
 
 ## System Description
 
-Multiple providers observe the same latent national employment growth $\mu_t$, each with their own bias, signal loading, and noise level. The model extracts the common signal while learning provider-specific characteristics.
-
-Even with a single payroll provider initially, the framework is ready for additional payroll providers.
+Continuing-units growth is the economic signal common to payroll providers and (after birth/death
+adjustment) to CES and QCEW. Providers observe the not-seasonally-adjusted continuing-units signal
+$g^{cont,nsa}_t$; CES and QCEW observe total growth (continuing units plus birth/death). QCEW is a
+near-census, NSA, lagged anchor that lets the model learn bias, loading, and noise parameters and
+project them forward to the censored frontier where the nowcast lives.
 
 ### Data Inputs
 
-| Source                              | Frequency | Lag       | Description                                                                                                                                                                                                                |
-|----------------------|-------------|----------------|----------------------|
-| Payroll Provider *p* National Index | Monthly   | Real-time | Continuing-units employment growth constructed from provider microdata using a rotating, frozen measurement panel aligned to the CES reference week (stabilized clients only; exits removed without counting as job loss). |
-| Official NFP                        | Monthly   | ~3 weeks | BLS CES headline number                                                                                                                                                                                                    |
+| Source | Frequency | Lag | Description |
+|---|---|---|---|
+| Payroll Provider *p* National Index | Monthly | ~3 weeks | Continuing-units (intensive-margin) growth from provider microdata on a rotating, internally frozen measurement panel aligned to the CES reference week (stabilized clients only; administrative exits removed without counting as job loss). **Not seasonally adjusted.** |
+| CES headline (SA) | Monthly | ~3 weeks (rev-0) | BLS CES seasonally adjusted total employment growth; revisions rev-0/1/2. |
+| CES headline (NSA) | Monthly | ~3 weeks (rev-0) | BLS CES not-seasonally-adjusted total employment growth; revisions rev-0/1/2. |
+| QCEW National | Quarterly | 5–6 months | Near-census total employment, **not seasonally adjusted**; revision selected per quarter. |
+| Cyclical indicators | Monthly | claims 1 mo, JOLTS 2 mo | Initial claims (ICNSA) and JOLTS job openings (JTSJOL), centered upstream. |
 
-### Provider Series Construction: Rotating, Frozen Measurement Panel
-
-Notation: let k(t) denote the active panel at time t; the observed provider series $y_{p,t}$ is the panel-based continuing-units growth signal.
-
-Within the frozen window, compute month-to-month growth using matched client observations only. Clients that administratively exit the provider during the window are removed from the panel and do not contribute negative change; the measurement target is the intensive-margin employment change of continuing units.
-
-Panel mechanics: at fixed refresh intervals (e.g., quarterly), define an eligible set of clients that have satisfied a stabilization rule (e.g., ≥K consecutive reference periods or change-point-based stabilization). Freeze this set for the panel window; do not add new clients mid-window even if they become eligible later.
-
-To align payroll-provider measures with CES-style continuing-units concepts---and to prevent provider onboarding/offboarding from masquerading as economic job flows---the provider's national index is computed on a rotating, internally frozen panel of clients.
+The provider series is computed on a rotating, internally frozen panel so that provider
+onboarding/offboarding cannot masquerade as economic job flows. Within the frozen window,
+month-to-month growth uses matched client observations only; clients that administratively exit are
+removed from the panel and do not contribute negative change — the measurement target is the
+intensive-margin employment change of continuing units. (Construction details are in the companion
+data-methods document; the model consumes the finished continuing-units series.)
 
 ### Complete Model Specification
 
-**Latent State (True National Employment Growth):**
+**Latent continuing-units growth — non-centered AR(1) with era-specific means.**
+The latent path is a *stationary* AR(1) parametrized by its stationary standard deviation $\tau$
+(this breaks the $\phi$–$\sigma$ ridge), with a regime break separating the pre- and post-COVID means
+(persistence and marginal SD are shared across eras; only the mean differs):
 
-Here, $y_{p,t}$ refers to the rotating-panel continuing-units growth measure described above (not a raw level change that includes client entry/exit).
+$$\tau \sim \text{LogNormal}(\log 0.013,\ 0.5)$$
 
-$$\mu_{t} = \mu_{t - 1} + \eta_{t},\quad\eta_{t} \sim N\left( 0,\sigma_{\eta}^{2} \right)$$
+$$\phi_{raw} \sim \text{Beta}(18,\ 2),\qquad \phi = \min(\phi_{raw},\ 0.99),\qquad \sigma_g = \tau\sqrt{1-\phi^{2}}$$
 
-**Data Likelihood --- Official NFP:**
+$$\mu_{g,e} \sim N(0.001,\ 0.005^{2}),\quad e \in \{0,1\}\ \ (\text{era break at 2020-01})$$
 
-$$y_{t}^{NFP} = \mu_{t} + \varepsilon_{t}^{NFP},\quad\varepsilon_{t}^{NFP} \sim N\left( 0,\sigma_{NFP}^{2} \right)$$
+$$\varepsilon_{g,t} \sim N(0,1),\qquad g^{cont}_{0} = \mu_{g,0} + \sigma_g\,\varepsilon_{g,0}$$
 
-**Data Likelihood --- Provider p National Aggregate:**
+$$g^{cont}_{t} = \mu_{g,e(t)} + \phi\big(g^{cont}_{t-1} - \mu_{g,e(t)}\big) + \sigma_g\,\varepsilon_{g,t}$$
 
-$$y_{p,t}^{G} = \alpha_{p} + \lambda_{p}\mu_{t} + \varepsilon_{p,t}^{G},\quad\varepsilon_{p,t}^{G} \sim N\left( 0,\sigma_{G,p}^{2} \right)$$
+The 2020–2021 window is excluded from evaluation; the estimation sample begins ~2012.
 
-where for each payroll provider p:
+**Fourier seasonal — annually-evolving amplitudes (non-centered Gaussian random walk across years).**
+With $K=4$ harmonics, the cosine/sine amplitudes evolve year to year; innovation scale decreases with
+harmonic order:
 
-- $\alpha_p$ is payroll provider-specific bias
+$$\sigma^{(k)}_{F} \sim \text{LogNormal}\big(\log 0.0003 - \log k,\ 0.5\big),\quad k = 1,\dots,K$$
 
-- $\lambda_p$ is payroll provider-specific signal loading
+$$z \sim N(0,1)^{(2K)\times n_{yr}},\qquad
+\text{step}_{\cdot,1} = 0.015\cdot z_{\cdot,1},\quad
+\text{step}_{\cdot,y>1} = \sigma^{(k)}_{F}\cdot z_{\cdot,y}$$
 
-- $\sigma^{2}_{G,p}$ is payroll provider-specific noise variance
+$$[A_{k,y};\,B_{k,y}] = \operatorname{cumsum}_{y}(\text{step}),\qquad
+s_t = \sum_{k=1}^{K} A_{k,\,yr(t)}\cos\!\Big(\tfrac{2\pi k\,m_t}{12}\Big) + B_{k,\,yr(t)}\sin\!\Big(\tfrac{2\pi k\,m_t}{12}\Big)$$
 
-**Hierarchical Priors over Providers:**
+where $m_t$ is month-of-year and $yr(t)$ the calendar year index. The first half of the coefficient
+rows are the $A_k$ (cosine), the second half the $B_k$ (sine).
+
+**Structural birth/death.** A constant plus cyclical covariates plus a structural innovation;
+covariates are centered upstream and gated out when a column is identically zero (which keeps
+backtest iterations identified):
+
+$$\phi_0 \sim N(0.001,\ 0.002^{2}),\qquad \sigma_{BD} \sim \text{LogNormal}(\log 0.003,\ 0.5),\qquad \xi_t \sim N(0,1)$$
+
+$$\phi_{3,i} \sim N(0,\ 0.3^{2})\ \text{ per active covariate } i \in \{\text{claims, JOLTS}\}$$
+
+$$BD_t = \phi_0 + \sigma_{BD}\,\xi_t + \sum_{i \in \text{active}} \phi_{3,i}\,X^{(i)}_t$$
+
+There is **no lagged-QCEW-birth/death proxy term** and **no separate birth-rate covariate**: both were
+removed empirically (posteriors indistinguishable from zero). The surviving cyclical block is
+$[\text{claims, JOLTS}]$ only.
+
+**Composite growth signals.**
+
+$$g^{cont,nsa}_t = g^{cont}_t + s_t,\qquad g^{tot,sa}_t = g^{cont}_t + BD_t,\qquad g^{tot,nsa}_t = g^{cont}_t + s_t + BD_t$$
+
+**Data Likelihood — QCEW (near-census NSA total, lagged, truth anchor).**
+A Student-t anchor with two estimated base scales (a tight M2 tier and a wider boundary tier for
+M1/M3 publications) times a per-observation revision multiplier from the publication schedule
+(post-COVID boundary months carry an additional era multiplier). The tight M2 prior prevents QCEW
+precision from dominating identification; LogNormal (not HalfNormal) scale priors avoid funnel
+geometry:
+
+$$\sigma^{mid}_{Q} \sim \text{LogNormal}(\log 0.0005,\ 0.15),\qquad \sigma^{bnd}_{Q} \sim \text{LogNormal}(\log 0.002,\ 0.5)$$
+
+$$\sigma_{Q,\,obs} = \big[\,\mathbb{1}\{M2\}\,\sigma^{mid}_{Q} + \mathbb{1}\{\text{boundary}\}\,\sigma^{bnd}_{Q}\,\big]\cdot r_{obs}$$
+
+$$y^{QCEW}_{obs} \sim \text{Student-}t\big(\nu = 5,\ g^{tot,nsa}_{obs},\ \sigma_{Q,\,obs}\big)$$
+
+QCEW arrives with a 5–6 month lag; the per-quarter maximum revision selected at a given horizon is
+$\{Q1{:}4,\ Q2{:}3,\ Q3{:}2,\ Q4{:}1\}$. Because QCEW is lagged, its role is to pin bias/loading/noise
+that then propagate forward to the real-time frontier.
+
+**Data Likelihood — CES (best-available print, vintage-indexed σ, shared bias/loading).**
+CES is modeled as a *biased, scaled* observation of latent total growth with **revision-indexed**
+noise, separately for the SA and NSA series. One observation per month per series is used, at the
+highest available revision (CES vintages are correlated at $\rho > 0.99$, so using all of them
+overcounts information):
+
+$$\alpha_{ces} \sim N(0,\ 0.005^{2}),\qquad \lambda_{ces} \sim \text{TruncatedNormal}(1,\ 0.1;\ \text{low}=0.5)$$
+
+$$\sigma^{sa}_{ces,v} \sim \text{LogNormal}(\log 0.002,\ 0.5),\qquad \sigma^{nsa}_{ces,v} \sim \text{LogNormal}(\log 0.002,\ 0.5)\quad \text{per observed vintage } v$$
+
+$$y^{ces,sa}_{obs} \sim N\big(\alpha_{ces} + \lambda_{ces}\,g^{tot,sa}_{obs},\ \sigma^{sa}_{ces,\,v(obs)}\big)$$
+
+$$y^{ces,nsa}_{obs} \sim N\big(\alpha_{ces} + \lambda_{ces}\,g^{tot,nsa}_{obs},\ \sigma^{nsa}_{ces,\,v(obs)}\big)$$
+
+The vintage index $v(obs)$ is the revision number (0/1/2) selected for that month, remapped to a
+contiguous range so there are no ghost-parameter scales for vintages with zero observations.
+
+**Data Likelihood — Payroll Provider *p* (continuing units, NSA).**
+Each provider observes the not-seasonally-adjusted continuing-units signal with its own bias and
+loading, and either iid or AR(1) measurement error:
+
+$$y^{p}_{t} = \alpha_p + \lambda_p\,g^{cont,nsa}_t + \varepsilon_{p,t}$$
+
+$$\text{iid: } \varepsilon_{p,t} \sim N(0,\ \sigma_p^{2}),\qquad
+\text{AR(1): } \varepsilon_{p,t} = \rho_p\,\varepsilon_{p,t-1} + u_{p,t}\ \ (\text{stationary init})$$
+
+See §7 for the provider priors (hierarchical target vs. implemented collapse).
+
+### 7. Provider priors — hierarchical pooling (planned) and its implemented collapse
+
+The provider parameters are designed as a **hierarchical pool**, so that with multiple providers the
+model learns provider-specific bias/loading/noise while shrinking sparse providers toward shared
+means. This is the planned form:
 
 *Bias:*
 
-$$\alpha_{p}|\mu_{\alpha},\tau_{\alpha} \sim N\left( \mu_{\alpha},\tau_{\alpha}^{2} \right)$$
+$$\alpha_p \sim N(\mu_\alpha,\ \tau_\alpha^{2}),\qquad \mu_\alpha \sim N(0,\ 0.005^{2}),\qquad \tau_\alpha \sim \text{Half-}N(0,\ 0.005)$$
 
-$$\mu_{\alpha} \sim N\left( 0,{0.5}^{2} \right)$$
+*Signal loading:*
 
-$$\tau_{\alpha} \sim \text{Half-N}(0,0.3)$$
+$$\lambda_p \sim N(\mu_\lambda,\ \tau_\lambda^{2}),\qquad \mu_\lambda \sim N(1,\ 0.15^{2}),\qquad \tau_\lambda \sim \text{Half-}N(0,\ 0.1)$$
 
-*Signal Loading:*
+*Observation noise (log scale):*
 
-$$\lambda_{p}|\mu_{\lambda},\tau_{\lambda} \sim N\left( \mu_{\lambda},\tau_{\lambda}^{2} \right)$$
+$$\log \sigma_p \sim N(\mu_\sigma,\ \tau_\sigma^{2}),\qquad \mu_\sigma \sim N(\log 0.002,\ 0.5^{2}),\qquad \tau_\sigma \sim \text{Half-}N(0,\ 0.3)$$
 
-$$\mu_{\lambda} \sim N\left( 1,{0.25}^{2} \right)$$
+*AR(1) persistence (when the AR(1) error model is selected):*
 
-$$\tau_{\lambda} \sim \text{Half-N}(0,0.2)$$
+$$\rho_p \sim \text{Beta}(2,\ 3)$$
 
-*Observation Noise:*
-
-$$\log\left( \sigma_{G,p} \right) \sim N\left( \mu_{\sigma},\tau_{\sigma}^{2} \right)$$
-
-$$\mu_{\sigma} \sim N\left( - 3,{0.5}^{2} \right)$$
-
-$$\tau_{\sigma} \sim \text{Half-N}(0,0.3)$$
-
-**Other Priors:**
-
-$$\mu_{0} \sim N\left( 0,{0.1}^{2} \right)$$
-
-$$\sigma_{\eta} \sim \text{Half-N}(0,0.02)$$
-
-$$\sigma_{NFP} \sim \text{Half-N}(0,0.005)$$
+> **Implemented vs. target.** The current code (`nfp_model.config.ProviderPriors`) realizes the
+> **single-provider collapse** of this hierarchy with fixed priors:
+> $\alpha_p \sim N(0,\ 0.005)$, $\lambda_p \sim N(1,\ 0.15)$, $\sigma_p \sim \text{InverseGamma}(3,\ 0.004)$
+> (median $\approx 0.002$), and $\rho_p \sim \text{Beta}(2,3)$ for the AR(1) option. The hyperprior
+> locations and scales above are chosen so the pool reduces to these fixed priors when $P = 1$;
+> activating the hierarchy ($P \ge 2$) is the open task that this section retains as the plan. The
+> InverseGamma noise prior is the current collapse of the LogNormal hierarchical noise above.
 
 ### Forecast Production
 
-1.  **Historical Estimation:** Run MCMC on all available data through time T-1
-2.  **Filtering:** Incorporate all payroll provider data for current month T
-3.  **Nowcast:** Posterior predictive distribution for $\mu_T$
+1.  **Censored estimation.** Run NUTS on all data knowable as of date $D$ (two-layer as-of censoring
+    upstream; the model never sees a vintage date). The latent $g^{cont}$, seasonal $s_t$, and $BD_t$
+    paths are inferred jointly.
+2.  **Nowcast transform.** Map the SA total path through the CES-SA observation equation,
+    $\alpha_{ces} + \lambda_{ces}\,g^{tot,sa}_t$, take the posterior-mean growth path, rebuild the
+    index path from the panel's base index, and read off the target month (the as-of month itself,
+    which sits at the censored frontier, so the last latent state is the nowcast proxy).
+3.  **Reporting.** Convert the month-over-month index change to jobs added (thousands).
 
 ### Output Specification
 
-| Output                    | Description                                          |
-|---------------------------|---------------------------------------------|
-| `nfp_nowcast`             | Point estimate (posterior mean of $\mu_T$)               |
-| `nfp_nowcast_std`         | Uncertainty (posterior std of $\mu_T$)                   |
-| `nfp_nowcast_ci`          | 80% and 95% credible intervals                       |
-| `provider_signal_quality` | Posterior mean of $\lambda_p$ for each payroll provider      |
-| `provider_bias`           | Posterior mean of $\alpha_p$ for each payroll provider      |
-| `provider_weights`        | Effective weight of each payroll provider in nowcast |
+The packaged nowcast summary (`nfp_model.nowcast.nowcast_summary`) returns:
+
+| Output | Description |
+|---|---|
+| `nowcast_growth` | Point estimate — posterior-mean log growth at the target month |
+| `nowcast_index` | Implied index level at the target month |
+| `nowcast_change_k` | Month-over-month jobs added (thousands) from the posterior-mean index path |
+| `pred_mean` | The $(T,)$ posterior-mean predictive growth path |
+| `pred_draws` | The $(\text{chains}\times\text{draws})$ predictive draws at the target month — the source for std and 80%/95% credible intervals |
+
+Additional quantities are available directly as posterior sites: the decomposition paths
+(`g_cont`, `seasonal`, `bd`, `g_total_sa`, `g_total_nsa`), the CES bias/loading
+($\alpha_{ces}, \lambda_{ces}$) and per-vintage noise scales, the QCEW tier scales, and the
+per-provider bias/loading/noise ($\alpha_p, \lambda_p, \sigma_p$, and $\rho_p$ under AR(1)) — the
+latter being the provider signal-quality and bias diagnostics.
 
 ### Validation Metrics
 
--   Out-of-sample RMSE against NFP releases
--   Coverage of credible intervals
--   Comparison to naive forecast (random walk on NFP)
--   Provider-specific signal quality rankings
-
-### Limitations
-
--   **No birth/death adjustment:** Providers measure continuing units only
--   No geographic or industry decomposition
--   No QCEW anchoring
--   Cannot explain drivers of forecast
-
-# Release 2: National Birth/Death Adjustment (Multi-Provider)
-
-## Objective
-
-Correct for the systematic gap between continuing units' data (what payroll providers measure) and total employment (what NFP captures) at the national level.
-
-## Incremental Changes from Release 1
-
--   Decompose true employment into continuing-units and birth/death components
-
-### Provider Series Construction: Rotating, Frozen Measurement Panel
-
-This ensures that the provider likelihood loads on $\mu^{cont}_t$ and that administrative churn (client onboarding/offboarding) is excluded from the measurement equation rather than implicitly absorbed into the birth/death component.
-
-In Release 2, payroll-provider observations are explicitly interpreted as continuing-units (intensive-margin) employment change. Accordingly, each provider's input series must be constructed using the rotating, frozen measurement-panel methodology.
-
--   Model BD as function of cyclical indicators
--   Anchor BD estimates with lagged QCEW birth/death data
--   Providers now explicitly measure continuing-units employment
-
-## System Description
-
-Each payroll provider measures employment change from continuing units only. The birth/death contribution is modeled separately and added to get total employment. This correction is critical at business cycle turning points.
-
-### Data Inputs
-
-| Source                            | Frequency | Lag        | Description                                                                                                                                                                                                                |
-|----------------------|-------------|----------------|----------------------|
-| Payroll Provider p National Index | Monthly   | Real-time  | Continuing-units employment growth constructed from provider microdata using a rotating, frozen measurement panel aligned to the CES reference week (stabilized clients only; exits removed without counting as job loss). |
-| Official NFP                      | Monthly   | ~3 weeks  | Total employment (includes BD)                                                                                                                                                                                             |
-| Cyclical Indicators               | Monthly   | Real-time  | GDP growth, unemployment rate, financial conditions                                                                                                                                                                        |
-| QCEW National                     | Quarterly | 5-6 months | Near-census total employment                                                                                                                                                                                               |
-| QCEW Birth/Death                  | Quarterly | 5-6 months | Actual BD contribution from QCEW microdata                                                                                                                                                                                 |
-
-### Complete Model Specification
-
-As in Release 1, $y_{p,t}$ is computed from the active panel k(t) and represents continuing-units growth only; client entry/exit are excluded by construction.
-
-**Latent State Decomposition:**
-
-$$\mu_{t} = \mu_{t}^{cont} + BD_{t}$$
-
-where $\mu^{cont}_t$ is continuing-units change and $BD_t$ is net birth/death contribution.
-
-**Latent Dynamics:**
-
-$$\mu_{t}^{cont} = \mu_{t - 1}^{cont} + \eta_{t}^{cont},\quad\eta_{t}^{cont} \sim N\left( 0,\sigma_{\eta,cont}^{2} \right)$$
-
-**Data Likelihood --- Official NFP (Total Employment):**
-
-$$y_{t}^{NFP} = \mu_{t}^{cont} + BD_{t} + \varepsilon_{t}^{NFP},\quad\varepsilon_{t}^{NFP} \sim N\left( 0,\sigma_{NFP}^{2} \right)$$
-
-**Data Likelihood --- Payroll Provider p (Continuing Units):**
-
-$$y_{p,t}^{G} = \alpha_{p} + \lambda_{p}\mu_{t}^{cont} + \varepsilon_{p,t}^{G},\quad\varepsilon_{p,t}^{G} \sim N\left( 0,\sigma_{G,p}^{2} \right)$$
-
-**Data Likelihood --- QCEW (Lagged, Total Employment):**
-
-$$y_{t - L}^{QCEW} = \mu_{t - L}^{cont} + BD_{t - L} + \varepsilon_{t - L}^{QCEW},\quad\varepsilon_{t - L}^{QCEW} \sim N\left( 0,\sigma_{QCEW}^{2} \right)$$
-
-**Birth/Death Model:**
-
-$$BD_{t} = \phi_{0} + \phi_{1}X_{t}^{cycle} + \phi_{2}BD_{t - L}^{QCEW} + \xi_{t},\quad\xi_{t} \sim N\left( 0,\sigma_{BD}^{2} \right)$$
-
-**Priors:**
-
-*Hierarchical priors over payroll providers:* Same as Release 1
-
-*Birth/death parameters:*
-
-$$\phi_{0} \sim N\left( 0,{0.01}^{2} \right)$$
-
-$$\phi_{1} \sim N\left( 0.5,{0.2}^{2} \right)\quad\text{[procyclical prior]}$$
-
-$$\phi_{2} \sim N\left( 0.7,{0.15}^{2} \right)\quad\text{[persistence]}$$
-
-$$\sigma_{BD} \sim \text{Half-N}(0,0.008)$$
-
-*QCEW noise:*
-
-$$\sigma_{QCEW} \sim \text{Half-N}(0,0.003)$$
-
-### Forecast Production
-
-1.  **Historical Estimation:** Run MCMC on all data through T-1
-2.  **BD Forecast:** Estimate $BD_T$ using cyclical indicators and lagged QCEW BD
-3.  **Continuing-Units Filtering:** Filter $\mu^{cont}_T$ from all payroll provider data
-4.  **Total Employment Nowcast:** $\mu_T$ = $\mu^{cont}_T$ + $BD_T$
-
-### Output Specification
-
-All outputs from Release 1, plus:
-
-| Output                     | Description                                   |
-|----------------------------|--------------------------------------------|
-| `bd_contribution`          | Estimated $BD_T$ contribution to current NFP    |
-| `continuing_units_nowcast` | $\mu^{cont}_T$ (what payroll providers measure) |
-| `cyclical_sensitivity`     | Posterior of $\phi_1$ (BD response to cycle)       |
-| `bd_persistence`           | Posterior of $\phi_2$                              |
-
-### Validation Metrics
-
--   RMSE improvement over Release 0, especially at turning points
--   BD estimates vs. realized QCEW BD (with lag)
--   Cyclical sensitivity $\phi_1$ should be positive and significant
-
-### Limitations
-
--   National-level only---no geographic or industry decomposition
--   BD model doesn't capture industry heterogeneity
--   Time-invariant payroll provider bias
--   Cannot explain forecast drivers beyond BD split
-
-# Release 3: Cell-Level Estimation with Dual Framework and MinT (Multi-Payroll Provider)
-
-## Objective
-
-Produce NFP nowcasts with geographic × industry decomposition, maintaining birth/death adjustment, multi-provider integration, and coherent national alignment.
-
-## Incremental Changes from Release 2
-
--   Estimate latent employment growth for each cell (geographic unit × supersector)
--   **Independent national state** alongside cell-level states
--   **MinT reconciliation** ensures cells sum to national
--   Extend BD model to cell level with industry effects
--   Payroll Provider × cell parameters with hierarchical shrinkage
--   Add cell-level QCEW observations
--   Exchangeable hierarchical priors for partial pooling
-
-## System Description
-
-This release introduces cell-level estimation within the **dual-estimation framework**: we estimate both an independent national state (informed by NFP) and cell-level states (informed by payroll provider/QCEW data), then reconcile via MinT.
-
-Each payroll provider now has cell-level observations, with payroll provider-specific and cell-specific parameters. Some payroll providers may have better coverage in certain industries or geographies.
-
-### Data Inputs
-
-| Source                              | Frequency | Lag        | Description                                    |
-|----------------------|-------------|----------------|----------------------|
-| Payroll Provider p Cell-Level Index | Monthly   | Real-time  | Employment growth by geo × supersector         |
-| Official NFP                        | Monthly   | ~3 weeks  | National headline                              |
-| Cyclical Indicators                 | Monthly   | Real-time  | GDP growth, unemployment, financial conditions |
-| QCEW Cell-Level                     | Quarterly | 5-6 months | Near-census employment by cell                 |
-| QCEW Birth/Death                    | Quarterly | 5-6 months | BD contribution by cell or national            |
-
-### Complete Model Specification
-
-**Latent States --- Dual Structure:**
-
-*National State (Independent):*
-
-$$\mu_{t}^{nat} = \mu_{t - 1}^{nat} + \eta_{t}^{nat},\quad\eta_{t}^{nat} \sim N\left( 0,\sigma_{\eta,nat}^{2} \right)$$
-
-*Cell-Level States:* Let j index cells:
-
-$$\mu_{j,t}^{cont} = \mu_{j,t - 1}^{cont} + \eta_{j,t},\quad\eta_{j,t} \sim N\left( 0,\sigma_{\eta}^{2} \right)$$
-
-Total cell employment: $\mu_{j,t} = \mu_{j,t}^{cont} + BD_{j,t}$
-
-**Data Likelihood --- Official NFP (Informs National State):**
-
-$$y_{t}^{NFP} = \mu_{t}^{nat} + \varepsilon_{t}^{NFP},\quad\varepsilon_{t}^{NFP} \sim N\left( 0,\sigma_{NFP}^{2} \right)$$
-
-**Data Likelihood --- Payroll Provider p, Cell j (Continuing Units):**
-
-$$y_{p,j,t}^{G} = \alpha_{p,j} + \beta_{p,j}\mu_{j,t}^{cont} + \varepsilon_{p,j,t}^{G},\quad\varepsilon_{p,j,t}^{G} \sim N\left( 0,\sigma_{p,j}^{2} \right)$$
-
-**Data Likelihood --- QCEW (Cell Level, Lagged):**
-
-$$y_{j,t - L}^{QCEW} = \mu_{j,t - L} + \varepsilon_{j,t - L}^{QCEW},\quad\varepsilon_{j,t - L}^{QCEW} \sim N\left( 0,\sigma_{QCEW}^{2} \right)$$
-
-**Birth/Death Model (Cell Level):**
-
-$$BD_{j,t} = \phi_{0} + \phi_{s(j)}^{ind} + \phi_{1}X_{t}^{cycle} + \phi_{2}BD_{j,t - L}^{QCEW} + \xi_{j,t}$$
-
-*Industry Effects (Exchangeable):*
-
-$$\phi_{s}^{ind}|\mu_{\phi},\tau_{\phi} \sim N\left( \mu_{\phi},\tau_{\phi}^{2} \right)$$
-
-**Discrepancy Model (National vs. Sum-of-Cells):**
-
-$$\delta_{t} = \delta_{t - 1} + \omega_{t}^{\delta},\quad\omega_{t}^{\delta} \sim N\left( 0,\sigma_{\delta}^{2} \right)$$
-
-**Hierarchical Priors --- Payroll Provider × Cell Parameters:**
-
-The key innovation is decomposing payroll provider-cell parameters into payroll provider effects, cell effects, and residual:
-
-*Bias:*
-
-$$\alpha_{p,j} = \alpha_{p}^{prov} + \alpha_{j}^{cell} + \alpha_{p,j}^{resid}$$
-
-$$\alpha_{p}^{prov}|\mu_{\alpha,prov},\tau_{\alpha,prov} \sim N\left( \mu_{\alpha,prov},\tau_{\alpha,prov}^{2} \right)$$
-
-$$\alpha_{j}^{cell}|\mu_{\alpha,cell},\tau_{\alpha,cell} \sim N\left( \mu_{\alpha,cell},\tau_{\alpha,cell}^{2} \right)$$
-
-$$\alpha_{p,j}^{resid} \sim N\left( 0,\tau_{\alpha,resid}^{2} \right)$$
-
-*Signal Loading:*
-
-$$\beta_{p,j} = \beta_{p}^{prov} + \beta_{j}^{cell} + \beta_{p,j}^{resid}$$
-
-$$\beta_{p}^{prov}|\mu_{\beta,prov},\tau_{\beta,prov} \sim N\left( \mu_{\beta,prov},\tau_{\beta,prov}^{2} \right)$$
-
-$$\mu_{\beta,prov} \sim N\left( 1,{0.2}^{2} \right)$$
-
-$$\beta_{j}^{cell}|\tau_{\beta,cell} \sim N\left( 0,\tau_{\beta,cell}^{2} \right)$$
-
-$$\beta_{p,j}^{resid} \sim N\left( 0,\tau_{\beta,resid}^{2} \right)$$
-
-*Observation Noise:*
-
-$$\log\left( \sigma_{p,j} \right) = log\left( \sigma_{p}^{prov} \right) + log\left( \sigma_{j}^{cell} \right) + \epsilon_{p,j}^{\sigma}$$
-
-This decomposition allows: - Learning which payroll providers are systematically better/worse (payroll provider effects) - Learning which cells are harder to estimate (cell effects) - Capturing payroll provider-cell interactions (residual)
-
-### Optimal Reconciliation (MinT)
-
-**Base Forecasts:**
-
-$${\widehat{y}}_{t} = \left\lbrack {\widehat{\mu}}_{1,t},...,{\widehat{\mu}}_{J,t},{\widehat{\mu}}_{t}^{nat} \right\rbrack'$$
-
-**Reconciled Forecasts:**
-
-$${\widetilde{y}}_{t} = S\left( S'W^{- 1}S \right)^{- 1}S'W^{- 1}{\widehat{y}}_{t}$$
-
-**Constraint:**
-
-$$\sum_{j}^{}w_{j}{\widetilde{\mu}}_{j,t} + \delta_{t} = {\widetilde{\mu}}_{t}^{nat}$$
-
-### Forecast Production
-
-1.  **Historical Estimation:** MCMC on all data through T-1
-2.  **Base Forecast --- National:** Posterior mean of $\mu^{nat}_T$
-3.  **Base Forecast --- Cells:** Combine all payroll provider signals, estimate $BD_{j,T}$, compute $\mu_{j,T}$
-4.  **Covariance Estimation:** Compute W from historical forecast errors
-5.  **MinT Reconciliation:** Coherent forecasts where cells sum to national
-
-### Output Specification
-
-All outputs from Release 2, plus:
-
-| Output                     | Description                                          |
-|----------------------------|--------------------------------------------|
-| `nfp_nowcast_reconciled`   | Reconciled national forecast                         |
-| `cell_nowcasts_reconciled` | Reconciled cell estimates (sum to national)          |
-| `cell_contributions`       | $w_j$ × $\tilde{\mu}_{j,T}$ for each cell                         |
-| `top_drivers`              | Cells contributing most to national change           |
-| `provider_effects`       | $\alpha^{prov}_p$, $\beta^{prov}_p$ for each payroll provider |
-| `provider_cell_coverage` | Which payroll providers inform which cells           |
-| `discrepancy_estimate`     | Current $\delta_t$                                          |
-
-### Validation Metrics
-
--   National RMSE
--   Coherence: cells sum exactly to national
--   Cell-level coverage against QCEW
--   Payroll Provider ranking by signal quality
-
-### Limitations
-
--   Exchangeable priors ignore geographic/industry nesting
--   Time-invariant bias
-
-# Release 4: Nested Hierarchical Structure (Multi-Payroll Provider)
-
-## Objective
-
-Improve cell-level estimation by exploiting nested structure of geography (region → division → state) and industry (domain → supersector).
-
-## Incremental Changes from Release 3
-
--   Replace exchangeable priors with nested random effects
--   Bias/loading decomposes into geographic, industry, payroll provider, and residual components
--   BD intensity follows nested industry hierarchy
--   Enable finer geographic granularity (states) without overfitting
-
-## System Description
-
-The nested structure reflects true geographic and industry relationships: cells in the same division are more similar than cells in different divisions. Payroll Provider effects interact with this structure---some payroll providers may be better in certain regions or industries.
-
-### Complete Model Specification
-
-**Latent States, Data Likelihoods, Discrepancy, MinT:** Same as Release 3
-
-**Hierarchical Priors with Nested Structure:**
-
-*Bias --- Full Decomposition:*
-
-$$\alpha_{p,j} = \alpha_{p}^{prov} + \alpha_{g(j)}^{geo} + \alpha_{s(j)}^{ind} + \alpha_{p,s(j)}^{prov \times ind} + \alpha_{p,j}^{resid}$$
-
-*Payroll Provider Effects:*
-
-$$\alpha_{p}^{prov} \sim N\left( 0,\tau_{\alpha,prov}^{2} \right)$$
-
-*Geographic Component (Nested):*
-
-$$\alpha_{g}^{geo} = \alpha_{r(g)}^{region} + \alpha_{d(g)}^{div|region} + \alpha_{g}^{state|div}$$
-
-$$\alpha_{r}^{region} \sim N\left( 0,\tau_{region}^{2} \right)$$
-
-$$\alpha_{d}^{div|region} \sim N\left( 0,\tau_{div|region}^{2} \right)$$
-
-$$\alpha_{g}^{state|div} \sim N\left( 0,\tau_{state|div}^{2} \right)$$
-
-*Industry Component (Nested):*
-
-$$\alpha_{s}^{ind} = \alpha_{m(s)}^{domain} + \alpha_{s}^{supersector|domain}$$
-
-$$\alpha_{m}^{domain} \sim N\left( 0,\tau_{domain}^{2} \right)$$
-
-$$\alpha_{s}^{supersector|domain} \sim N\left( 0,\tau_{supersector|domain}^{2} \right)$$
-
-*Payroll Provider × Industry Interaction:*
-
-$$\alpha_{p,s}^{prov \times ind} \sim N\left( 0,\tau_{prov \times ind}^{2} \right)$$
-
-This captures that some payroll providers are better in certain industries (e.g., one payroll provider may have better Manufacturing coverage).
-
-*Residual:*
-
-$$\alpha_{p,j}^{resid} \sim N\left( 0,\tau_{resid}^{2} \right)$$
-
-**Signal Loading (Nested Industry + Payroll Provider):**
-
-$$\beta_{p,j} = \beta_{0} + \beta_{p}^{prov} + \beta_{m(j)}^{domain} + \beta_{s(j)}^{supersector|domain} + \beta_{p,j}^{resid}$$
-
-**Birth/Death Intensity (Nested Industry):**
-
-$$\phi_{s}^{ind} = \phi_{m(s)}^{domain} + \phi_{s}^{supersector|domain}$$
-
-**Variance Component Priors:**
-
-$$\tau_{region} \sim \text{Half-N}(0,0.4)$$
-
-$$\tau_{div|region} \sim \text{Half-N}(0,0.25)$$
-
-$$\tau_{state|div} \sim \text{Half-N}(0,0.15)$$
-
-$$\tau_{domain} \sim \text{Half-N}(0,0.4)$$
-
-$$\tau_{supersector|domain} \sim \text{Half-N}(0,0.25)$$
-
-$$\tau_{prov \times ind} \sim \text{Half-N}(0,0.15)$$
-
-### Output Specification
-
-All outputs from Release 3, plus:
-
-| Output                             | Description                                       |
-|----------------------------|--------------------------------------------|
-| `variance_components`              | $\tau^{2}$ at each hierarchy level                        |
-| `geographic_effects`               | Region, division, state effects                   |
-| `industry_effects`                 | Domain, supersector effects                       |
-| `provider_industry_interactions` | Which payroll providers excel in which industries |
-| `effective_shrinkage`              | Cell-level shrinkage toward each parent           |
-
-### Validation Metrics
-
--   Improved RMSE for sparse cells vs Release 3
--   Variance decomposition by hierarchy level
--   Payroll Provider × industry interaction patterns
-
-### Limitations
-
--   Time-invariant bias
--   No QCEW forecasting for real-time conditioning
-
-# Release 5: QCEW Conditioning and Time-Varying Bias (Multi-Payroll Provider)
-
-## Objective
-
-Allow payroll provider bias to evolve over time with QCEW error-correction and forecast QCEW for real-time conditioning.
-
-## Incremental Changes from Release 4
-
--   Time-varying bias $\alpha_{p,j,t}$ with RW1 dynamics
--   QCEW error-correction anchors bias drift
--   Forecasted QCEW enables real-time conditioning
--   Location quotients and leading indicators predict QCEW
-
-## System Description
-
-Payroll Provider bias drifts over time due to client composition changes, market share shifts, or methodology updates. QCEW error-correction prevents unbounded drift. Forecasting QCEW to the present enables tighter conditioning even during the 5-6 month publication lag.
-
-### Complete Model Specification
-
-**Latent States, Nested Hierarchical Structure, Discrepancy, MinT:** Same as Release 4
-
-**Time-Varying Bias:**
-
-$$\alpha_{p,j,t} = \alpha_{p,j,t - 1} + \omega_{p,j,t} - \kappa_{p}\left( d_{p,j,t - L} \right)$$
-
-where:
-
-- $\omega_{p,j,t}$ ∼ N(0, $\sigma^{2}_\omega$) is RW1 innovation
-
-- $d_{p,j,t-L}$ is discrepancy vs. QCEW at lag L
-
-- $\kappa_p$ is payroll provider-specific error-correction speed
-
-The initial bias $\alpha_{p,j,0}$ retains the nested decomposition from Release 4.
-
-**Payroll Provider-Specific Error-Correction:**
-
-$$\kappa_{p} \sim \text{Beta}(3,3)$$
-
-Different payroll providers may have different bias persistence---some track QCEW more closely than others.
-
-**Priors:**
-
-$$\sigma_{\omega} \sim \text{Half-N}(0,0.005)$$
-
-**QCEW Forecast Model:**
-
-$${\widehat{y}}_{j,t}^{QCEW} = \mu_{j,t|t - L} + \gamma_{j}^{LQ} \cdot LQ_{j} \cdot \left( {\widehat{y}}_{s(j),t}^{sector} - {\widehat{y}}_{t}^{national} \right) + X'_{j,t}\beta^{fcst} + \xi_{j,t}^{fcst}$$
-
-$$\xi_{j,t}^{fcst} \sim N\left( 0,\sigma_{fcst}^{2} \cdot \left( 1 + \rho \cdot h_{t} \right) \right)$$
-
-**Conditioning on Forecasted QCEW:**
-
-$${\widehat{y}}_{j,t}^{QCEW} = \mu_{j,t} + \varepsilon_{j,t}^{fcst},\quad\varepsilon_{j,t}^{fcst} \sim N\left( 0,\sigma_{QCEW,fcst}^{2} \right)$$
-
-### Note on Temporal Dependence
-
-The RW1 prior on $\alpha_{p,j,t}$ sets AR = 1 (unit root), capturing smooth drift. The QCEW error-correction provides bounded behavior. A GP would be theoretically superior but computationally prohibitive.
-
-### Note on QCEW Treatment
-
-The model conditions on QCEW (high-precision observation) rather than benchmarking (constraining sums). The tight $\sigma_{QCEW}$ prior is needed for identification.
-
-### Output Specification
-
-All outputs from Release 4, plus:
-
-| Output                      | Description                                         |
-|---------------------------|---------------------------------------------|
-| `bias_trajectories`         | $\alpha_{p,j,t}$ time series by payroll provider and cell |
-| `error_correction_speeds`   | $\kappa_p$ by payroll provider                             |
-| `qcew_forecast`             | Forecasted QCEW by cell                             |
-| `provider_bias_stability` | Which payroll providers have more stable bias       |
-
-# Appendix A: Summary Release Comparison
-
-| Release | Scope               | Multi-Payroll Provider | Birth/Death  | Hierarchy    | Dual + MinT | QCEW           | Time-Varying Bias |
-|---------|----------|---------|---------|----------|---------|---------|---------|
-| 1       | National            | **Yes**                | No           | ---          | No          | No             | No                |
-| 2       | National            | Yes                    | **Yes**      | ---          | No          | Lagged         | No                |
-| 3       | Geo × Supersector   | Yes                    | Yes (cell)   | Exchangeable | **Yes**     | Lagged         | No                |
-| 4       | State × Supersector | Yes                    | Yes (nested) | **Nested**   | Yes         | Lagged         | No                |
-| 5       | State × Supersector | Yes                    | Yes (nested) | Nested       | Yes         | **Forecasted** | **Yes**           |
-
-# Appendix B: Multi-Payroll Provider Design Rationale
-
-## Why Multi-Payroll Provider from the Start?
-
-1.  **No retrofitting:** Adding payroll providers later requires restructuring; building it in from Release 1 is cleaner.
-
-2.  **Graceful degradation:** With one payroll provider, hierarchical priors collapse to weakly informative; the framework works but doesn't overcomplicate.
-
-3.  **Immediate benefits:** Even with one payroll provider, the framework reveals payroll provider-specific signal quality metrics.
-
-4.  **Payroll Provider comparison:** When multiple payroll providers exist, the model automatically learns relative strengths by cell/industry.
-
-## Payroll Provider × Cell Interaction
-
-The decomposition $\alpha_{p,j} = \alpha^{prov}_p + \alpha^{cell}_j + \alpha^{prov \times ind}_{p,s(j)} + \alpha^{resid}_{p,j}$ captures:
-
--   **Payroll Provider main effect:** Some payroll providers are systematically biased
--   **Cell main effect:** Some cells are harder to estimate for all payroll providers
--   **Payroll Provider × industry:** Some payroll providers specialize in certain industries
--   **Residual:** Unexplained payroll provider-cell variation
-
-## Combining Multiple Payroll Provider Signals
-
-For a given cell j, the model combines signals from all payroll providers observing that cell via precision weighting. Payroll Providers with lower noise (higher $\beta_p$, lower $\sigma_{p,j}$) receive more weight.
-
-# Appendix C: Implementation Notes {#appendix-c-implementation-notes-1}
-
-## Non-Centered Parameterization
-
-Essential for sparse cells and payroll providers with limited coverage:
-
-    # Non-centered (recommended)
-    α̃_{p,j} ~ N(0, 1)
-    α_{p,j} = μ_α + τ_α × α̃_{p,j}
-
-## Computational Scaling
-
-| Release | Approx. Parameters                    | Typical Runtime |
-|---------|---------------------------------------|-----------------|
-| 1       | ~10 × P                              | Minutes         |
-| 2       | ~15 × P                              | Minutes         |
-| 3       | ~50 + 10×P + 5×J + P×J               | 30-60 min       |
-| 4       | ~100 + 10×P + hierarchy + P×J        | 1-2 hours       |
-| 5       | Release 4 + T×P×J (bias trajectories) | 3-6 hours       |
-
-P = number of payroll providers, J = number of cells, T = time periods
+-   Vintage-aware backtest RMSE against CES first/second/final prints (the canonical evaluation),
+    scored at each information regime (e.g. T−12/9/6/3/1); LOO-CV is treated as a data-quality audit,
+    not model evaluation.
+-   Coverage of 80%/95% credible intervals.
+-   Comparison to naive baselines (random walk on CES) as a sanity floor, and — once added (Phase A5)
+    — to ADP and consensus-median competitors at each regime.
+-   Birth/death estimates vs. realized QCEW birth/death (with lag).
+-   Per-provider signal-quality and bias rankings.
+
+### Limitations (of the national model)
+
+-   National-level only — no geographic or industry decomposition (Part II).
+-   Birth/death does not capture industry heterogeneity.
+-   Provider bias is time-invariant (time-varying bias is Release 5).
+-   Provider pooling is the single-provider collapse until the hierarchy is activated (§7).
+
+---
+
+# PART II — PLANNED EXTENSIONS (not implemented)
+
+> The following releases are **design sketches, not built code.** They map to the port plan's Phase B
+> (`plans/0-port_and_staged_plan.md`): B1 supersector narrative, B2 forecasted QCEW + time-varying
+> provider bias, B3 MinT reconciliation + production hardening. Do not treat the equations below as a
+> description of `nfp-model`. Several Phase-B strategic questions (target = first print vs.
+> benchmark-informed truth; consumer of the output; whether the banked model beats consensus/ADP)
+> are to be resolved before this work begins.
+>
+> Note: the existing 44-cell (11 supersector × 4 region) QCEW-weighted **compositing** lives in the
+> **data** layer (`nfp_ingest/compositing.py`) and collapses cell-level provider data into a single
+> national series *before* it reaches the model. It is a representativeness correction, **not** the
+> cell-level Bayesian model described below.
+
+## Release 3 (planned): Cell-Level Estimation with Dual Framework and MinT
+
+**Objective.** Geographic × industry (cell) decomposition with coherent national alignment, retaining
+birth/death and multi-provider integration.
+
+**Key additions.**
+
+-   Cell-level latent states $\mu^{cont}_{j,t}$ (geo unit × supersector) alongside an **independent
+    national state** $\mu^{nat}_t$ informed by CES (dual estimation).
+-   Provider × cell parameters with exchangeable hierarchical shrinkage:
+    $\alpha_{p,j} = \alpha^{prov}_p + \alpha^{cell}_j + \alpha^{resid}_{p,j}$, and likewise for the
+    loading $\beta_{p,j}$ and a log-additive noise decomposition.
+-   Cell-level birth/death with exchangeable industry effects.
+-   A national-vs-sum-of-cells discrepancy state $\delta_t$ (random walk).
+-   Cell-level QCEW observations.
+
+**MinT reconciliation.** With base forecasts $\hat y_t = [\hat\mu_{1,t},\dots,\hat\mu_{J,t},\hat\mu^{nat}_t]'$,
+reconciled forecasts $\tilde y_t = S(S'W^{-1}S)^{-1}S'W^{-1}\hat y_t$ with $W$ from historical forecast
+errors, enforcing $\sum_j w_j \tilde\mu_{j,t} + \delta_t = \tilde\mu^{nat}_t$.
+
+## Release 4 (planned): Nested Hierarchical Structure
+
+**Objective.** Exploit the nesting of geography (region → division → state) and industry
+(domain → supersector) for finer granularity without overfitting.
+
+**Key additions.** Replace exchangeable cell priors with nested random effects; bias and loading
+decompose into geographic, industry, provider, provider×industry, and residual components; birth/death
+intensity follows the nested industry hierarchy. Example bias decomposition:
+
+$$\alpha_{p,j} = \alpha^{prov}_p + \alpha^{geo}_{g(j)} + \alpha^{ind}_{s(j)} + \alpha^{prov\times ind}_{p,s(j)} + \alpha^{resid}_{p,j}$$
+
+with $\alpha^{geo} = \alpha^{region} + \alpha^{div|region} + \alpha^{state|div}$ and
+$\alpha^{ind} = \alpha^{domain} + \alpha^{supersector|domain}$, each level given its own Half-Normal
+variance-component prior.
+
+## Release 5 (planned): QCEW Conditioning and Time-Varying Bias
+
+**Objective.** Let provider bias evolve over time with QCEW error-correction, and forecast QCEW to the
+present to tighten conditioning during the 5–6 month publication lag.
+
+**Key additions.**
+
+-   Time-varying bias with RW1 dynamics and QCEW error-correction:
+    $\alpha_{p,j,t} = \alpha_{p,j,t-1} + \omega_{p,j,t} - \kappa_p\,d_{p,j,t-L}$, where $d$ is the
+    discrepancy vs. QCEW at lag $L$ and $\kappa_p \sim \text{Beta}(3,3)$ is a provider-specific
+    error-correction speed.
+-   A QCEW forecast model (location quotients + leading indicators) producing
+    $\hat y^{QCEW}_{j,t}$, which then enters as an explicitly-noisier observation for real-time
+    conditioning.
+-   The model **conditions on** QCEW (a high-precision observation) rather than benchmarking
+    (constraining sums) — consistent with the national model's treatment in Part I.
+
+---
+
+# Appendix A: Implemented vs. Planned — Capability Summary
+
+| Release | Scope | Multi-provider | Birth/Death | Seasonal | Hierarchy | Dual + MinT | QCEW | Time-varying bias | Status |
+|---|---|---|---|---|---|---|---|---|---|
+| 1–2 | National | Yes (pooling planned) | Yes (structural) | **Yes (Fourier)** | — | No | Lagged (Student-t, tiered) | No | **Implemented** |
+| 3 | Geo × Supersector | Yes | Yes (cell) | Yes | Exchangeable | **Yes** | Lagged (cell) | No | Planned |
+| 4 | State × Supersector | Yes | Yes (nested) | Yes | **Nested** | Yes | Lagged (cell) | No | Planned |
+| 5 | State × Supersector | Yes | Yes (nested) | Yes | Nested | Yes | **Forecasted** | **Yes** | Planned |
+
+Two features of the implemented model that the original staged plan omitted: an **annually-evolving
+Fourier seasonal** with an explicit SA/NSA decomposition, and a **CES observation equation with bias,
+loading, and vintage-indexed noise** (CES is not treated as a direct readout of latent truth).
+
+# Appendix B: Multi-Provider Design Rationale
+
+1.  **No retrofitting.** Adding providers later requires restructuring; building the measurement-error
+    framework for it from the start is cleaner.
+2.  **Graceful degradation.** With one provider the hierarchical priors collapse to weakly-informative
+    per-provider priors (the current implemented form); the framework works without overcomplicating.
+3.  **Immediate diagnostics.** Even with one provider, the model exposes provider-specific signal
+    quality ($\lambda_p$) and bias ($\alpha_p$).
+4.  **Provider comparison.** With multiple providers, the hierarchy automatically learns relative
+    strengths; at the cell level (Release 3+) the
+    $\alpha_{p,j} = \alpha^{prov}_p + \alpha^{cell}_j + \alpha^{prov\times ind}_{p,s(j)} + \alpha^{resid}_{p,j}$
+    decomposition separates provider main effects, cell difficulty, provider×industry specialization,
+    and residual.
+
+For a given target, signals from multiple providers combine via precision weighting: providers with
+higher loading and lower noise receive more weight.
+
+# Appendix C: Implementation Notes
+
+## Non-centered parameterization
+
+The implemented model is non-centered throughout — the latent AR(1) (`eps_g` $\sim N(0,1)$ scaled by
+$\sigma_g$ around the era mean), the Fourier GRW (`fourier_z` $\sim N(0,1)$ scaled by the per-harmonic
+innovation), and the birth/death innovation (`xi_bd` $\sim N(0,1)$ scaled by $\sigma_{BD}$). The same
+non-centering is essential for sparse cells and providers in Part II:
+
+```
+# Non-centered (recommended)
+α̃_{p,j} ~ N(0, 1)
+α_{p,j} = μ_α + τ_α × α̃_{p,j}
+```
+
+The latent parametrization uses the **stationary SD** $\tau$ with $\sigma_g = \tau\sqrt{1-\phi^2}$
+specifically to break the $\phi$–$\sigma$ ridge that a direct $(\phi, \sigma)$ parametrization
+induces.
+
+## Computational scaling
+
+| Release | Approx. parameters | Typical runtime |
+|---|---|---|
+| 1–2 (implemented) | latent path $T$ + seasonal $2K\times n_{yr}$ + BD path $T$ + $\mathcal{O}(10)$ scalars + per-provider $\mathcal{O}(3)\times P$ | Minutes (CPU); the batched vmap path fits an as-of grid in one program (GPU is the speed lever) |
+| 3 | $\sim 50 + 10P + 5J + P\times J$ | 30–60 min |
+| 4 | $\sim 100 + 10P + \text{hierarchy} + P\times J$ | 1–2 hours |
+| 5 | Release 4 $+\ T\times P\times J$ (bias trajectories) | 3–6 hours |
+
+$P$ = number of providers, $J$ = number of cells, $T$ = time periods, $K$ = Fourier harmonics ($=4$),
+$n_{yr}$ = number of years in the sample.

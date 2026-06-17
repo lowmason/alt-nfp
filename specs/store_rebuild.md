@@ -165,14 +165,23 @@ Layer-1 + `panel_adapter` Layer-2) works unchanged.
   (stamps misalign across the months being differenced,
   `ces_growth_convention.md` §4c). The store commits to neither growth form (§6);
   it stores levels.
-- **QCEW:** carries its **own** vintage structure — `revision 0-4` with
-  quarter-dependent depth (**Q1=4, Q2=3, Q3=2, Q4=1**), a distinct `vintage_date`
-  per `(ref_date, revision)`, and `benchmark_revision = 0` always (QCEW has no
-  annual benchmark). The crosswalk sum **never crosses a QCEW vintage** — mixing
-  vintages inside one aggregate would corrupt the level/growth. The concrete
-  `vintage_date` value for each `(ref_date, revision)` is the QCEW quarterly
-  publication date, from `nfp_lookups.revision_schedules.get_qcew_vintage_date`
-  (exact from the calendar when available, else the lag-based approximation).
+- **QCEW — single-vintage (`revision = 0`) per industry.** BLS publishes QCEW
+  revision history **only at the national total** (`qcew-revisions.csv` is
+  area×field with no industry breakdown — verified 2026-06-15), and the open-data
+  API serves only current values, so per-industry rev-1..4 levels **do not exist
+  as a public source**. Each per-industry cell is therefore stored as a single
+  `revision = 0` row (`benchmark_revision = 0` always — QCEW has no annual
+  benchmark), `vintage_date` = the QCEW quarterly publication date for that
+  ref-quarter from `nfp_lookups.revision_schedules.get_qcew_vintage_date` (exact
+  from the calendar when available, else the lag-based approximation). The stored
+  level is the current (latest-revised) value; QCEW **revision uncertainty is
+  carried model-side** by the per-quarter noise schedule (`QCEW_REVISIONS` noise
+  multipliers; nominal depth Q1=4/Q2=3/Q3=2/Q4=1), **not** as stored revision rows
+  — a deliberate accepted trade-off (**decision A**, 2026-06-15; the per-industry
+  rev-0 row holds a benchmarked value tagged at its initial publication date, a
+  small accepted as-of lookahead). See `store_rebuild_acquire.md`. The crosswalk
+  sum still **never crosses a QCEW vintage** (here trivially one rev-0 vintage per
+  ref-quarter).
 - **Publication lag.** QCEW lands ~5–6 months after the reference quarter; the
   reconstructed series inherits QCEW's `vintage_date`, so as-of knowability is
   honored automatically. The `(2,1)` CES benchmark rows carry the February
@@ -249,6 +258,20 @@ all-sizes), `small` (codes `'1'`–`'3'`), `medium` (codes `'1'`–`'5'`), and `
 stored value). `geographic_type == 'national'` for now. Size-class rows inherit
 their industry parent's QCEW `(rev, vintage_date)` and `ownership='private'`.
 
+**The `total`/`'0'` headline carries the area-levels total, not the bucket sum.**
+The `small`/`medium`/`large` buckets are sums over native `size_code`s with
+suppressed (`disclosure_code='N'`) cells dropped, so a bucket-sum `'0'` would
+*undercount* the published, un-suppressed all-sizes total — unevenly per
+industry, which also breaks §3 additive closure (`05 = 06 + 08`) at Q1. The
+build therefore **overrides the `'0'` row's value to the area-levels total**
+(the un-suppressed agglvl 13–16 figure the area endpoint publishes), keeping the
+row's `(rev, vintage_date)` and size metadata untouched. The buckets legitimately
+need **not** sum to `'0'` under suppression — exactly how BLS presents the two
+products (un-suppressed total; suppressed size detail). Area totals nest by BLS
+construction, so this restores additive closure at Q1. (Compose-layer override in
+`compose_rebuild_panel`; the size builder still emits the bucket-sum as the
+pre-override value / fallback when the area endpoint lacks the series.)
+
 The **provider store** (separate repo/object-store) bins its microdata to the
 *same* scheme (March/third-month employment) so the two line up.
 
@@ -273,7 +296,11 @@ The **provider store** (separate repo/object-store) bins its microdata to the
    never source or join `small`/`medium` codes directly from raw QCEW. On Q1 the
    all-sizes level is the `total`/`'0'` row **only** — emit **no** null-size row
    for Q1 (else it double-counts under §7's `IS NULL OR size_class_code='0'`
-   selector).
+   selector). **Then override the `'0'` value to the area-levels total** (§8): the
+   bucket-sum drops suppressed cells and would undercount the published headline,
+   so `compose_rebuild_panel` replaces the `'0'` employment with the area-endpoint
+   all-sizes figure (bucket-sum kept only as the fallback when the area row is
+   absent).
 4. **Write** both to `NFP_STORE_URI=s3://alt-nfp/store-rebuild` (the canonical guard
    refuses `…/store`; `is_canonical_store` from the audit branch).
 
@@ -292,6 +319,9 @@ supersector `55` (Financial activities) vs sector `55` (Management of companies)
 - **History consistency:** rebuilt `source=ces` prints match the current store's
   rows where both exist (≤2023, the known-good core) — for the private hierarchy
   **and** the `00` anchor. The four-combo `(rev,bmr)` population must reproduce.
+  *(Recalibrated 2026-06-16 — see the implementation note below: HARD only on the
+  benchmark-**free** `(0,0)`/`(1,0)` prints; the benchmark cohorts are SOFT, with
+  the HARD rail moved to the new `gate_ces_fidelity`.)*
 - **Gap fill — priority-ordered:**
   - *Hard gate:* `05` + the supersectors current to the published frontier (what
     the nowcast and the supersector narrative read today), and the 2024-12 /
@@ -309,6 +339,23 @@ supersector `55` (Financial activities) vs sector `55` (Management of companies)
   gate is operational; do not hardcode equality).
 - **Vintage integrity:** `_validate_censored_selection`-style fail-fast checks pass
   on an as-of slice (no dups, no cross-vintage sums, no nulls/zeros).
+
+**Implementation note (2026-06-16) — history recalibration + `gate_ces_fidelity`.**
+Run against the real stores, the history gate's original premise ("rebuilt
+reproduces the legacy store to 0.5k on all four `(rev,bmr)` cohorts") proved wrong
+for the **benchmark-bearing** cohorts. A primary-source cross-check against the raw
+`cesvinall` triangle showed the rebuilt `(2,0)` *and* `(2,1)` reproduce the literal
+published cells **to the unit** (including the per-benchmark `(2,1)` fan-out), while
+the **legacy store deviates** — its `(2,1)` mis-stamped the *latest* benchmark value
+under the *earliest* `vintage_date` (a lookahead contamination from the old
+benchmark splice). The benchmark-**free** `(0,0)`/`(1,0)` prints reproduce the legacy
+store **exactly** (0/2520 diverge). So the gate now keys the verdict by cohort: HARD
+on `(0,0)`/`(1,0)`-vs-legacy + the four-combo population; SOFT on `(2,0)`/`(2,1)`-vs-legacy
+(the rebuild correctly diverges from a buggy reference). The HARD accuracy rail on
+the benchmark cohorts moves to a new **`gate_ces_fidelity`** (rebuilt CES `==` a fresh
+`build_ces_panel(cesvinall)`, to the unit) — the CES analogue of `gate_qcew_fidelity`.
+This mirrors the reconstruction-gate recalibration: a §10 premise that contradicted
+verified-correct rebuilt data was corrected against ground truth, not the data.
 
 **Promotion:** once gates pass, cut over deliberately (repoint `NFP_STORE_URI` to
 the validated prefix, or copy scratch→canonical with the explicit
@@ -348,8 +395,12 @@ None outstanding. Resolved this round:
 - **`00` total-nonfarm kept as a stored-not-modeled anchor** (reverses the earlier
   "no need to store 00" — needed for the nowcast-vs-actual comparison).
 - **Nested additive hierarchy** (§3, §6), NSA-required; sectors future-facing.
+- **QCEW per-industry is single-vintage (`rev=0`)** — **decision A** (2026-06-15):
+  BLS publishes no per-industry revision history, so per-industry QCEW is stored
+  rev-0 (current value) and revision uncertainty stays model-side
+  (`QCEW_REVISIONS` noise). Only the national total has rev 0–4. (Rejected: B,
+  proportional synthesis from total-level revision ratios.)
 - Size cross-product keyed on `industry_code` (§8); all-sizes selection convention
-  (§7); QCEW `vintage_date` source (§5); reconstruction-accuracy tolerance deferred
-  (§10).
+  (§7); reconstruction-accuracy tolerance deferred (§10).
 
 The spec is ready for an implementation plan.

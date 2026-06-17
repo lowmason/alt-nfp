@@ -39,7 +39,12 @@ open-ended (no upper limit).
 
 - `'large'` codes are the **native QCEW `size_code` values** — join directly to QCEW
   size-class files on these.
-- `'total'` code `'0'` is the all-sizes total (sum over every native code).
+- `'total'` code `'0'` is the all-sizes total. As a *scheme* it is the sum over
+  every native code; but in the **rebuilt store** the `'0'` headline is overridden
+  to the published **area-levels** total, because the native-code sum drops
+  suppressed (`disclosure_code='N'`) cells and would undercount the un-suppressed
+  headline (see `store_rebuild.md` §8). The buckets need not sum to `'0'` under
+  suppression.
 - `'small'` / `'medium'` codes are **sequential aggregation indices**, not QCEW codes:
   the same code string means different ranges under different types, so always key by
   type first.

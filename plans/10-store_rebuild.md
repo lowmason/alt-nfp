@@ -12,21 +12,22 @@
 
 ------------------------------------------------------------------------
 
-## Status (2026-06-15)
+## Status (2026-06-16)
 
-Pure-code, locally-verifiable tasks are done; data-dependent tasks (BLS network / store creds) await the maintainer's local runs.
+Builder + gate **code** is complete (T0–T6), and **T6 acceptance is DONE — all gates green against the rebuilt store, with the Q1 defect FIXED and verified.** The §7 **Q1 all-sizes undercount** found in the first run (rebuilt Q1 headline light vs the published un-suppressed BLS area total) is resolved by a value-override in `compose_rebuild_panel` (the Q1 `'0'` headline now carries the area-levels total; metadata/vintage untouched). **Rebuilt to scratch with the fix + all 7 `real_store` gates re-run green** (2026-06-16): `qcew_fidelity` un-scoped to **all four quarters** reproduces the area endpoint to the unit (the former Q1 divergences are gone — 2024-Q1 15→0, 2025-Q1 75→0; 2025-Q1 `total/05` corrected from 106.4M / −18% to the published 129.7M exactly), and `reconstruction`/`ces_fidelity`/`history`/`gap_fill`/`q1_continuity`/`vintage_integrity` all stay green (the override moved March residuals toward the band without overshooting positive). Two §10 gate premises (history, reconstruction) were recalibrated against verified-correct rebuilt data with primary-source evidence (legitimate; see T6). **T7 (re-baseline goldens) is BLOCKED**, but for a *different* reason than the Q1 defect: `build_model_data` against the rebuilt store is degenerate (0 QCEW observations vs 131 against canonical) because the model-data layer still reads the canonical SA schema and has **not** been adapted to the rebuilt NSA/ownership store. T7 + T8 are gated on that adaptation — the **deferred** SA `00` composition (spec §11), out of plans/10's scope. See T7.
 
 | Task | State | Notes |
 |---|---|---|
-| **T0** Acquisition spike | ⏳ **maintainer** | Needs BLS egress (blocked in the cloud env). Walkthrough handed off; surfaced two acquire gaps (below). |
+| **T0** Acquisition spike | ✅ **resolved** (local, 2026-06-15) | 3 unknowns resolved — [`store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md). `cesvinall` reconstructs `(rev,bmr)` (verified vs store); QCEW size + levels via API slices. |
+| **T0.5** QCEW vintaging | ✅ **resolved (A)** | Per-industry QCEW has **no** published revision history — rev-0 only (verified: only national `00` has rev 0–4; `qcew-revisions.csv` & the BLS revisions page are total-level). **Decision A** (2026-06-15): store rev-0, carry revision uncertainty model-side (`QCEW_REVISIONS` noise). No reconstruction. |
 | **T1** Schema & grammar | ✅ **done** (`bc932ba`) | ownership axis, `national` retired, taxonomy + remap, `55` two-level, schema dedup (IND-XC-3), tolerant reader. |
-| **T2** CES builder | ⛔ **blocked on T0** | `(2,1)`-source question (bulk flat file vs triangular) is a T0 unknown. |
+| **T2** CES builder | ✅ **done** (`e662329`) | `nfp_ingest.ces_builder.build_ces_panel`: `cesvinall` → `(0,0)/(1,0)/(2,0)` + **per-benchmark** `(2,1)` (value+date same benchmark, no lookahead), ownership taxonomy, pure `as_of`. Spec + code-quality reviews passed; 10 tests, store anchors verified (Jun-2023 `00`). |
 | **T3** QCEW crosswalk | ✅ **done** (`f399cc5`) | `qcew_crosswalk.build_qcew_panel`; agglvl 13/14/15/16 pull tables in lookups; synthetic tests green. |
 | **T4** Size-class cross-product | ✅ **done** (`a28de4e`) | `size_class.build_size_class_panel` + `all_sizes_predicate`; `size_classes.py` scheme; `size_class_*` schema cols. |
-| **T5** Build orchestration | ⛔ **blocked on T2** | Canonical guard already exists (`build_store.is_canonical_store`). Acquire fix owed (below). |
-| **T6** Acceptance-gate validator | ⬜ depends T5 | Gate *functions* are T0-independent and can be pre-built on synthetic frames. |
-| **T7** Re-baseline goldens | ⬜ depends T6 | Needs scratch store. |
-| **T8** Promotion | ⬜ depends T6/T7 + GO | Needs store + maintainer approval. |
+| **T5** Build orchestration | ✅ **done** (`fa5168a`; run 2026-06-16) | Compose + guarded write + `build-rebuild` CLI + httpx API-slice acquire (area per-qtr + size per-Q1; size crosswalk reuses `build_qcew_panel` via agglvl −10 remap; drops `disclosure_code='N'`; excludes the 61–64 dup). **Full rebuild ran to scratch** (CES 16,408 / QCEW 17,880 rows, 2017+) and is verified faithful to published QCEW (Other Services 80 == published QCEW NAICS 81 to the unit); canonical untouched. |
+| **T6** Acceptance-gate validator | ✅ **DONE — all gates green, Q1 defect fixed** | 6 gates + new `gate_ces_fidelity` + 65 unit tests; 7 `real_store` wrappers pass against the rebuilt scratch (+ canonical for history). History gate **recalibrated** (benchmark-free vs legacy HARD; benchmark cohorts SOFT) after cesvinall cross-check proved the rebuild faithful and the legacy splice buggy; `gate_ces_fidelity` is the new HARD CES accuracy rail (rebuilt==cesvinall). **§7 Q1 all-sizes undercount FIXED** (compose value-override → Q1 `'0'` = area total); `qcew_fidelity` un-scoped to **all four quarters**, 0 divergences after the fix-rebuild. |
+| **T7** Re-baseline goldens | ⛔ **blocked — model-data not adapted to rebuilt store** | `build_model_data(rebuilt)` is degenerate (0 QCEW obs vs 131 canonical); gated on the deferred SA `00` composition (§11), out of scope. See T7. |
+| **T8** Promotion | ⛔ depends T7 + GO | Blocked behind T7; needs the model to consume the rebuilt store before canonical cutover. |
 
 Full non-network suite green (513 passed; only the 2 pre-existing `claims`/`jolts` indicator env-failures, unrelated to the rebuild). `ruff check .` clean.
 
@@ -46,14 +47,38 @@ Full non-network suite green (513 passed; only the 2 pre-existing `claims`/`jolt
 
 ------------------------------------------------------------------------
 
-## T0 — Acquisition spike (resolve unknowns before building) `[blocking, read-only]`
+## T0 — Acquisition spike — ✅ DONE (2026-06-15) → [`specs/store_rebuild_acquire.md`](../specs/store_rebuild_acquire.md)
 
-Three unknowns can invalidate later tasks; resolve them first, read-only.
+All three unknowns resolved (read-only: cached `cesvinall` + live QCEW API slices, cross-checked vs the store):
 
--   [ ] **CES triangular coverage.** Confirm `cesvinall` carries (a) the sub-supersector private codes (`06`/`08`/all sectors) and (b) the per-ref-month benchmark `(2,1)` rows for 2017+, i.e. that the bulk benchmarked file (not triangular) is the right source for `(2,1)` per spec §4.1. Sample-verify against the known anchors (Dec-25 `(2,1)`=158,497; Sep-25 `(2,1)`=158,548 — national `00` from `ces_growth_convention.md`).
--   [ ] **QCEW size-class file coverage.** Confirm the QCEW Q1 size-class files carry native `size_code` 1–9 for the private CES codes the crosswalk targets, national, 2017+.
--   [ ] **NAICS vintage.** Confirm the NAICS-2022 crosswalk is acceptable for all of 2017+ (spec defers vintage-aware crosswalks; flag if any year breaks).
--   [ ] **Acceptance:** a short findings note (append to `store_audit_findings.md` or a T0 scratch doc) answering all three, with go/no-go for each downstream task.
+-   [x] **CES triangular coverage** — GO. 113 NSA codes (full hierarchy). `cesvinall` reconstructs `(0,0)/(1,0)/(2,0)/(2,1)` by itself; verified vs store to the unit (Jun-2023 `00` NSA = 156963/156945/156905/156701). `(2,1)` is **per-benchmark** (each Feb re-basing); the "bulk benchmarked file" is just the triangle's latest vintage row.
+-   [x] **QCEW size-class coverage** — GO. Size endpoint `/{year}/1/size/{1-9}.csv` (Q1 only), national = private (`own_code=5`), `size_code` 1–9, agglvls `{21–28}`, includes supersector pulls + sectors.
+-   [x] **NAICS vintage** — GO (low risk). NAICS-2022-for-all OK at supersector/sector aggregation; spot-check 3-digit durable/nondurable.
+-   [x] **Acceptance note** written: `specs/store_rebuild_acquire.md`, with go/no-go per task.
+
+**Bonus:** the QCEW acquire can use targeted API slices (US000 area per-qtr carries agglvl 13/16; size per-Q1) instead of the 280 MB singlefiles.
+
+## T0.5 — QCEW historical vintaging — ✅ RESOLVED (decision A, 2026-06-15)
+
+Investigation outcome (corrects the earlier "reference reconstructs per-industry
+vintages" read): **per-industry QCEW vintages do not exist.** BLS publishes
+revision history **only at the national total** — `qcew-revisions.csv` and the
+whole `bls.gov/cew/revisions/` page are area×field with no industry/size breakdown
+(verified by fetch), the open-data API serves current values only, and historical
+singlefiles are overwritten. In the existing store this shows up cleanly: only
+`industry_code='00'` carries rev 0–4; every per-industry private code is rev-0.
+The `qcew_vintages.parquet` / `load_qcew_vintages` / `ingest_qcew` path that would
+have held per-industry revisions is a **dead stub** — nothing writes it, no live
+callers. The live pipeline (`nfp_vintages/processing/qcew_bulk.py`) makes
+per-industry rev-0 (bulk) + national-`00` rev 0–4 (revisions CSV).
+
+-   [x] **Decision A** — store per-industry QCEW as a single `revision=0` row
+    (current value); carry revision uncertainty **model-side** via the
+    `QCEW_REVISIONS` noise schedule. No per-industry reconstruction.
+    (Rejected **B**: proportional synthesis from total-level revision ratios —
+    manufactures data BLS doesn't publish, assumes uniform per-industry revision.)
+    Spec §5 corrected to match. T5's QCEW path is therefore just **acquire current
+    (API slices) → T3 crosswalk → rev-0**; see `store_rebuild_acquire.md`.
 
 ------------------------------------------------------------------------
 
@@ -67,14 +92,18 @@ Three unknowns can invalidate later tasks; resolve them first, read-only.
 
 ------------------------------------------------------------------------
 
-## T2 — CES builder (`nfp-ingest`) `[depends: T1]`
+## T2 — CES builder (`nfp-ingest`) `[depends: T1]` — ✅ DONE (`e662329`)
 
-Implement spec §4.1's provenance source table.
+`nfp_ingest.ces_builder.build_ces_panel(cesvinall_dir=None, *, as_of=None)`. Note:
+T0 showed `cesvinall` alone reconstructs every `(rev,bmr)` — including the
+benchmark `(2,1)` (the triangle's February column-steps) — so the builder is
+**triangle-sourced** (no separate bulk file), and `(2,1)` is **per-benchmark**
+(decision this session) rather than the spec's original single-bulk row.
 
--   [ ] Triangular `cesvinall` → real-time prints `(rev∈{0,1,2}, bmr=0)`, tagged by ordinal; private hierarchy `ownership='private'`, the `00` series `ownership='total'`.
--   [ ] Bulk → benchmarked history as `(rev=2, bmr=1)` at the February benchmark `vintage_date`; the un-benchmarked tail as `(rev∈{0,1,2}, bmr=0)`. Precedence: bulk wins for the tail, triangular for established history.
--   [ ] Never write `07`/`90`–`93`. Day-12 `ref_date`; NSA; thousands.
--   [ ] **Acceptance:** tests reproduce the four-combo `(rev,bmr)` population and the known anchors (Dec-25 `(2,1)`=158,497; a post-benchmark second print stays `(1,0)`, e.g. Dec-2024 rev-1=158,926). `tmp_path`/synthetic only.
+-   [x] Triangular `cesvinall` → `(0,0)/(1,0)/(2,0)` prints, `bmr=0`, ownership taxonomy (`00`→`total/total`, `05`→`total/private`, `06/08`→`domain/private`, supersectors/sectors→`private`); `07/90–93` dropped.
+-   [x] Per-benchmark `(2,1)`: one row per distinct annual-benchmark basis (value + `vintage_date` both from the same `(Y,1)` release — no lookahead; unchanged later benchmarks skipped). Pure `as_of` frontier filter.
+-   [x] Day-12 `ref_date`; NSA; thousands; 2017+; `nfp_lookups`-only imports; no store I/O.
+-   [x] **Acceptance:** 10 tests (synthetic + `as_of` gating + dedup) + offline `cesvinall` cross-check — Jun-2023 `00` NSA: prints `156963/156945/156905`, `(2,1)`={`156842`@2024-02-02, `156701`@2025-02-07}. Spec-compliance + code-quality reviews passed.
 
 ------------------------------------------------------------------------
 
@@ -98,30 +127,49 @@ Spec §8.
 
 ------------------------------------------------------------------------
 
-## T5 — Build orchestration → scratch (`nfp-vintages` CLI) `[depends: T2, T3, T4]`
+## T5 — Build orchestration → scratch (`nfp-vintages` CLI) `[depends: T2, T3, T4]` — ✅ DONE (`fa5168a`; run 2026-06-16)
 
--   [ ] Wire acquire → CES (T2) → QCEW (T3) → size-class (T4) → write, all to `NFP_STORE_URI=s3://alt-nfp/store-rebuild`. 2017+. **Acquire fix owed:** widen `download_qcew_bulk._WANTED_AGGLVL` to add agglvl `13`/`16` + the QCEW size agglvls, and keep `size_code` in `_KEEP_COLUMNS` (current filter strips all three; confirm exact size agglvls via T0). **Compose glue (T0-independent, unit-testable now):** for Q1 use the T4 size cross-product (incl. `total`/`'0'` all-sizes); for Q2–Q4 use the T3 null-size rows — do **not** also emit a Q1 null-size row (§7).
--   [ ] Enforce the `is_canonical_store` guard at the write boundary (refuse `…/store` without `--allow-canonical`). *(Guard already lives in `build_store`.)*
--   [ ] **Acceptance:** a dry-run / small-window build to scratch succeeds; the guard test proves a canonical target is refused.
-
-------------------------------------------------------------------------
-
-## T6 — Acceptance-gate validator (§10) `[depends: T5]`
-
-Implement the four gates; key on `industry_type + industry_code + ownership + (rev,bmr) + values` using the T1 remap (so code `55` stays unambiguous).
-
--   [ ] **History consistency:** rebuilt `source=ces` matches the current store ≤2023 (private hierarchy + `00` anchor); four-combo `(rev,bmr)` reproduces.
--   [ ] **Gap fill (priority):** *hard* — `05` + supersectors current to frontier, 2024-12/2025-12 `(2,1)` complete; *reconstruct-and-validate* — `06`/`08`/sectors refilled, additive nesting validated where present (missing sector-month does not block).
--   [ ] **Reconstruction accuracy:** QCEW vs published CES at benchmark months / annual averages; `81/80/08/05` residual small and **non-negative**. **Set the numeric `|residual|` tolerance here** (owed by this plan per §10) — choose and justify a bound; do not require exact equality.
--   [ ] **Vintage integrity:** `_validate_censored_selection`-style checks on an as-of slice (no dups, no cross-vintage sums, no nulls/zeros).
--   [ ] **Acceptance:** validator runs against the scratch store and reports pass/fail per gate; gates are tests, not prose.
+-   [x] **Compose glue (done, unit-tested):** `compose_rebuild_panel(ces, qcew_levels, size=None)` unions the three panels via `diagonal_relaxed` (null-fills the size cols `build_qcew_panel` omits) and enforces §7: for Q1, drop a `qcew_levels` null-size row **only** where the size frame has a `total`/`'0'` (all-sizes) row for that 6-col series identity (`geo_type, geo_code, ownership, industry_type, industry_code, ref_date`) — a conditional anti-join, **not** a month filter, so partial-coverage industries keep their null-size level. Q2–Q4 use the T3 null-size rows. Tests cover no-double-emit (exactly one `all_sizes_predicate` row), partial coverage (both branches), and non-Q1 never dropped.
+-   [x] **Guard (done):** `write_rebuild_store(panel, store_path=None, *, allow_canonical=False)` raises before any I/O when `is_canonical_store(store_path)` and not `allow_canonical`; mirrors `build_store`'s Hive write (untouched). Null-`vintage_date` partitions fail loud (no `v_None_None.parquet`).
+-   [x] **CLI (wired):** `alt-nfp build-rebuild [--allow-canonical]` wires `build_ces_panel()` → acquire-QCEW → acquire-size → compose → guarded write. The two acquire steps are `NotImplementedError` seams (`_acquire_qcew_levels`, `_acquire_qcew_size_native`) pointing to `store_rebuild_acquire.md`.
+-   [x] **Acquire layer (done):** httpx API-slice fetchers — `_acquire_qcew_levels` (area per-qtr `…/api/{y}/{q}/area/US000.csv`, all 4 qtrs) + `_acquire_qcew_size_native` (size per-Q1 `…/api/{y}/1/size/{1-9}.csv`), `own_code=5`, 2017+, `revision=0`, 404-tolerant. **Transport = plain httpx** (`create_client`) — `data.bls.gov` is not Akamai-fingerprinted (only www.bls.gov is); the singlefile/`_WANTED_AGGLVL` path stays untouched. Disclosure: drop `disclosure_code='N'` (withheld); the 61–64 duplicate family is excluded by the 21–28 filter.
+-   [x] **QCEW size crosswalk (done — no new pull maps needed):** the size tree = the area tree shifted **+10 agglvl** (verified live: 23=supersector…26=4-digit incl. `1133`). So `_size_raw_to_native` remaps agglvl **−10** and reuses the T3-tested `build_qcew_panel`, run **once per `size_code`** (its grouping has no size axis — a combined call would sum across size classes), then re-tags `size_code` → `native`. Suppression contained to sectors `31`/`32`/`11` (3/4-digit); hard-gate levels exact. Tests: per-size_code independence, 61–64 exclusion, disclosure null-safety, round-trip through `build_size_class_panel`.
+-   [x] **Acceptance run (done, maintainer, 2026-06-16):** `alt-nfp build-rebuild` ran to `s3://alt-nfp/store-rebuild` — CES 16,408 / QCEW 17,880 rows (2017+); structure verified (ownership axis, four `(rev,bmr)`, size cross-product, `05=06+08` exact) and **faithful to published QCEW** (Other Services `80` == published QCEW NAICS `81` to the unit @ 2024-06). Canonical untouched (guard held). Known frontier-lag: 2025-Q1 size/sector-detail tables hadn't published (SOFT-warned by the reconstruction gate; fills on the next rebuild).
 
 ------------------------------------------------------------------------
 
-## T7 — Re-baseline A1/A2 goldens `[depends: T6 passing]`
+## T6 — Acceptance-gate validator (§10) `[depends: T5]` — ✅ DONE: all gates green on the real stores (2026-06-16)
 
--   [ ] Regenerate A1 (censored panels) and A2 (`build_model_data` arrays) fixtures from the **scratch** store; update the goldens manifest. Document the divergence from the frozen reference (ownership axis, `00` anchor, NSA, QCEW-mapped) in the manifest/readme so the change is auditable, not silent.
--   [ ] **Acceptance:** A1/A2 gates green against the re-baselined fixtures; the diff vs old fixtures is explained.
+Gap-collector gates in `nfp_vintages.rebuild_gates` (+60 unit tests). Key on `industry_type + industry_code + ownership + (rev,bmr)` via the T1 remap (code `55` unambiguous). Run via the `@real_store` wrappers in `test_rebuild_gates.py::TestGatesAgainstRealStore`: `NFP_STORE_URI=s3://alt-nfp/store-rebuild` (rebuilt) and, for history, `NFP_LEGACY_STORE_URI=s3://alt-nfp/store` (legacy). **All 7 wrappers pass.**
+
+-   [x] **History consistency** (`gate_history_consistency`): **RECALIBRATED + ✅ GREEN** (dual-store). The original premise — "rebuilt reproduces the legacy store to 0.5k on all four `(rev,bmr)` cohorts" — proved wrong for the **benchmark-bearing** cohorts. Primary-source check vs `cesvinall` (2026-06-16): rebuilt `(2,0)` *and* `(2,1)` reproduce the **literal triangle cells to the unit** (incl. the per-benchmark `(2,1)` fan-out, e.g. Jun-2019 `00` = {151739@2020, 151716@2021, 151714@2023, 151713@2025}); the **legacy store deviates** there — its `(2,1)` mis-stamped the *latest* benchmark value under the *earliest* `vintage_date` (a lookahead bug). The benchmark-**free** `(0,0)`/`(1,0)` prints reproduce the legacy store **exactly** (0/2520 diverge). So: HARD on `(0,0)`/`(1,0)` vs legacy + the four-combo `(rev,bmr)` population; the `(2,0)`/`(2,1)`-vs-legacy divergence is **SOFT** (legacy splice ≠ cesvinall; the rebuild diverges *toward* ground truth).
+-   [x] **CES fidelity** (`gate_ces_fidelity`, **new**): the HARD CES accuracy rail (CES analogue of `gate_qcew_fidelity`) the history recalibration relies on — rebuilt CES `==` a fresh `build_ces_panel(cesvinall)` to the unit on the full per-vintage key, so a real benchmark-walk regression the legacy comparison no longer catches fails HERE. **✅ GREEN** against the rebuilt store.
+-   [x] **Gap fill** (`gate_gap_fill`): HARD `05`+supersectors-to-frontier + Dec `(2,1)`; SOFT additive nesting. **✅ GREEN** (0 HARD; 4 SOFT nesting drifts ≤7 jobs at the unsettled 2025 frontier). Wrapper derives `frontier_ref_date`/`dec_cohort_years` from the store.
+-   [x] **Reconstruction accuracy** (`gate_reconstruction_accuracy`): **RECALIBRATED** (`1fba229`) — per-series QCEW≤CES bands `_EXPECTED_QCEW_CES_RESIDUAL` ±`_QCEW_CES_RESIDUAL_BAND`; SOFT-warns the unsettled frontier + COVID. **✅ GREEN** (0 HARD). `specs/ces_qcew_industry.md` §8 corrected.
+    -   *Q1 continuity (T5 carry-over):* `gate_q1_continuity` — temporal-neighbour proxy; SOFT/diagnostic-only. **✅ GREEN** (SOFT surfaced).
+-   [x] **QCEW fidelity** (`gate_qcew_fidelity`): rebuilt-QCEW vs the **area endpoint** (the store's own source) to the unit. The real wrapper was broken (CSV inferred `area_fips` as i64 → choked on `"C1010"`; also fetched the wrong product, the `_qtrly_singlefile`). **Fixed**: reference = `_acquire_qcew_levels` of `/api/{y}/{q}/area/US000.csv`. **✅ GREEN over all four quarters** after the §7 Q1 fix-rebuild (the former Q1 divergences are gone — 2024-Q1 15→0, 2025-Q1 75→0).
+-   [x] **Vintage integrity** (`gate_vintage_integrity`): no dups, one vintage per series-month, no null/zero. **✅ GREEN**.
+-   [x] **Acceptance:** all 7 `real_store` wrappers pass against the rebuilt scratch (+ canonical-for-history), **`qcew_fidelity` over all four quarters**. Complete.
+
+**✅ RESOLVED — §7 Q1 all-sizes undercount (fixed + verified 2026-06-16).** The first run's store had a **Q1 all-sizes** headline (`size_class_code='0'`) that was **light vs the published, un-suppressed BLS area total**: the §7 compose substituted the size-cross-product `total/'0'` = sum of the *available* native buckets, which undercounts whenever buckets are missing (suppression **or** unpublished frontier tables). Quantified (Q1, vs the live area endpoint, `under = published − store`): settled 2017–2024 headline `total/05` max ~3.9k (0.003%) but sector `11` up to **8.5%** / sector `32` ~1% (~45k); **frontier 2025-Q1 catastrophic** — `total/05` **23.4M / ~18% too low**, supersectors `20`/`30`/`10`/`50` **81–93% under** (the partial-size-table case turned a benign "detail not yet published" into a malignant "headline 18% wrong").
+
+**Fix (Option A2 — compose value-override):** `compose_rebuild_panel` now overrides **only** the Q1 `'0'` row's *employment* to the area-levels total (left-join area on `_SERIES_IDENTITY_KEY`, `coalesce`-fallback to the bucket-sum if no area row), leaving the bucket rows + all `(rev, vintage_date)`/metadata untouched (so vintage-integrity is unchanged; area totals nest by BLS construction, so `05=06+08` additive closure is restored at Q1). 5 CI unit tests (`TestComposeQ1HeadlineCarriesAreaTotal`); specs §8/§9 + `size_classes.md` + the `gate_q1_continuity` docstring corrected; `qcew_fidelity` un-scoped to all four quarters. **Rebuilt to scratch + all 7 gates re-run green; the former Q1 divergences are eliminated** (2024-Q1 15→0; 2025-Q1 75→0, `total/05` 106.4M→129.7M = published exactly). The adversarial-review workflow's flagged risk — `gate_reconstruction_accuracy` March residual overshooting positive — did **not** materialize (still 0 HARD). The §7 fix was a peer-session hand-off; this session owned the implementation + the scratch-rebuild verification. *(The 2025-Q1 frontier lag was already noted under T5 as "fills on the next rebuild"; this finding shows it also corrupts the headline until §7 is fixed.)*
+
+------------------------------------------------------------------------
+
+## T7 — Re-baseline A1/A2 goldens `[depends: T6 passing]` — ⛔ BLOCKED (premature; gated on the deferred model-data adaptation)
+
+**Finding (2026-06-16): the rebuilt store is not yet a consumable substrate for `build_model_data`, so re-baselining A1/A2 now would pin a *degenerate* configuration.** Verified empirically (read-only, `NFP_STORE_URI=s3://alt-nfp/store-rebuild`):
+
+-   `build_panel(as_of_ref=D)` runs against the rebuilt store but yields an **NSA-only** panel (4,699 rows vs the frozen reference's 11,020) with **0 CES `00` and 0 QCEW `00` rows** — the model-data layer does not surface the rebuilt store's NSA `00` anchor / ownership hierarchy as the CES/QCEW **target** series it reads.
+-   `build_model_data(as_of=D)` therefore returns a **degenerate** dict: `qcew_obs` is shape `(0,)` (**zero** QCEW observations), `g_qcew` is all-NaN, `qcew_is_m2`/`qcew_noise_mult` empty. Only the **local-file** inputs (provider `G`, cyclical `claims_c`/`jolts_c`) are populated, because those don't come from the store. Contrast: the **canonical** store gives `qcew_obs` shape `(131,)`, `g_qcew` 131/137 non-NaN.
+
+The model-data layer still consumes the **canonical SA schema**; it has **not** been adapted to the rebuilt NSA + ownership store. That adaptation is the **deferred downstream** (spec §11: "the downstream `00` SA composition" — and the NSA→SA consumption path). **T7 (and T8) are gated on it.** Pinning A1/A2 goldens against a 0-QCEW-observation input would baseline a broken modeling path, so no fixtures were generated (also: never overwrite the frozen-reference goldens at `s3://…/golden/a1|a2` — re-baseline must target a scratch golden prefix + staging manifests, promoted *alongside* T8, to keep the parity tests on `main` intact and the diff auditable).
+
+Two divergences the original T7 note did not list, to fold in once unblocked: **2017+ history truncation** (rebuilt store starts 2017 vs `START_YEAR=2012`) and **which store validates the goldens** (generated from scratch, but the tests read `VINTAGE_STORE_PATH` = canonical until T8 — re-check `AS_OF_DATES`/`EXPECTED_FAILURE_DATES` against a 2017+ store).
+
+-   [ ] **Prereq (new):** adapt the model-data layer (`build_panel`/`panel_to_model_data`/`build_model_data`) to consume the rebuilt store — surface the `00` target (the deferred SA `00` composition from the private hierarchy), so `build_model_data` produces a non-degenerate input. **Out of plans/10's scope** (it's the deferred downstream); a separate plan owns it.
+-   [ ] Then: regenerate A1/A2 fixtures from the rebuilt store to a **scratch golden prefix** (`NFP_GOLDEN_URI`); document the divergences (ownership axis, `00` anchor, NSA, QCEW-mapped, **2017+ truncation**); A1/A2 gates green against the re-baselined fixtures with `NFP_STORE_URI` pointed at the rebuilt store; diff vs old fixtures explained.
 
 ------------------------------------------------------------------------
 
