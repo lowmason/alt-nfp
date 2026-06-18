@@ -103,7 +103,10 @@ def cmd_snapshot(root: Path) -> None:
                 "c_idx": int(c_idx),
                 "content_hash": meta["content_hash"],
                 "snapshot": str(path.relative_to(root)),
-                "first_print_change_k": fp_map.get(target),
+                # first_print is a *monthly* series keyed to month-start (day=1);
+                # ``target`` rides the model's daily axis (CES ref day, the 12th).
+                # Bucket the lookup to the month so the monthly value joins.
+                "first_print_change_k": fp_map.get(target.replace(day=1)),
                 "best_avail_change_k": (actual_index - prev_index) * idx_to_level,
             }
             _write_json(manifest_path, manifest)
