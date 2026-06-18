@@ -14,11 +14,7 @@ from datetime import date
 import polars as pl
 import pytest
 from nfp_ingest.vintage_store import read_vintage_store, transform_to_panel
-from nfp_lookups.industry import (
-    CES_SECTOR_TO_NAICS,
-    INDUSTRY_MAP,
-    SINGLE_SECTOR_SUPERSECTORS,
-)
+from nfp_lookups.industry import CES_SECTOR_TO_NAICS, INDUSTRY_MAP
 from nfp_lookups.paths import VINTAGE_STORE_PATH
 
 
@@ -61,9 +57,9 @@ _SECTOR_RECODE = {
 def _scope_to_types(scope: str) -> set[str]:
     """Map scope name to allowed industry_type values."""
     if scope == "all":
-        return {"national", "domain", "supersector", "sector"}
+        return {"total", "domain", "supersector", "sector"}
     if scope == "domain":
-        return {"national", "domain"}
+        return {"total", "domain"}
     if scope == "supersector":
         return {"supersector"}
     if scope == "sector":
@@ -72,12 +68,21 @@ def _scope_to_types(scope: str) -> set[str]:
 
 
 def _build_expected_industries(scope: str = "all") -> set[tuple[str, str]]:
-    """Build expected (industry_type, industry_code) pairs from INDUSTRY_MAP + recoding.
+    """Build expected (industry_type, industry_code) pairs for the rebuilt store.
 
-    CES processing remaps ``industry_code='00'`` to ``industry_type='national'``,
-    recodes sector codes 41→42 / 42→44 / 43→48, and duplicates single-sector
-    supersectors (20→23, 50→51, 80→81) as sector rows.  QCEW produces the same
-    final set via its own NAICS-based pipeline.
+    The 2017+ public reconstruction (plans/10–11) normalised the CES/QCEW schema:
+
+    * the aggregate totals ``00`` (total nonfarm) and ``05`` (total private) live
+      under ``industry_type='total'`` (the ownership axis) — replacing the retired
+      ``industry_type='national'`` that the old store used for the ``00`` total;
+    * government is not carried (supersector ``90``; sectors ``91/92/93``), nor is
+      the government-inclusive service-providing domain ``07``;
+    * CES collapses single-sector supersectors (``20/50/80``) and does **not** emit
+      their sector duplicates (``23/51/81``); QCEW carries those — plus agriculture
+      ``11`` — so this common set is a strict subset of QCEW coverage and both
+      sources satisfy it (``_check_presence`` only flags *missing* combos).
+
+    Sector codes are recoded CES→NAICS (41→42 / 42→44 / 43→48).
     """
     allowed = _scope_to_types(scope)
     pairs: set[tuple[str, str]] = set()
@@ -86,8 +91,17 @@ def _build_expected_industries(scope: str = "all") -> set[tuple[str, str]]:
         itype = entry.industry_type
         icode = entry.industry_code
 
-        if icode == "00" and itype == "domain":
-            itype = "national"
+        # The 00/05 aggregate totals move to the 'total' ownership axis.
+        if itype == "domain" and icode in ("00", "05"):
+            itype = "total"
+        # Not carried by the public reconstruction: the government-inclusive
+        # service-providing domain (07) and government itself (90 / 91 / 92 / 93).
+        if itype == "domain" and icode == "07":
+            continue
+        if (itype == "supersector" and icode == "90") or (
+            itype == "sector" and icode in ("91", "92", "93")
+        ):
+            continue
 
         if itype not in allowed:
             continue
@@ -96,10 +110,6 @@ def _build_expected_industries(scope: str = "all") -> set[tuple[str, str]]:
             icode = _SECTOR_RECODE[icode]
 
         pairs.add((itype, icode))
-
-    if "sector" in allowed:
-        for sec_code in SINGLE_SECTOR_SUPERSECTORS.values():
-            pairs.add(("sector", sec_code))
 
     return pairs
 
@@ -339,7 +349,8 @@ def _check_qcew_revisions(df: pl.DataFrame) -> list[str]:
         return []
 
     gaps: list[str] = []
-    is_total = (pl.col("industry_type") == "national") & (
+    # Rebuilt store: the all-industry total is ('total', '00') (was 'national').
+    is_total = (pl.col("industry_type") == "total") & (
         pl.col("industry_code") == "00"
     )
 
