@@ -88,6 +88,17 @@ def test_consensus_competitor_t1_lookup(tmp_path):
     assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) == pytest.approx(190.0)
 
 
+def test_consensus_lookup_is_month_keyed(tmp_path):
+    # The backtest harness keys targets on the model date axis (the CES ref day,
+    # the 12th), but the consensus file's ref_month is month-start (day=1, per
+    # specs/bloomberg_consensus.md). predict must month-bucket so the lookup hits
+    # — else consensus silently scores None for every month once the file lands.
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+
+    c = Consensus(load_consensus(_consensus_file(tmp_path)))
+    assert c.predict(date(2024, 6, 12), as_of=date(2024, 7, 4)) == pytest.approx(190.0)
+
+
 def test_consensus_none_when_unconfigured():
     from nfp_vintages.competitors.consensus import Consensus
 

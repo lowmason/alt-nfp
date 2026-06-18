@@ -57,7 +57,12 @@ class Consensus:
     def predict(self, ref_month: date, *, as_of: date) -> float | None:
         if self.table is None:
             return None
-        row = self.table.filter(pl.col("ref_month") == ref_month)
+        # The file's ``ref_month`` is month-start (day=1, per
+        # ``specs/bloomberg_consensus.md``); the harness keys targets on the model
+        # date axis (the CES ref day, the 12th). Month-bucket so the lookup is
+        # agnostic to the caller's day convention.
+        ref_m = date(ref_month.year, ref_month.month, 1)
+        row = self.table.filter(pl.col("ref_month") == ref_m)
         if row.height == 0:
             return None
         survey = row["survey_date"][0]
