@@ -30,7 +30,7 @@ def first_print_changes(
     store_path: Path = VINTAGE_STORE_PATH,
     geographic_type: str = "national",
     geographic_code: str = "00",
-    industry_type: str = "national",
+    industry_type: str = "total",
     industry_code: str = "00",
 ) -> pl.DataFrame:
     """Per reference month: the first-print headline change and growth.

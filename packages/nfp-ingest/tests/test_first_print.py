@@ -20,10 +20,13 @@ def _store_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _store_available(),
-    reason="Vintage store not available",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not _store_available(),
+        reason="Vintage store not available",
+    ),
+    pytest.mark.real_store,  # reads the real vintage store; exempt from cred-blanking
+]
 
 
 def _change_for(df, y: int, m: int) -> float:
