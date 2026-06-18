@@ -169,8 +169,8 @@ class TestHashStability:
     def test_build_twice_same_hash(self):
         from nfp_ingest.model_data import build_model_data
 
-        d1 = build_model_data(self.AS_OF, start_year=2012, end_year=2026)
-        d2 = build_model_data(self.AS_OF, start_year=2012, end_year=2026)
+        d1 = build_model_data(self.AS_OF, start_year=2017, end_year=2026)
+        d2 = build_model_data(self.AS_OF, start_year=2017, end_year=2026)
         a1, m1 = collect_snapshot(d1)
         a2, m2 = collect_snapshot(d2)
         assert content_hash(a1, m1) == content_hash(a2, m2)
@@ -179,9 +179,12 @@ class TestHashStability:
         from nfp_ingest.snapshots import snapshot_model_data
 
         path, digest = snapshot_model_data(
-            self.AS_OF, out_root=Path(tmp_path), start_year=2012, end_year=2026
+            self.AS_OF, out_root=Path(tmp_path), start_year=2017, end_year=2026
         )
         arrays, meta = load_snapshot(path)
         assert meta["content_hash"] == digest
         assert meta["as_of"] == self.AS_OF.isoformat()
-        assert meta["scalars"]["T"] == 137  # pinned by the A2 golden master
+        # Rebuilt store starts 2017-01; for as_of 2023-07-12 the grid runs
+        # 2017-01..2023-06 = 78 months (was 137 under the old 2012+ store, per
+        # the re-baselined A2 golden master).
+        assert meta["scalars"]["T"] == 78
