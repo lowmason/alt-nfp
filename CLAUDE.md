@@ -57,12 +57,18 @@ to `main`.
 - **`data/` is proprietary and gitignored** — this repo is public. Tests that
   need the vintage store self-skip when it's unavailable; network tests are
   marked `@pytest.mark.network`.
-- **Never rebuild the canonical store in place.** `s3://alt-nfp/store`
-  contains live-captured release-day vintage rows (national CES, Mar 2025–
-  Jan 2026 and ongoing) that exist in no raw input — a from-scratch
-  `alt-nfp build` to that URI would silently destroy them. Rebuilds target a
-  scratch prefix (`NFP_STORE_URI=s3://alt-nfp/store-rebuild …`); the
-  canonical store only ever takes appends.
+- **Rebuild to scratch; promote deliberately.** `s3://alt-nfp/store` now holds
+  the **rebuilt** schema (reconstructable public CES/QCEW, 2017+; promoted from
+  `…/store-rebuild` on 2026-06-18 via `plans/10` T8, prior canonical preserved at
+  `…/store-prev-20260618`). It is **not** append-only/irreplaceable — the old
+  "live-captured, exists in no raw input" framing is retired (see memory
+  `store-replaceable-and-rebuild-backlog`). Still: never `alt-nfp build` straight
+  to `…/store`. Rebuilds target a scratch prefix
+  (`NFP_STORE_URI=s3://alt-nfp/store-rebuild …`); promotion to canonical is the
+  deliberate T8 cutover — snapshot the prior canonical first, then copy-then-delete
+  per partition (filenames encode vintage ranges, so a plain overwrite would leave
+  both files and corrupt the store). `is_canonical_store` still guards
+  `build_store`/`mirror_store` against accidental clobber.
 - **Specs workflow**: implemented specs move from `specs/` to `archive/`.
 - The old repo at `~/Projects/alt_nfp` is the frozen reference — read it for
   parity questions, never modify it.

@@ -11,9 +11,10 @@ and credentials come from the environment (``.env`` is loaded):
 parquet preserving the hive layout. Idempotent: existing keys are
 overwritten. (Kept as a script because no mc/aws CLI is installed.)
 
-Refuses to mirror onto the canonical, append-only store
+Refuses to mirror onto the canonical (production) store
 (``s3://alt-nfp/store``) unless ``--allow-canonical`` is passed; target a
-scratch prefix (e.g. ``.../store-rebuild``) instead.
+scratch prefix (e.g. ``.../store-rebuild``) instead. Promotion to canonical is
+a deliberate, backup-first cutover (see ``plans/10`` T8).
 """
 
 from __future__ import annotations
@@ -37,9 +38,9 @@ def main() -> None:
     allow_canonical = "--allow-canonical" in sys.argv
     if is_canonical_store(uri) and not allow_canonical:
         sys.exit(
-            f"refusing to mirror onto the canonical store {uri!r} — it is "
-            "append-only and irreplaceable; target a scratch prefix or pass "
-            "--allow-canonical"
+            f"refusing to mirror onto the canonical (production) store {uri!r} — "
+            "promotion is a deliberate, backup-first cutover (plans/10 T8); target "
+            "a scratch prefix or pass --allow-canonical"
         )
 
     import s3fs

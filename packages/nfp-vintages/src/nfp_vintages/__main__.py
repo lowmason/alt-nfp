@@ -206,7 +206,7 @@ def build(
     allow_canonical: bool = typer.Option(
         False,
         "--allow-canonical",
-        help="Permit rebuilding the canonical store in place (DANGEROUS — destroys live-captured vintage rows).",
+        help="Permit overwriting the canonical (production) store in place (DANGEROUS — prefer the plans/10 T8 backup-first cutover).",
     ),
 ) -> None:
     """Build the Hive-partitioned vintage store."""
