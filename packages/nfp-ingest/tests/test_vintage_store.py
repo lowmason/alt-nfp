@@ -241,6 +241,57 @@ class TestTransformToPanel:
         expected = np.log(100_100.0) - np.log(100_000.0)
         assert abs(panel["growth"][0] - expected) < 1e-12
 
+    def test_qcew_q1_size_buckets_collapse_to_headline_at_frontier(self, tmp_path):
+        """Rebuilt-store QCEW Q1 size cross-product must not duplicate/corrupt the
+        headline at censoring.
+
+        The rebuilt store carries a QCEW Q1 size cross-product (store_rebuild §8):
+        the all-sizes ``total``/``'0'`` row PLUS size buckets, all sharing
+        ``(geo, industry, ref_date)``.  ``_QCEW_SERIES_KEY`` and the growth group
+        both EXCLUDE ``size_class``, so without an all-sizes filter the buckets
+        (a) make the rank-1 frontier month select every rev-0 row → a duplicate
+        ``(series, ref_date)`` that ``_validate_censored_selection`` rejects, and
+        (b) pollute the headline log-growth.  ``transform_to_panel`` must reduce to
+        the headline (``all_sizes_predicate``) first.  The canonical store has no
+        size rows, so the filter is a no-op there.
+        """
+        base = {
+            "geographic_type": "national", "geographic_code": "00", "ownership": "private",
+            "industry_type": "supersector", "industry_code": "20", "revision": 0,
+            "benchmark_revision": 0, "source": "qcew", "seasonally_adjusted": False,
+        }
+        # Three consecutive Q1 months, headline (all-sizes) level.
+        rows = [
+            {**base, "ref_date": date(2024, 1, 1), "vintage_date": date(2024, 2, 1),
+             "employment": 7800.0, "size_class_type": "total", "size_class_code": "0"},
+            {**base, "ref_date": date(2024, 2, 1), "vintage_date": date(2024, 3, 1),
+             "employment": 7850.0, "size_class_type": "total", "size_class_code": "0"},
+            {**base, "ref_date": date(2024, 3, 1), "vintage_date": date(2024, 4, 1),
+             "employment": 7913.0, "size_class_type": "total", "size_class_code": "0"},
+        ]
+        # The frontier month (2024-03, rank 1) ALSO carries size buckets — the trigger.
+        for sct, scc, emp in [
+            ("large", "1", 872.0), ("large", "2", 900.0),
+            ("medium", "3", 4520.0), ("small", "4", 5664.0),
+        ]:
+            rows.append({**base, "ref_date": date(2024, 3, 1),
+                         "vintage_date": date(2024, 4, 1), "employment": emp,
+                         "size_class_type": sct, "size_class_code": scc})
+        df = pl.DataFrame(rows, schema=VINTAGE_STORE_SCHEMA)
+        _write_hive_store(df, tmp_path)
+
+        # as_of so 2024-03 is the rank-1 frontier with all of Q1 in-window.
+        panel = transform_to_panel(read_vintage_store(tmp_path), as_of_ref=date(2024, 4, 12))
+
+        qcew = panel.filter(pl.col("source") == "qcew")
+        # Exactly one row per period — the size buckets are gone, headline kept.
+        assert (qcew.group_by("period").len()["len"] == 1).all()
+        mar = qcew.filter(pl.col("period") == date(2024, 3, 1))
+        assert mar.height == 1
+        assert mar["employment_level"][0] == pytest.approx(7913.0)
+        # Growth is the clean headline month-over-month, not corrupted by buckets.
+        assert mar["growth"][0] == pytest.approx(np.log(7913.0) - np.log(7850.0))
+
     def test_benchmark_revision_sets_revision_minus_one(self, tmp_path):
         """CES with benchmark_revision > 0 → revision_number = -1."""
         rows = _make_vintage_rows(

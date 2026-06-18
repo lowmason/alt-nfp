@@ -26,6 +26,8 @@ from nfp_lookups.paths import VINTAGE_STORE_PATH, is_remote, storage_options_for
 # definition — audit IND-XC-3).
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
+from nfp_ingest.size_class import all_sizes_predicate
+
 logger = logging.getLogger(__name__)
 
 # Boundary between pre-2017 (max-revision) and 2017+ (rank-based) QCEW regimes.
@@ -478,6 +480,16 @@ def transform_to_panel(
         & pl.col("employment").is_not_null()
         & (pl.col("employment") > 0)
     )
+
+    # Reduce to the headline (all-sizes) level before growth + censoring. The
+    # rebuilt store carries a QCEW Q1 size-class cross-product (store_rebuild §8)
+    # the model does not consume; left in, the buckets corrupt the headline
+    # log-growth (the growth group excludes size_class) and duplicate (series,
+    # ref_date) at censoring (``_QCEW_SERIES_KEY`` excludes it too). Canonical
+    # frames carry no size rows (null size_class), so this is a no-op there; the
+    # guard skips frames that lack the size columns entirely.
+    if {"size_class_type", "size_class_code"}.issubset(lf.collect_schema().names()):
+        lf = lf.filter(all_sizes_predicate())
 
     # --- 2. Source tags ----------------------------------------------------
     lf = _derive_source_tags(lf)

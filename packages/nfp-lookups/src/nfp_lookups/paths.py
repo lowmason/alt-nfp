@@ -72,13 +72,16 @@ def is_remote(path: Any) -> bool:
 
 
 def is_canonical_store(path: Any) -> bool:
-    """True if *path* is the canonical, append-only vintage store.
+    """True if *path* is the canonical (production) vintage store.
 
-    The canonical store (``s3://alt-nfp/store``) holds live-captured,
-    release-day vintage rows that exist in no raw input and are therefore
-    irreplaceable — it only ever takes appends and must never be rebuilt in
-    place (see root ``CLAUDE.md``). This predicate gates the write doors that
-    could clobber it (``build_store``, ``mirror_store``).
+    The canonical store (``s3://alt-nfp/store``) is the production store the
+    model reads (rebuilt schema since the 2026-06-18 promotion; see ``plans/10``
+    T8). It holds reconstructable public CES/QCEW data — replaceable, **not**
+    append-only/irreplaceable (the older framing is retired) — but a from-scratch
+    build or mirror straight to it would clobber the live store, so this predicate
+    gates the write doors (``build_store``, ``mirror_store``) against accidental
+    overwrite. Promotion to canonical is a deliberate, backup-first cutover, not a
+    routine write.
 
     A value is treated as the canonical store when it is a *remote* path
     whose URI ends in ``/store``. Remoteness is detected for both ``UPath``
