@@ -1,5 +1,17 @@
 # Implementation Plan: A3 — `nfp-model` posterior parity
 
+> **⚠️ Post-rebuild status (2026-06-18).** These A3 references are **frozen
+> pre-rebuild** — PyMC posteriors on the OLD 2012+ vintage store. The store rebuild
+> ([`plans/10`](10-store_rebuild.md) T8) moved the canonical store to the 2017+
+> rebuilt schema, so the references **no longer match `build_model_data` against the
+> canonical store** (different data window + the Oct-2025 shutdown). They were
+> intentionally NOT re-baselined: the port validation below is historical and sound
+> (the model code is unchanged). To re-run parity, point at the preserved old-store
+> backup — `NFP_STORE_URI=s3://alt-nfp/store-prev-20260618`. A forward
+> JAX-on-canonical **regression** baseline is deferred until model iteration resumes;
+> the spot-check test (`test_parity_golden`) now skips when pointed at the canonical
+> store and tells you to use the backup.
+
 > **Status: ✅ COMPLETE (2026-06-12). A3 PARITY PASS: 14 fixtures,
 > 476/476 criteria.** Suite at **421 passed / 2 intentional skips** (+33
 > nfp-model tests incl. the opt-in parity spot check), ruff clean; without

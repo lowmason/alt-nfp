@@ -16,7 +16,8 @@
     ],
     "corrected_indicators_config": true,
     "base_index": 100.19552925011902,
-    "idx_to_level": 1335.09
+    "idx_to_level": 1335.09,
+    "post_rebuild_note": "FROZEN PRE-REBUILD: references are PyMC posteriors on the old 2012+ store. After the store rebuild (plans/10 T8, 2026-06-18) the canonical store is the 2017+ rebuilt schema; these no longer match build_model_data against the canonical store. Re-run parity against NFP_STORE_URI=s3://alt-nfp/store-prev-20260618 (old-store backup). Intentionally NOT re-baselined — the port validation is historical/sound; a forward JAX-on-canonical regression baseline is deferred."
   },
   "fixtures": {
     "asof_2023-07-12_default": {
