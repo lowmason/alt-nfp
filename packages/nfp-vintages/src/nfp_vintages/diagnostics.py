@@ -84,21 +84,26 @@ def build_revision_table(store_path=None) -> pl.DataFrame:
 
 
 def qcew_settled_changes(store_path=None) -> pl.DataFrame:
-    """Latest-vintage QCEW national total private over-the-month change (thousands).
+    """Latest-vintage QCEW national total-private over-the-month change (thousands).
 
     The settled QCEW level is the fair external target for QCEW-anchored competitors.
     Selects max(vintage_date) per ref month, level-differences, and returns the result
     in thousands (employment is already stored in thousands; no unit conversion needed).
 
+    Series used: industry_code='05' (total private, NSA). The store does NOT contain
+    industry_code='00' (total nonfarm) — total private is the only available QCEW proxy.
+
     THREE KNOWN LIMITATIONS (DONE_WITH_CONCERNS):
     1. NOT seasonally adjusted (NSA): The store holds only NSA QCEW; the model nowcast
        and CES first-print are seasonally adjusted. Comparing SA errors to this NSA truth
        mixes seasonality and overstates apparent errors in summer/winter months.
-    2. Private-only: The total (industry_code='05', ownership='private') excludes
-       government workers — it is not directly comparable to CES total nonfarm.
+    2. Private-only (industry_code='05'): Excludes government workers — not directly
+       comparable to CES total nonfarm (industry_code='00'). Total-nonfarm QCEW
+       (industry_code='00') is absent from this store.
     3. Q1 hole (April gap): QCEW ref_dates cover months 4–12 only (Jan–Mar are absent
        from the store). The April shift(1) entry is a 4-month gap (Dec→Apr), not a
        monthly change. May–Dec differences are genuine month-over-month changes.
+       Callers scoring metrics must exclude April to avoid corrupting ME/MAE/RMSE.
     These limitations are logged here so downstream callers can filter or caveat as needed.
     """
     from nfp_ingest.vintage_store import read_vintage_store

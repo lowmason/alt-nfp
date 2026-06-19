@@ -339,7 +339,9 @@ def cmd_score(root: Path) -> int:
         print(f"[qcew scoreboard] skipped: {exc}")
     if qcew:
         qlines = ["", "## Truth scoreboard (vs QCEW-settled change)", "",
-                  "Fair target for QCEW-anchored competitors (model, ADP). "
+                  "QCEW truth here is NSA, total-private-only (industry_code='05'; "
+                  "total-nonfarm '00' is absent from this store), with a Q1 data hole — "
+                  "interpret as indicative, not a clean truth comparison. "
                   "ADP renders `—` until Bloomberg data lands.",
                   "| regime | competitor | n | ME | MAE | RMSE |",
                   "|---|---|---|---|---|---|"]
@@ -349,7 +351,12 @@ def cmd_score(root: Path) -> int:
             errs = []
             for r in sub.iter_rows(named=True):
                 # qcew keys are month-start; ref_month rows are the day-12 model date.
-                truth = qcew.get(r["ref_month"].replace(day=1))
+                ref_month_start = r["ref_month"].replace(day=1)
+                # April is a Dec→Apr 4-month cumulative (Q1 QCEW hole), not a monthly
+                # change — exclude it to avoid corrupting ME/MAE/RMSE.
+                if ref_month_start.month == 4:
+                    continue
+                truth = qcew.get(ref_month_start)
                 if truth is not None and r["pred_change_k"] is not None:
                     errs.append(truth - r["pred_change_k"])
             mm = score(np.array(errs, dtype=float))
