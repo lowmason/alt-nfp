@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from nfp_vintages.scoreboard import change_draws_k
+from nfp_vintages.scoreboard import change_draws_k, crps_sample, interval_coverage
 
 
 def assemble_total(
@@ -39,3 +39,15 @@ def assemble_total(
     if np.isnan(total).any():
         raise ValueError("assemble_total produced NaN — check prev_index/idx_to_level anchor")
     return total
+
+
+def score_total(total_change_draws, *, first_print_k, consensus_k=None) -> dict:
+    """Score the assembled Total against the Total first print (+ consensus if present)."""
+    draws = np.asarray(total_change_draws, float).reshape(-1)
+    point = float(draws.mean())
+    return {
+        "crps": crps_sample(draws, first_print_k),
+        "cover80": float(interval_coverage(draws, first_print_k, level=0.80)),
+        "point_err": abs(point - first_print_k),
+        "consensus_err": (None if consensus_k is None else abs(consensus_k - first_print_k)),
+    }
