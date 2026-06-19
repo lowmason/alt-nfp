@@ -113,6 +113,14 @@ def cmd_snapshot(root: Path) -> None:
     fp_map = dict(
         fp.select(["ref_date", "first_print_change_k"]).iter_rows()
     )
+    # Total ('00') first-print — the scored actual for the Track B Total backtest
+    # (cmd_total). Stored per target alongside the private first print; never used
+    # to score the private nowcast (Track A scores '05'). KeyError-by-design in
+    # cmd_total if a target lacks a '00' first print — no silent fallback.
+    total_fp = first_print_changes(industry_code="00")
+    total_fp_map = dict(
+        total_fp.select(["ref_date", "first_print_change_k"]).iter_rows()
+    )
 
     T = len(dates)
     target_indices = list(range(T - N_BACKTEST, T))
@@ -183,6 +191,9 @@ def cmd_snapshot(root: Path) -> None:
                 # ``target`` rides the model's daily axis (CES ref day, the 12th).
                 # Bucket the lookup to the month so the monthly value joins.
                 "first_print_change_k": fp_map.get(target.replace(day=1)),
+                # Total ('00') first print — scored actual for cmd_total; same
+                # day-12 → day-1 bucketing as the private first print above.
+                "total_first_print_k": total_fp_map.get(target.replace(day=1)),
                 "best_avail_change_k": (actual_index - prev_index) * idx_to_level,
                 # prev_index required by cmd_score calibration (change_draws_k).
                 "prev_index": prev_index,
@@ -429,13 +440,67 @@ def cmd_score(root: Path) -> int:
     return 0
 
 
+def cmd_total(root: Path) -> None:
+    """Fit the wedge per target, assemble Total, score vs first print + consensus.
+
+    Track B: Total = private nowcast ('05') + government wedge. The private leg
+    is the persisted ``nowcast_pred_draws`` from the existing batched private fit;
+    the wedge leg is an as-of-censored wedge fit per release-eve. Read-only on the
+    store (READ + FIT only — never writes the store).
+    """
+    from datetime import date
+
+    import numpy as np
+    from nfp_ingest.wedge_data import build_wedge_model_data
+    from nfp_model.wedge import fit_wedge, wedge_pred_draws
+    from nfp_vintages.assembly import assemble_total, score_total
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+
+    manifest = _read_json(root / "grid_manifest.json")
+    prov = manifest["provenance"]
+    consensus = Consensus(load_consensus())
+    rows = {}
+    for rname in REGIMES:
+        reg = manifest["regimes"][rname]
+        for key, t in sorted(reg["targets"].items()):
+            if "error" in t:
+                continue
+            # ``key`` is the model date axis (CES ref day, the 12th); the wedge
+            # model_data and consensus both key monthly series on month-start
+            # (day=1). Normalize, matching cmd_snapshot/cmd_score's .replace(day=1)
+            # — otherwise build_wedge_model_data's ref_months.index(target_month)
+            # raises ValueError (its month grid is day-1).
+            target = date.fromisoformat(key).replace(day=1)
+            as_of = date.fromisoformat(t["as_of"])
+            # private leg: persisted nowcast_pred_draws from the batched private fit
+            batched = np.load(root / f"{rname}_batched_{key}.npz")
+            priv_growth = batched["nowcast_pred_draws"]                # growth/index
+            # wedge leg: as-of-censored fit for this release-eve
+            wdata = build_wedge_model_data(as_of=as_of, target_month=target)
+            wfit = fit_wedge(wdata, settings=PRESET, seed=BATCH_SEED)
+            wedge = wedge_pred_draws(wfit, wdata["target_idx"], seed=BATCH_SEED)
+            total = assemble_total(priv_growth, wedge,
+                                   prev_index=float(t["prev_index"]),
+                                   idx_to_level=float(prov["idx_to_level"]))
+            # Scored actual = the Total (00) first print, stored at grid-build time
+            # (cmd_snapshot). KeyError if missing — never silently fall back to the
+            # 05 first print, which would score Total against the wrong actual.
+            cons = consensus.predict(target, as_of=as_of)
+            rows[f"{rname}:{key}"] = score_total(
+                total, first_print_k=t["total_first_print_k"], consensus_k=cons)
+    _write_json(root / "total_scores.json", rows)
+    print(f"Scored {len(rows)} Total targets → {root / 'total_scores.json'}")
+
+
 def main() -> None:
     mode, root_arg = sys.argv[1], sys.argv[2]
     root = Path(root_arg).resolve()
-    {"snapshot": cmd_snapshot, "batched": cmd_batched}.get(mode, lambda r: None)(root)
+    {"snapshot": cmd_snapshot, "batched": cmd_batched, "total": cmd_total}.get(
+        mode, lambda r: None
+    )(root)
     if mode == "score":
         raise SystemExit(cmd_score(root))
-    elif mode not in ("snapshot", "batched"):
+    elif mode not in ("snapshot", "batched", "total"):
         raise SystemExit(f"unknown mode {mode!r}")
 
 
