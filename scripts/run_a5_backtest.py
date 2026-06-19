@@ -1,8 +1,16 @@
-"""A5 backtest — model vs competitors on the first print, at T−7 and T−1.
+"""A5 backtest — private nowcast vs naive floors on the first print, T−7/T−1.
 
     uv run python scripts/run_a5_backtest.py snapshot data/backtests/a5
     uv run python scripts/run_a5_backtest.py batched  data/backtests/a5
     uv run python scripts/run_a5_backtest.py score    data/backtests/a5
+
+Track A (private): the model nowcasts **total private** NFP (``industry_code=
+'05'``) — the object it is actually built for (QCEW-anchored, private-provider
+inputs, private birth/death) — and is scored against the **private** first print
+and **private** QCEW-settled truth. Competitors are **naive floors only**
+(random-walk, trailing-mean). Consensus (a Total-NFP object) and ADP are removed:
+they belong to the deferred Track B (Total = private nowcast + government
+forecast). See ``specs/model_improvements.md``.
 
 Reuses the A4 batched harness verbatim (``fit_model_batch``); only the as-of
 dates differ (release(M) − {7,1}). Snapshots live under ``<root>/<regime>/``.
@@ -24,6 +32,14 @@ END_YEAR = 2026
 PRESET = "light"
 BATCH_SEED = 9100
 REGIMES = {"t7": 7, "t1": 1}  # name -> days_before release
+
+# The model nowcasts CES **total private** (industry_code='05'), not total
+# nonfarm '00': its latent is QCEW-anchored (private in this store) and its
+# differentiating inputs are private payroll providers + firm births/deaths.
+# Thread this into every CES/QCEW data-layer call so the model trains on,
+# predicts, and is scored against the private series (specs/model_improvements.md
+# §1). Total '00' is reserved for a future, unbuilt Track B.
+HEADLINE_INDUSTRY = "05"
 
 # Months delayed/distorted by the 2025 government shutdown — flagged, not pooled
 # (see memory ces-oct2025-shutdown; specs/model_improvements.md section 3).
@@ -67,7 +83,12 @@ def cmd_snapshot(root: Path) -> None:
         panel_to_model_data,
     )
     from nfp_ingest.panel import build_panel
-    from nfp_ingest.snapshots import load_snapshot, snapshot_model_data
+    from nfp_ingest.snapshots import (
+        collect_snapshot,
+        content_hash,
+        load_snapshot,
+        save_snapshot,
+    )
     from nfp_lookups.paths import VINTAGE_STORE_PATH
     from nfp_vintages.a5 import near_release_asof
 
@@ -77,13 +98,18 @@ def cmd_snapshot(root: Path) -> None:
 
     print("Building uncensored panel (truth side)...", flush=True)
     panel_full = build_panel(end_year=END_YEAR)
-    data_full = panel_to_model_data(panel_full, list(PROVIDERS_DEFAULT))
+    # Truth side: private '05' levels → ces_sa_index / base_index / idx_to_level
+    # all come from the private panel automatically.
+    data_full = panel_to_model_data(
+        panel_full, list(PROVIDERS_DEFAULT), industry_code=HEADLINE_INDUSTRY
+    )
     dates = data_full["dates"]
     levels = data_full["levels"]
     ces_sa_index = levels["ces_sa_index"].to_numpy().astype(float)
     base_index, idx_to_level = levels_provenance(levels)
 
-    fp = first_print_changes()  # ref_date -> first_print_change_k
+    # Private first-print target (industry_code='05').
+    fp = first_print_changes(industry_code=HEADLINE_INDUSTRY)  # ref_date -> change_k
     fp_map = dict(
         fp.select(["ref_date", "first_print_change_k"]).iter_rows()
     )
@@ -96,6 +122,7 @@ def cmd_snapshot(root: Path) -> None:
         "end_year": END_YEAR,
         "preset": PRESET,
         "n_backtest": N_BACKTEST,
+        "industry_code": HEADLINE_INDUSTRY,
     }
 
     for rname, days_before in REGIMES.items():
@@ -112,7 +139,29 @@ def cmd_snapshot(root: Path) -> None:
             if path is None:
                 print(f"[{rname} {n + 1}/{N_BACKTEST}] target {key} as_of {as_of}: building", flush=True)
                 try:
-                    path, _ = snapshot_model_data(as_of, out_root=snap_dir, end_year=END_YEAR)
+                    # Inline build_model_data + snapshot_model_data so the model
+                    # FITS the private series. build_model_data() does not expose
+                    # industry_code (it routes through panel_to_model_data with the
+                    # '00' default), so threading '05' requires calling the two
+                    # data-layer steps directly with the allowed kwarg. Matches
+                    # build_model_data exactly otherwise: as_of to BOTH
+                    # build_panel(as_of_ref=) and panel_to_model_data(as_of=), and
+                    # start_year left at its shared 2012 default.
+                    providers = list(PROVIDERS_DEFAULT)
+                    panel = build_panel(
+                        providers=providers, end_year=END_YEAR, as_of_ref=as_of
+                    )
+                    data = panel_to_model_data(
+                        panel, providers, as_of=as_of, industry_code=HEADLINE_INDUSTRY
+                    )
+                    arrays, meta = collect_snapshot(data)
+                    meta["as_of"] = as_of.isoformat()
+                    digest = content_hash(arrays, meta)
+                    path = (
+                        snap_dir / f"asof={as_of.isoformat()}"
+                        / f"model_data_{digest[:12]}.npz"
+                    )
+                    save_snapshot(arrays, meta, path, digest=digest)
                 except Exception as e:  # noqa: BLE001 — A1 negative-master pattern
                     print(f"  UNBUILDABLE: {e}", flush=True)
                     reg["targets"][key] = {"error": str(e), "as_of": as_of.isoformat()}
@@ -190,7 +239,6 @@ def cmd_score(root: Path) -> int:
     import polars as pl
     from nfp_ingest.first_print import first_print_changes
     from nfp_vintages.a5 import score
-    from nfp_vintages.competitors.consensus import Consensus, load_consensus
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
     from nfp_vintages.diagnostics import build_revision_table
     from nfp_vintages.scoreboard import (
@@ -205,9 +253,11 @@ def cmd_score(root: Path) -> int:
     manifest = _read_json(root / "grid_manifest.json")
     prov = manifest["provenance"]
     idx_to_level = float(prov["idx_to_level"])
-    fp = first_print_changes()
+    # Private first-print target ('05') — the object the model nowcasts.
+    fp = first_print_changes(industry_code=HEADLINE_INDUSTRY)
     fp_hist = fp.select(["ref_date", "first_print_change_k", "vintage_date"])
-    consensus = Consensus(load_consensus())  # None until Bloomberg file lands → "—"
+    # Track A competitors: naive floors only. Consensus (a Total-NFP object) and
+    # ADP are removed — they belong to deferred Track B (see module docstring).
     naive_rw, naive_mean = RandomWalk(fp_hist), TrailingMean(fp_hist, window=12)
 
     # Month-type inputs (skeleton-safe: empty maps degrade to "normal"/"benchmark").
@@ -253,7 +303,6 @@ def cmd_score(root: Path) -> int:
             mtype = month_type.get(ref.replace(day=1), "normal")
             preds = {
                 "model": model,
-                "consensus": consensus.predict(ref, as_of=as_of),
                 "naive_rw": naive_rw.predict(ref, as_of=as_of),
                 "naive_mean": naive_mean.predict(ref, as_of=as_of),
             }
@@ -292,9 +341,14 @@ def cmd_score(root: Path) -> int:
 
     venues = sorted({v for v in df["venue"].unique() if v is not None})
     lines = ["# A5 backtest report", "",
-             "Model vs competitors on the CES **first print**, at T−7 and T−1, "
-             "decomposed by month type.",
-             "Consensus is T−1-only and renders `—` until the Bloomberg file lands.",
+             "**Track A — the private nowcast.** The model nowcasts CES **total "
+             "private** (`industry_code='05'`) and is scored against the **private** "
+             "first print at T−7 and T−1, decomposed by month type. Competitors are "
+             "**naive floors only** (random-walk, trailing-mean).",
+             "Consensus and ADP are absent by design: consensus forecasts **Total** "
+             "NFP, which has no meaning against the private nowcast alone — it belongs "
+             "to the deferred **Track B** (Total = private nowcast + government "
+             "forecast). ADP is removed entirely. See `specs/model_improvements.md`.",
              f"Venue(s) in this run: **{', '.join(venues) or 'public-only'}** — a "
              "`public-only` run scores a providerless skeleton (spec section 10).",
              "COVID (2020–2021) and shutdown-flagged months excluded from metrics.", ""]
@@ -306,7 +360,7 @@ def cmd_score(root: Path) -> int:
             n_months = sub.select(pl.col("ref_month").n_unique()).item()
             lines += [f"### {mtype} ({n_months} months)", "",
                       "| competitor | n | ME | MAE | RMSE |", "|---|---|---|---|---|"]
-            for comp in ["model", "consensus", "naive_rw", "naive_mean"]:
+            for comp in ["model", "naive_rw", "naive_mean"]:
                 e = sub.filter(pl.col("competitor") == comp)["error_k"].to_numpy()
                 m = score(e)
                 if m["n"] == 0:
@@ -329,7 +383,9 @@ def cmd_score(root: Path) -> int:
     (root / "a5_report.md").write_text("\n".join(lines) + "\n")
     print((root / "a5_report.md").read_text())
 
-    # ---- Second scoreboard: model & ADP vs QCEW-settled truth ----
+    # ---- Primary truth scoreboard: private nowcast vs QCEW-settled truth ----
+    # The model is QCEW-anchored, so the private QCEW-settled value ('05') is the
+    # closest administrative truth it can be held to — the PRIMARY truth comparison.
     from nfp_vintages.diagnostics import qcew_settled_changes
     try:
         qcew = {r["ref_date"]: r["qcew_settled_change_k"]
@@ -338,11 +394,14 @@ def cmd_score(root: Path) -> int:
         qcew = {}
         print(f"[qcew scoreboard] skipped: {exc}")
     if qcew:
-        qlines = ["", "## Truth scoreboard (vs QCEW-settled change)", "",
-                  "QCEW truth here is NSA, total-private-only (industry_code='05'; "
-                  "total-nonfarm '00' is absent from this store), with a Q1 data hole — "
-                  "interpret as indicative, not a clean truth comparison. "
-                  "ADP renders `—` until Bloomberg data lands.",
+        qlines = ["", "## Primary truth scoreboard (private nowcast vs QCEW-settled change)",
+                  "",
+                  "The model is QCEW-anchored, so the **private** QCEW-settled value is "
+                  "the closest administrative truth it can be held to — this is the "
+                  "**primary** truth comparison. QCEW truth here is NSA, total-private "
+                  "(industry_code='05'; total-nonfarm '00' is absent from this store), "
+                  "with a Q1 data hole (April excluded) — interpret as indicative, not a "
+                  "clean SA truth comparison.",
                   "| regime | competitor | n | ME | MAE | RMSE |",
                   "|---|---|---|---|---|---|"]
         model_rows = df.filter(pl.col("competitor") == "model")
@@ -364,7 +423,6 @@ def cmd_score(root: Path) -> int:
                     f"| {mm['mae']:,.0f}k | {mm['rmse']:,.0f}k |") if mm["n"] else \
                    f"| {rname} | model | 0 | — | — | — |"
             qlines.append(cell)
-            qlines.append(f"| {rname} | adp | 0 | — | — | — |")  # Bloomberg-only
         with (root / "a5_report.md").open("a") as fh:
             fh.write("\n".join(qlines) + "\n")
 
