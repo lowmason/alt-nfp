@@ -1,12 +1,16 @@
 # scripts/run_tier1_diagnostics.py
-"""Tier 1 diagnostics: Aruoba revision regression + Mincer-Zarnowitz + gate.
+"""Tier 1 diagnostics (PRIVATE '05'): Aruoba revision regression + Mincer-Zarnowitz + gate.
 
 Usage:
     uv run python scripts/run_tier1_diagnostics.py data/backtests/a5
 
-Reads the A5 results parquet (for the model's MZ) and the vintage store (for the
-Aruoba LHS + design), writes tier1_diagnostics.md / .parquet, prints the gate.
-Provider-ablation is forward-looking (Bloomberg-only) and self-skips locally.
+Track A only — the private nowcast. The Aruoba LHS is the private first-to-third
+revision (build_revision_table → industry_code='05'); the regressors are public
+FRED indicators (claims, jolts, biz_apps, nfci, lagged revision) — no ADP. The MZ
+runs only on the model's private nowcast; consensus MZ is deferred to Track B
+(Total). Reads the A5 results parquet (model MZ) and the vintage store (Aruoba LHS
++ design), writes tier1_diagnostics.md / .parquet, prints the gate. Provider-
+ablation is forward-looking (Bloomberg-only) and self-skips locally.
 """
 from __future__ import annotations
 
@@ -38,7 +42,8 @@ def main() -> int:
     ref = [r["ref_date"] for r in rev_tbl.iter_rows(named=True)]
     rev = np.array([r["revision_k"] for r in rev_tbl.iter_rows(named=True)], dtype=float)
 
-    # ---- regressors (skeleton: claims momentum, JOLTS, lagged revision) ----
+    # ---- regressors (public FRED: claims momentum, JOLTS, biz_apps, nfci,
+    #      lagged revision) — no ADP ----
     def _monthly(name: str) -> dict:
         df = read_indicator(name)
         if df is None or df.is_empty():
@@ -55,7 +60,11 @@ def main() -> int:
               .with_columns((pl.col("v") - pl.col("v").shift(3)).alias("mom3")))
         claims_mom = {r["m"]: r["mom3"] for r in mm.iter_rows(named=True)}
     lagged_rev = {ref[i]: rev[i - 1] for i in range(1, len(ref))}
+    # Public FRED indicators only (X = claims_mom, jolts, biz_apps, nfci,
+    # lagged_revision). No ADP regressor — ADP is removed entirely. A regressor
+    # whose series is absent is dropped by build_aruoba_design (→ skeleton venue).
     regressors = {"claims_mom": claims_mom, "jolts": _monthly("jolts"),
+                  "biz_apps": _monthly("biz_apps"), "nfci": _monthly("nfci"),
                   "lagged_revision": lagged_rev}
 
     X, names, used = build_aruoba_design(ref, regressors)
@@ -73,7 +82,10 @@ def main() -> int:
         if len(idx) > X.shape[1] + 2:  # enough dof
             r2_by_type[mt] = aruoba_regression(rev[idx], X[idx], names).r2
 
-    # ---- Mincer-Zarnowitz on the model nowcast ----
+    # ---- Mincer-Zarnowitz on the model's PRIVATE nowcast only ----
+    # Consensus MZ is removed from the private track: consensus forecasts the
+    # Total-NFP number, which has no meaning against the private nowcast alone.
+    # An MZ on consensus belongs with the Total assembly → deferred Track B.
     mz_lines = []
     results_path = root / "a5_results.parquet"
     if results_path.exists():
@@ -84,19 +96,10 @@ def main() -> int:
             actual = mrows["actual_first_print_k"].to_numpy()
             pred = mrows["pred_change_k"].to_numpy()
             mz = mincer_zarnowitz(actual, pred)
-            mz_lines = [f"- model: alpha={mz.alpha:+.1f}k, beta={mz.beta:.3f}, "
+            mz_lines = [f"- model (private): alpha={mz.alpha:+.1f}k, beta={mz.beta:.3f}, "
                         f"joint p(alpha=0,beta=1)={mz.joint_p:.3f}, n={mz.n}"]
-        # consensus MZ only if consensus predictions are present
-        crows = df.filter((pl.col("competitor") == "consensus")
-                          & pl.col("error_k").is_not_null())
-        if crows.height > 5:
-            mzc = mincer_zarnowitz(crows["actual_first_print_k"].to_numpy(),
-                                   crows["pred_change_k"].to_numpy())
-            mz_lines.append(f"- consensus: alpha={mzc.alpha:+.1f}k, beta={mzc.beta:.3f}, "
-                            f"joint p={mzc.joint_p:.3f}, n={mzc.n}")
-        else:
-            mz_lines.append("- consensus: — (no consensus predictions present; "
-                            "Bloomberg file not landed)")
+        mz_lines.append("- consensus MZ → deferred Track B (Total): consensus is a "
+                        "Total-NFP object, not comparable to the private nowcast.")
 
     gate = gate_decision(r2_by_type, GateConfig())
 
