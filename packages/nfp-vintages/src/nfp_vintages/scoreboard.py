@@ -84,3 +84,22 @@ def crps_sample(draws: np.ndarray, actual: float) -> float:
     # mean pairwise abs diff = (2 / n^2) * sum_i (2i - n - 1) * s_i
     mean_pairwise = (2.0 / (n * n)) * np.sum((2 * i - n - 1) * s)
     return float(term1 - 0.5 * mean_pairwise)
+
+
+def change_draws_k(
+    pred_growth_draws: np.ndarray, *, prev_index: float, idx_to_level: float
+) -> np.ndarray:
+    """Predictive sample of the first-print change (thousands) from growth draws.
+
+    Mirrors the batch nowcast arithmetic (batch.py reduction): a month-over-month
+    change of growth g multiplies the prior index, change_k = prev*(exp(g)-1)*scale.
+    Uses the mean prior index as a fixed scale (a first-order linearization that is
+    exact to O(g^2); adequate for interval coverage / CRPS).
+    """
+    g = np.asarray(pred_growth_draws, dtype=float).reshape(-1)
+    return prev_index * (np.exp(g) - 1.0) * idx_to_level
+
+
+def venue_for(*, providers_present: bool) -> str:
+    """Tag a scored row by information regime (spec section 3)."""
+    return "full" if providers_present else "public-only"

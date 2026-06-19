@@ -4,9 +4,11 @@ from datetime import date
 import numpy as np
 from nfp_vintages.scoreboard import (
     MonthTypeConfig,
+    change_draws_k,
     classify_month_types,
     crps_sample,
     interval_coverage,
+    venue_for,
 )
 from pytest import approx as pytest_approx
 
@@ -69,3 +71,28 @@ def test_crps_smaller_when_sharper_and_centered():
     sharp = np.random.default_rng(0).normal(0.0, 5.0, 4000)
     wide = np.random.default_rng(0).normal(0.0, 50.0, 4000)
     assert crps_sample(sharp, actual) < crps_sample(wide, actual)
+
+
+# Task 3: Predictive change-draws extraction + venue tag
+
+
+def test_change_draws_linearization():
+    # tiny growth draws around g; with prev_index and idx_to_level the change
+    # draws must match prev_index*(exp(g)-1)*idx_to_level elementwise.
+    g = np.array([0.001, 0.002, -0.0005])
+    prev_index = 150_000.0
+    idx_to_level = 1.0  # 1 index point == 1k jobs in this fixture
+    out = change_draws_k(g, prev_index=prev_index, idx_to_level=idx_to_level)
+    expected = prev_index * (np.exp(g) - 1.0) * idx_to_level
+    assert np.allclose(out, expected)
+
+
+def test_change_draws_flattens_chains_draws():
+    g2d = np.zeros((2, 50))  # (chains, draws)
+    out = change_draws_k(g2d, prev_index=150_000.0, idx_to_level=1.0)
+    assert out.shape == (100,)
+
+
+def test_venue_for():
+    assert venue_for(providers_present=True) == "full"
+    assert venue_for(providers_present=False) == "public-only"
