@@ -7,7 +7,15 @@ ModelData arrays in, posterior out.
 
 Faithful translation of the frozen PyMC reference
 (`~/Projects/alt_nfp/packages/nfp-model-hmc`), gated by A3 posterior parity
-(`plans/5-a3_model_parity.md`). Provides:
+(`plans/5-a3_model_parity.md`).
+
+**Parity here is port-fidelity — the JAX model reproduces the reference's
+posterior — not correctness: the reference is a WIP, and model correctness is
+validated against external ground truth (see `plans/0`). A3 parity is banked,
+but a correctness-driven change to a pinned default is legitimate behind a new
+baseline.**
+
+Provides:
 - **Model** (`model.py`): `nfp_model(data, priors)` — non-centered AR(1)
   latent with era means, Fourier-GRW seasonal, structural birth/death with
   gated cyclical covariates (claims/jolts), QCEW Student-t anchor with

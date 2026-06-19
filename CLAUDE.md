@@ -1,10 +1,14 @@
 # alt-nfp
 
 Bayesian state-space NFP nowcasting from real-time data vintages. This is the
-v2 repo: data packages ported from the frozen reference implementation at
-`~/Projects/alt_nfp` (underscore); the model layer is rewritten in
-JAX/NumPyro as `nfp-model` behind parity gates. Roadmap: `plans/`; design
-record: `specs/` (active) and `archive/` (implemented/superseded).
+v2 repo: data packages ported from `~/Projects/alt_nfp` (underscore); the model
+layer is rewritten in JAX/NumPyro as `nfp-model`. The port was gated against the
+old repo for **fidelity** (did the rewrite reproduce it?) — but that repo is a
+work-in-progress with bugs, **not validated truth**. Parity is a port-fidelity
+floor, not a correctness certificate; correctness is validated against **external
+ground truth** (published BLS / ALFRED real-time vintages) — see `plans/0`.
+Roadmap: `plans/`; design record: `specs/` (active) and `archive/`
+(implemented/superseded).
 
 ## Workspace
 
@@ -70,5 +74,9 @@ to `main`.
   both files and corrupt the store). `is_canonical_store` still guards
   `build_store`/`mirror_store` against accidental clobber.
 - **Specs workflow**: implemented specs move from `specs/` to `archive/`.
-- The old repo at `~/Projects/alt_nfp` is the frozen reference — read it for
-  parity questions, never modify it.
+- The old repo at `~/Projects/alt_nfp` is the frozen **port reference** — read it
+  to see what the JAX rewrite was ported from, never modify it. But it is a buggy
+  WIP, **not an oracle**: a reference value is not automatically correct. When code
+  must be *correct* (not merely port-faithful), validate against external ground
+  truth (published BLS / ALFRED), and re-baseline the golden if a correctness fix
+  diverges from the reference. Parity ≠ correctness.
