@@ -83,6 +83,27 @@ def build_revision_table(store_path=None) -> pl.DataFrame:
     return _join_revision(fp, later)
 
 
+def build_aruoba_design(
+    ref_months: list, regressors: dict[str, dict]
+) -> tuple[np.ndarray, list[str], list[str]]:
+    """Design matrix X_t with an intercept, plus a name list and the used set.
+
+    ``regressors`` maps name -> {ref_month: value}. A regressor that is entirely
+    NaN/missing across ``ref_months`` is dropped (records the skeleton vs full
+    regime). Rows with any NaN in a *kept* column are the caller's responsibility
+    to drop (see aruoba_regression).
+    """
+    cols, names, used = [np.ones(len(ref_months))], ["const"], []
+    for name, series in regressors.items():
+        vals = np.array([series.get(m, np.nan) for m in ref_months], dtype=float)
+        if np.all(~np.isfinite(vals)):
+            continue
+        cols.append(vals)
+        names.append(name)
+        used.append(name)
+    return np.column_stack(cols), names, used
+
+
 def qcew_settled_changes(store_path=None) -> pl.DataFrame:
     """Latest-vintage QCEW national total-private over-the-month change (thousands).
 

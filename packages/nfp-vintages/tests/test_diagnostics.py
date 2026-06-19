@@ -79,3 +79,34 @@ def test_qcew_settled_changes_shape():
     # catching unit errors (e.g., values in persons instead of thousands).
     vals = df["qcew_settled_change_k"].drop_nulls().to_numpy()
     assert (abs(vals) < 30000).all()
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Aruoba design matrix
+# ---------------------------------------------------------------------------
+from nfp_vintages.diagnostics import build_aruoba_design  # noqa: E402
+
+
+def test_build_aruoba_design_skeleton():
+    ref = [_d(2023, m, 1) for m in range(1, 7)]
+    regressors = {
+        "claims_mom": {m: float(i) for i, m in enumerate(ref)},
+        "jolts": {m: 9_000.0 + i for i, m in enumerate(ref)},
+        "lagged_revision": {m: float(-i) for i, m in enumerate(ref)},
+    }
+    X, names, used = build_aruoba_design(ref, regressors)
+    assert X.shape == (6, len(names))
+    assert names[0] == "const"
+    assert set(used) == {"claims_mom", "jolts", "lagged_revision"}
+    assert np.allclose(X[:, 0], 1.0)  # intercept column
+
+
+def test_build_aruoba_design_drops_all_nan_regressor():
+    ref = [_d(2023, m, 1) for m in range(1, 4)]
+    regressors = {
+        "claims_mom": dict.fromkeys(ref, 1.0),
+        "nfci": dict.fromkeys(ref, float("nan")),  # absent locally → dropped
+    }
+    X, names, used = build_aruoba_design(ref, regressors)
+    assert "nfci" not in names
+    assert "nfci" not in used
