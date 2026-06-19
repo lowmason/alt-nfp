@@ -104,6 +104,25 @@ def build_aruoba_design(
     return np.column_stack(cols), names, used
 
 
+@dataclass(frozen=True)
+class AruobaResult:
+    intercept_k: float          # alpha — the first-print bias (feeds section 5A)
+    r2: float                   # forecastable share of revision variance
+    coef_names: list[str]
+    coeffs: np.ndarray
+    n: int
+
+
+def aruoba_regression(revision_k: np.ndarray, X: np.ndarray, names: list[str]) -> AruobaResult:
+    """Fit revision = alpha + gamma'.X. Drops rows with any non-finite entry."""
+    revision_k = np.asarray(revision_k, dtype=float)
+    mask = np.isfinite(revision_k) & np.isfinite(X).all(axis=1)
+    Xm, ym = X[mask], revision_k[mask]
+    res = ols(Xm, ym)
+    return AruobaResult(intercept_k=float(res.coeffs[0]), r2=res.r2,
+                        coef_names=list(names), coeffs=res.coeffs, n=res.n)
+
+
 def qcew_settled_changes(store_path=None) -> pl.DataFrame:
     """Latest-vintage QCEW national total-private over-the-month change (thousands).
 

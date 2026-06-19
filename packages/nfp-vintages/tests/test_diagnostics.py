@@ -110,3 +110,31 @@ def test_build_aruoba_design_drops_all_nan_regressor():
     X, names, used = build_aruoba_design(ref, regressors)
     assert "nfci" not in names
     assert "nfci" not in used
+
+
+# ---------------------------------------------------------------------------
+# Task 9: Aruoba revision regression
+# ---------------------------------------------------------------------------
+from nfp_vintages.diagnostics import AruobaResult, aruoba_regression  # noqa: E402
+
+
+def test_aruoba_recovers_intercept_and_r2():
+    rng = np.random.default_rng(1)
+    n = 400
+    x = rng.normal(size=n)
+    # revision = 12 (bias) + 4*x + small noise → R^2 high, intercept ~12.
+    rev = 12.0 + 4.0 * x + rng.normal(scale=0.01, size=n)
+    X = np.column_stack([np.ones(n), x])
+    res = aruoba_regression(rev, X, ["const", "x"])
+    assert isinstance(res, AruobaResult)
+    assert res.intercept_k == approx(12.0, abs=0.1)
+    assert res.r2 > 0.99
+
+
+def test_aruoba_low_r2_for_pure_noise():
+    rng = np.random.default_rng(2)
+    n = 300
+    rev = rng.normal(scale=20.0, size=n)         # unforecastable
+    X = np.column_stack([np.ones(n), rng.normal(size=n)])
+    res = aruoba_regression(rev, X, ["const", "x"])
+    assert res.r2 < 0.1                           # below the gate threshold
