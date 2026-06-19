@@ -123,6 +123,35 @@ def aruoba_regression(revision_k: np.ndarray, X: np.ndarray, names: list[str]) -
                         coef_names=list(names), coeffs=res.coeffs, n=res.n)
 
 
+@dataclass(frozen=True)
+class MZResult:
+    alpha: float
+    beta: float
+    joint_stat: float    # Wald chi^2 for (alpha=0, beta=1)
+    joint_p: float
+    r2: float
+    n: int
+
+
+def mincer_zarnowitz(actual: np.ndarray, forecast: np.ndarray) -> MZResult:
+    """Efficiency regression actual = alpha + beta*forecast; test alpha=0, beta=1."""
+    from scipy.stats import chi2
+
+    actual = np.asarray(actual, dtype=float)
+    forecast = np.asarray(forecast, dtype=float)
+    mask = np.isfinite(actual) & np.isfinite(forecast)
+    a, f = actual[mask], forecast[mask]
+    X = np.column_stack([np.ones(a.size), f])
+    res = ols(X, a)
+    theta = res.coeffs                       # [alpha, beta]
+    theta0 = np.array([0.0, 1.0])
+    diff = theta - theta0
+    wald = float(diff @ np.linalg.inv(res.cov) @ diff)
+    p = float(chi2.sf(wald, df=2))
+    return MZResult(alpha=float(theta[0]), beta=float(theta[1]),
+                    joint_stat=wald, joint_p=p, r2=res.r2, n=res.n)
+
+
 def qcew_settled_changes(store_path=None) -> pl.DataFrame:
     """Latest-vintage QCEW national total-private over-the-month change (thousands).
 

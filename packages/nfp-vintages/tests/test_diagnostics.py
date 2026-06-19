@@ -138,3 +138,28 @@ def test_aruoba_low_r2_for_pure_noise():
     X = np.column_stack([np.ones(n), rng.normal(size=n)])
     res = aruoba_regression(rev, X, ["const", "x"])
     assert res.r2 < 0.1                           # below the gate threshold
+
+
+# ---------------------------------------------------------------------------
+# Task 10: Mincer–Zarnowitz efficiency regression
+# ---------------------------------------------------------------------------
+from nfp_vintages.diagnostics import MZResult, mincer_zarnowitz  # noqa: E402
+
+
+def test_mz_efficient_forecast_not_rejected():
+    rng = np.random.default_rng(3)
+    forecast = rng.normal(100.0, 50.0, 400)
+    actual = forecast + rng.normal(0.0, 1.0, 400)   # efficient: alpha~0, beta~1
+    res = mincer_zarnowitz(actual, forecast)
+    assert isinstance(res, MZResult)
+    assert res.alpha == approx(0.0, abs=2.0)
+    assert res.beta == approx(1.0, abs=0.05)
+    assert res.joint_p > 0.05                         # null not rejected
+
+
+def test_mz_biased_forecast_rejected():
+    rng = np.random.default_rng(4)
+    forecast = rng.normal(100.0, 50.0, 400)
+    actual = 30.0 + 0.5 * forecast + rng.normal(0.0, 1.0, 400)  # inefficient
+    res = mincer_zarnowitz(actual, forecast)
+    assert res.joint_p < 0.01                         # null rejected
