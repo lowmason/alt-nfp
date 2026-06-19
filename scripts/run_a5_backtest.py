@@ -25,6 +25,31 @@ PRESET = "light"
 BATCH_SEED = 9100
 REGIMES = {"t7": 7, "t1": 1}  # name -> days_before release
 
+# Months delayed/distorted by the 2025 government shutdown — flagged, not pooled
+# (see memory ces-oct2025-shutdown; specs/model_improvements.md section 3).
+SHUTDOWN_FLAGGED = frozenset({date(2025, 10, 1), date(2025, 9, 1)})
+
+
+def _claims_momentum_k() -> dict[date, float]:
+    """3-month change in monthly initial claims (thousands), keyed by month-start.
+
+    Returns {} if the claims indicator is absent locally (skeleton venue)."""
+    from nfp_ingest.indicators import read_indicator
+
+    df = read_indicator("claims")
+    if df is None or df.is_empty():
+        return {}
+    import polars as pl
+
+    monthly = (
+        df.with_columns(pl.col("ref_date").dt.truncate("1mo").alias("m"))
+        .group_by("m").agg(pl.col("value").mean().alias("v"))
+        .sort("m")
+        .with_columns((pl.col("v") - pl.col("v").shift(3)).alias("mom3"))
+    )
+    return {r["m"]: (r["mom3"] / 1000.0 if r["mom3"] is not None else float("nan"))
+            for r in monthly.iter_rows(named=True)}
+
 
 def _read_json(p: Path) -> dict:
     return json.loads(p.read_text())
@@ -110,6 +135,10 @@ def cmd_snapshot(root: Path) -> None:
                 # Bucket the lookup to the month so the monthly value joins.
                 "first_print_change_k": fp_map.get(target.replace(day=1)),
                 "best_avail_change_k": (actual_index - prev_index) * idx_to_level,
+                # prev_index required by cmd_score calibration (change_draws_k).
+                "prev_index": prev_index,
+                # n_providers from the snapshot scalars (0 locally → public-only venue).
+                "n_providers": meta["scalars"]["n_providers"],
             }
             _write_json(manifest_path, manifest)
     print(f"Grid built under {root}")
@@ -157,17 +186,38 @@ def cmd_batched(root: Path) -> None:
 
 
 def cmd_score(root: Path) -> int:
+    import numpy as np
     import polars as pl
     from nfp_ingest.first_print import first_print_changes
     from nfp_vintages.a5 import score
     from nfp_vintages.competitors.consensus import Consensus, load_consensus
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
+    from nfp_vintages.diagnostics import build_revision_table
+    from nfp_vintages.scoreboard import (
+        MonthTypeConfig,
+        change_draws_k,
+        classify_month_types,
+        crps_sample,
+        interval_coverage,
+        venue_for,
+    )
 
     manifest = _read_json(root / "grid_manifest.json")
+    prov = manifest["provenance"]
+    idx_to_level = float(prov["idx_to_level"])
     fp = first_print_changes()
     fp_hist = fp.select(["ref_date", "first_print_change_k", "vintage_date"])
     consensus = Consensus(load_consensus())  # None until Bloomberg file lands → "—"
     naive_rw, naive_mean = RandomWalk(fp_hist), TrailingMean(fp_hist, window=12)
+
+    # Month-type inputs (skeleton-safe: empty maps degrade to "normal"/"benchmark").
+    rev_tbl = build_revision_table()  # [ref_date, first_print_change_k, later_change_k, revision_k]
+    rev_months = [r["ref_date"] for r in rev_tbl.iter_rows(named=True)]
+    rev_abs = np.array([abs(r["revision_k"]) if r["revision_k"] is not None else np.nan
+                        for r in rev_tbl.iter_rows(named=True)], dtype=float)
+    mom = _claims_momentum_k()
+    claims_arr = np.array([mom.get(m, np.nan) for m in rev_months], dtype=float)
+    month_type = classify_month_types(rev_months, rev_abs, claims_arr, MonthTypeConfig())
 
     rows = []
     for rname, _days_before in REGIMES.items():
@@ -182,6 +232,25 @@ def cmd_score(root: Path) -> int:
             if actual is None:
                 continue
             model = batched[key]["nowcast_change_k"]
+            # Predictive draws for calibration (model only) from the persisted npz.
+            cov80 = cov90 = crps = None
+            npz_path = root / f"{rname}_batched_{key}.npz"
+            if npz_path.exists() and actual is not None:
+                with np.load(npz_path) as z:
+                    if "nowcast_pred_draws" in z:
+                        prev_index = float(t["prev_index"])
+                        cd = change_draws_k(
+                            z["nowcast_pred_draws"],
+                            prev_index=prev_index, idx_to_level=idx_to_level,
+                        )
+                        cov80 = interval_coverage(cd, actual, 0.80)
+                        cov90 = interval_coverage(cd, actual, 0.90)
+                        crps = crps_sample(cd, actual)
+            providers_present = bool(t.get("n_providers", 0))
+            # month_type keys are month-start (day=1) — ref is the day-12 model
+            # date, so normalize before lookup (same day-12-vs-day-1 alignment the
+            # harness already does for fp_map at run_a5_backtest.py:111).
+            mtype = month_type.get(ref.replace(day=1), "normal")
             preds = {
                 "model": model,
                 "consensus": consensus.predict(ref, as_of=as_of),
@@ -192,10 +261,17 @@ def cmd_score(root: Path) -> int:
                 rows.append({
                     "regime": rname,
                     "ref_month": ref,
+                    "month_type": mtype,
+                    "venue": venue_for(providers_present=providers_present),
+                    "shutdown_flag": ref in SHUTDOWN_FLAGGED,
                     "competitor": comp,
                     "pred_change_k": pred,
                     "actual_first_print_k": actual,
                     "error_k": None if pred is None else actual - pred,
+                    # calibration only meaningful for the model row
+                    "coverage_80": cov80 if comp == "model" else None,
+                    "coverage_90": cov90 if comp == "model" else None,
+                    "crps_k": crps if comp == "model" else None,
                 })
 
     if not rows:
@@ -207,33 +283,49 @@ def cmd_score(root: Path) -> int:
         return 0
 
     df = pl.DataFrame(rows)
-    # Exclude COVID (2020–2021) from headline metrics (decided-questions rule)
     scored = df.filter(
         pl.col("error_k").is_not_null()
         & ~pl.col("ref_month").dt.year().is_in([2020, 2021])
+        & ~pl.col("shutdown_flag")
     )
     df.write_parquet(root / "a5_results.parquet")
 
+    venues = sorted({v for v in df["venue"].unique() if v is not None})
     lines = ["# A5 backtest report", "",
-             "Model vs competitors on the CES **first print**, at T−7 and T−1.",
+             "Model vs competitors on the CES **first print**, at T−7 and T−1, "
+             "decomposed by month type.",
              "Consensus is T−1-only and renders `—` until the Bloomberg file lands.",
-             "COVID (2020–2021) excluded from metrics.", ""]
+             f"Venue(s) in this run: **{', '.join(venues) or 'public-only'}** — a "
+             "`public-only` run scores a providerless skeleton (spec section 10).",
+             "COVID (2020–2021) and shutdown-flagged months excluded from metrics.", ""]
+    order = ["normal", "large_revision", "turning_point", "benchmark_window"]
     for rname in REGIMES:
-        lines += [f"## Regime {rname}", "", "| competitor | n | ME | MAE | RMSE |",
-                  "|---|---|---|---|---|"]
-        for comp in ["model", "consensus", "naive_rw", "naive_mean"]:
-            e = scored.filter(
-                (pl.col("regime") == rname) & (pl.col("competitor") == comp)
-            )["error_k"].to_numpy()
-            m = score(e)
-            if m["n"] == 0:
-                lines.append(f"| {comp} | 0 | — | — | — |")
+        lines += [f"## Regime {rname}", ""]
+        for mtype in order:
+            sub = scored.filter((pl.col("regime") == rname) & (pl.col("month_type") == mtype))
+            n_months = sub.select(pl.col("ref_month").n_unique()).item()
+            lines += [f"### {mtype} ({n_months} months)", "",
+                      "| competitor | n | ME | MAE | RMSE |", "|---|---|---|---|---|"]
+            for comp in ["model", "consensus", "naive_rw", "naive_mean"]:
+                e = sub.filter(pl.col("competitor") == comp)["error_k"].to_numpy()
+                m = score(e)
+                if m["n"] == 0:
+                    lines.append(f"| {comp} | 0 | — | — | — |")
+                else:
+                    lines.append(
+                        f"| {comp} | {m['n']} | {m['me']:+,.0f}k | {m['mae']:,.0f}k "
+                        f"| {m['rmse']:,.0f}k |")
+            # Model calibration row for this bucket.
+            mc = sub.filter(pl.col("competitor") == "model")
+            cov80 = mc["coverage_80"].drop_nulls().mean()
+            cov90 = mc["coverage_90"].drop_nulls().mean()
+            crps = mc["crps_k"].drop_nulls().mean()
+            if cov80 is not None:
+                lines += ["",
+                          f"model calibration — 80% coverage: {cov80:.0%}, "
+                          f"90% coverage: {cov90:.0%}, mean CRPS: {crps:,.0f}k", ""]
             else:
-                lines.append(
-                    f"| {comp} | {m['n']} | {m['me']:+,.0f}k | {m['mae']:,.0f}k "
-                    f"| {m['rmse']:,.0f}k |"
-                )
-        lines.append("")
+                lines.append("")
     (root / "a5_report.md").write_text("\n".join(lines) + "\n")
     print((root / "a5_report.md").read_text())
     return 0
