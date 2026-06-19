@@ -36,7 +36,11 @@ def _write_json(p: Path, obj: dict) -> None:
 
 def cmd_snapshot(root: Path) -> None:
     from nfp_ingest.first_print import first_print_changes
-    from nfp_ingest.model_data import PROVIDERS_DEFAULT, panel_to_model_data
+    from nfp_ingest.model_data import (
+        PROVIDERS_DEFAULT,
+        levels_provenance,
+        panel_to_model_data,
+    )
     from nfp_ingest.panel import build_panel
     from nfp_ingest.snapshots import load_snapshot, snapshot_model_data
     from nfp_lookups.paths import VINTAGE_STORE_PATH
@@ -52,9 +56,7 @@ def cmd_snapshot(root: Path) -> None:
     dates = data_full["dates"]
     levels = data_full["levels"]
     ces_sa_index = levels["ces_sa_index"].to_numpy().astype(float)
-    base_row_idx = int(np.argmin(np.abs(ces_sa_index - 100.0)))
-    ces_sa_base_level = float(levels["ces_sa_level"].to_numpy().astype(float)[base_row_idx])
-    idx_to_level = ces_sa_base_level / 100.0
+    base_index, idx_to_level = levels_provenance(levels)
 
     fp = first_print_changes()  # ref_date -> first_print_change_k
     fp_map = dict(
@@ -64,7 +66,7 @@ def cmd_snapshot(root: Path) -> None:
     T = len(dates)
     target_indices = list(range(T - N_BACKTEST, T))
     manifest["provenance"] = {
-        "base_index": float(ces_sa_index[0]),
+        "base_index": base_index,
         "idx_to_level": idx_to_level,
         "end_year": END_YEAR,
         "preset": PRESET,

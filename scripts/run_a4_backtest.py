@@ -88,7 +88,11 @@ def _targets(manifest: dict) -> list[tuple[str, dict]]:
 
 def cmd_snapshot(root: Path) -> None:
     import polars as pl
-    from nfp_ingest.model_data import PROVIDERS_DEFAULT, panel_to_model_data
+    from nfp_ingest.model_data import (
+        PROVIDERS_DEFAULT,
+        levels_provenance,
+        panel_to_model_data,
+    )
     from nfp_ingest.panel import build_panel
     from nfp_ingest.snapshots import load_snapshot, snapshot_model_data
 
@@ -127,10 +131,7 @@ def cmd_snapshot(root: Path) -> None:
     g_ces_sa_actual = np.asarray(data_full["g_ces_sa"], dtype=float)
     levels = data_full["levels"]
     ces_sa_index = levels["ces_sa_index"].to_numpy().astype(float)
-    base_index = float(ces_sa_index[0])
-    base_row_idx = int(np.argmin(np.abs(ces_sa_index - 100.0)))
-    ces_sa_base_level = float(levels["ces_sa_level"].to_numpy().astype(float)[base_row_idx])
-    idx_to_level = ces_sa_base_level / 100.0
+    base_index, idx_to_level = levels_provenance(levels)
 
     T = len(dates)
     target_indices = list(range(T - N_BACKTEST, T))
