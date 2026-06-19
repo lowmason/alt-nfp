@@ -328,6 +328,39 @@ def cmd_score(root: Path) -> int:
                 lines.append("")
     (root / "a5_report.md").write_text("\n".join(lines) + "\n")
     print((root / "a5_report.md").read_text())
+
+    # ---- Second scoreboard: model & ADP vs QCEW-settled truth ----
+    from nfp_vintages.diagnostics import qcew_settled_changes
+    try:
+        qcew = {r["ref_date"]: r["qcew_settled_change_k"]
+                for r in qcew_settled_changes().iter_rows(named=True)}
+    except Exception as exc:  # store unavailable locally
+        qcew = {}
+        print(f"[qcew scoreboard] skipped: {exc}")
+    if qcew:
+        qlines = ["", "## Truth scoreboard (vs QCEW-settled change)", "",
+                  "Fair target for QCEW-anchored competitors (model, ADP). "
+                  "ADP renders `—` until Bloomberg data lands.",
+                  "| regime | competitor | n | ME | MAE | RMSE |",
+                  "|---|---|---|---|---|---|"]
+        model_rows = df.filter(pl.col("competitor") == "model")
+        for rname in REGIMES:
+            sub = model_rows.filter(pl.col("regime") == rname)
+            errs = []
+            for r in sub.iter_rows(named=True):
+                # qcew keys are month-start; ref_month rows are the day-12 model date.
+                truth = qcew.get(r["ref_month"].replace(day=1))
+                if truth is not None and r["pred_change_k"] is not None:
+                    errs.append(truth - r["pred_change_k"])
+            mm = score(np.array(errs, dtype=float))
+            cell = (f"| {rname} | model | {mm['n']} | {mm['me']:+,.0f}k "
+                    f"| {mm['mae']:,.0f}k | {mm['rmse']:,.0f}k |") if mm["n"] else \
+                   f"| {rname} | model | 0 | — | — | — |"
+            qlines.append(cell)
+            qlines.append(f"| {rname} | adp | 0 | — | — | — |")  # Bloomberg-only
+        with (root / "a5_report.md").open("a") as fh:
+            fh.write("\n".join(qlines) + "\n")
+
     return 0
 
 

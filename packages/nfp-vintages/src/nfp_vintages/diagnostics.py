@@ -81,3 +81,45 @@ def build_revision_table(store_path=None) -> pl.DataFrame:
     fp = fp.select(["ref_date", "first_print_change_k"])
     later = _latest_ces_changes(store_path)
     return _join_revision(fp, later)
+
+
+def qcew_settled_changes(store_path=None) -> pl.DataFrame:
+    """Latest-vintage QCEW national total private over-the-month change (thousands).
+
+    The settled QCEW level is the fair external target for QCEW-anchored competitors.
+    Selects max(vintage_date) per ref month, level-differences, and returns the result
+    in thousands (employment is already stored in thousands; no unit conversion needed).
+
+    THREE KNOWN LIMITATIONS (DONE_WITH_CONCERNS):
+    1. NOT seasonally adjusted (NSA): The store holds only NSA QCEW; the model nowcast
+       and CES first-print are seasonally adjusted. Comparing SA errors to this NSA truth
+       mixes seasonality and overstates apparent errors in summer/winter months.
+    2. Private-only: The total (industry_code='05', ownership='private') excludes
+       government workers — it is not directly comparable to CES total nonfarm.
+    3. Q1 hole (April gap): QCEW ref_dates cover months 4–12 only (Jan–Mar are absent
+       from the store). The April shift(1) entry is a 4-month gap (Dec→Apr), not a
+       monthly change. May–Dec differences are genuine month-over-month changes.
+    These limitations are logged here so downstream callers can filter or caveat as needed.
+    """
+    from nfp_ingest.vintage_store import read_vintage_store
+    from nfp_lookups.paths import VINTAGE_STORE_PATH
+
+    store_path = store_path or VINTAGE_STORE_PATH
+    lf = read_vintage_store(
+        store_path, source="qcew", seasonally_adjusted=False,
+        geographic_type="national", geographic_code="00",
+        industry_type="total", industry_code="05",
+    )
+    df = (
+        lf.collect()
+        # Keep only the aggregate (null size_class = all size classes combined).
+        .filter(pl.col("size_class_code").is_null())
+        .with_columns(pl.col("ref_date").dt.truncate("1mo"))  # store ref_date is day-12; align to month-start
+        .sort(["ref_date", "vintage_date"])
+        .group_by("ref_date").agg(pl.col("employment").last().alias("level"))
+        .sort("ref_date")
+        .with_columns(((pl.col("level") - pl.col("level").shift(1))).alias("qcew_settled_change_k"))
+        .select(["ref_date", "qcew_settled_change_k"])
+        .drop_nulls("qcew_settled_change_k")
+    )
+    return df

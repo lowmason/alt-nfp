@@ -62,3 +62,20 @@ def test_build_revision_table_real():
     tbl = build_revision_table()
     assert {"ref_date", "first_print_change_k", "later_change_k", "revision_k"} <= set(tbl.columns)
     assert tbl.height > 0
+
+
+from nfp_vintages.diagnostics import qcew_settled_changes  # noqa: E402
+
+
+@pytest.mark.real_store
+@pytest.mark.skipif(not _store_available(), reason="vintage store unavailable")
+def test_qcew_settled_changes_shape():
+    df = qcew_settled_changes()
+    assert {"ref_date", "qcew_settled_change_k"} <= set(df.columns)
+    assert df.height > 0
+    # change values are in a sane band (thousands per month); the plan's original
+    # threshold of 5000 is exceeded by the COVID Apr-2020 crash (-21,923k), which
+    # is real data. Threshold raised to 30000 to accommodate COVID while still
+    # catching unit errors (e.g., values in persons instead of thousands).
+    vals = df["qcew_settled_change_k"].drop_nulls().to_numpy()
+    assert (abs(vals) < 30000).all()
