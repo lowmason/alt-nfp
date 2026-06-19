@@ -59,9 +59,53 @@ def test_join_revision_pure():
     reason="Vintage store not available (no SA CES data in store)",
 )
 def test_build_revision_table_real():
+    # Defaults to PRIVATE '05' (Track A): the model nowcasts private NFP.
     tbl = build_revision_table()
     assert {"ref_date", "first_print_change_k", "later_change_k", "revision_k"} <= set(tbl.columns)
     assert tbl.height > 0
+    # First-to-third PRIVATE revisions are literature-plausible: tens of k, NOT the
+    # ~-223k garbage intercept a cross-gap shift(1) diff produced before the
+    # adjacency guard. The pooled |revision| stays well under 100k.
+    rev = tbl["revision_k"].drop_nulls().to_numpy()
+    assert rev.size > 0
+    assert float(np.abs(rev).mean()) < 100.0
+
+
+@pytest.mark.real_store
+@pytest.mark.skipif(
+    not _store_available(),
+    reason="Vintage store not available (no SA CES data in store)",
+)
+def test_third_print_changes_gap_safe_adjacent_only():
+    # The gap-safe third-print change must NEVER diff across a month gap. Recover the
+    # third-print LEVEL months independently, then assert every returned change sits
+    # on an adjacent (exactly-one-month-apart) level pair. A naive shift(1) over a
+    # store that omits months (e.g. shutdown holes) would diff across a gap and fail.
+    from nfp_ingest.vintage_store import read_vintage_store
+    from nfp_lookups.paths import VINTAGE_STORE_PATH
+    from nfp_vintages.diagnostics import _third_print_changes
+
+    df = _third_print_changes()
+    assert {"ref_date", "later_change_k"} <= set(df.columns)
+    assert df.height > 0
+
+    level_months = set(
+        read_vintage_store(
+            VINTAGE_STORE_PATH, source="ces", seasonally_adjusted=True,
+            geographic_type="national", geographic_code="00",
+            industry_type="total", industry_code="05",
+        )
+        .collect()
+        .filter((pl.col("benchmark_revision") == 0) & (pl.col("employment") > 0))
+        .with_columns(pl.col("ref_date").dt.truncate("1mo"))["ref_date"]
+        .to_list()
+    )
+    # Each returned change at month M requires M and its exact prior month to both be
+    # real third-print level months — i.e. no gap was bridged.
+    for m in df["ref_date"].to_list():
+        prev = pl.Series([m]).dt.offset_by("-1mo")[0]
+        assert m in level_months
+        assert prev in level_months, f"change at {m} bridged a month gap (prev {prev} absent)"
 
 
 from nfp_vintages.diagnostics import qcew_settled_changes  # noqa: E402

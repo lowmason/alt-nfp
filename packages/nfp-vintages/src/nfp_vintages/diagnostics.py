@@ -37,10 +37,26 @@ def ols(X: np.ndarray, y: np.ndarray) -> OLSResult:
     return OLSResult(coeffs=beta, cov=sigma2 * xtx_inv, r2=r2, n=n, residuals=resid)
 
 
-def _latest_ces_changes(store_path=None) -> pl.DataFrame:
-    """Latest-vintage CES SA national total over-the-month change (thousands).
+def _third_print_changes(store_path=None, industry_code: str = "05") -> pl.DataFrame:
+    """First-to-THIRD PRIVATE CES SA over-the-month change (thousands), gap-safe.
 
-    ref_date is truncated to month-start (1st) to align with first_print_changes().
+    The model nowcasts PRIVATE NFP (``industry_code='05'``); this is the third-print
+    private level-change that, differenced against the private first print, defines
+    the Aruoba revision LHS. ``industry_code='05'`` (total private) by default, SA.
+
+    Per reference month the THIRD monthly print level ``L2(M)`` is the latest
+    NON-benchmark (``benchmark_revision == 0``) vintage — equivalently the max
+    ``revision`` among the monthly prints (``revision == 2`` when present; rev 0/1
+    survive gracefully at the frontier). Benchmark vintages are excluded so annual-
+    benchmark wedges never enter the revision. The ``-1.0`` "no print" shutdown
+    sentinel (``employment <= 0``) is dropped. ref_date is truncated to month-start.
+
+    The change is computed ONLY between ADJACENT months:
+    ``change(M) = L2(M) - L2(M-1)`` where the prior row's ref_date is EXACTLY one
+    month before ``M``. The store omits some months, so a naive ``.shift(1)`` would
+    diff across month gaps and produce a garbage intercept — the adjacency guard (an
+    explicit one-month-prior self-join, NOT shift) is mandatory. Non-adjacent months
+    get a null change and are dropped.
     """
     from nfp_ingest.vintage_store import read_vintage_store
     from nfp_lookups.paths import VINTAGE_STORE_PATH
@@ -49,17 +65,28 @@ def _latest_ces_changes(store_path=None) -> pl.DataFrame:
     lf = read_vintage_store(
         store_path, source="ces", seasonally_adjusted=True,
         geographic_type="national", geographic_code="00",
-        industry_type="total", industry_code="00",
+        industry_type="total", industry_code=industry_code,
     )
-    return (
+    # Third-print level per ref month: latest bmr0 monthly vintage, sentinel dropped.
+    levels = (
         lf.collect()
-        .sort(["ref_date", "vintage_date"])
+        .filter((pl.col("benchmark_revision") == 0) & (pl.col("employment") > 0))
+        .with_columns(pl.col("ref_date").dt.truncate("1mo").alias("ref_date"))
+        .sort(["ref_date", "revision", "vintage_date"])
         .group_by("ref_date").agg(pl.col("employment").last().alias("level"))
         .sort("ref_date")
-        .with_columns(
-            pl.col("ref_date").dt.truncate("1mo").alias("ref_date"),
-            (pl.col("level") - pl.col("level").shift(1)).alias("later_change_k"),
-        )
+        .with_columns(prev_month=pl.col("ref_date").dt.offset_by("-1mo"))
+    )
+    # Adjacency guard: join each month to its EXACT one-month-prior level. A self
+    # join on the prior-month key (not shift) leaves the change null wherever the
+    # store skips a month, so gaps never masquerade as monthly changes.
+    prev = levels.select(
+        pl.col("ref_date").alias("prev_month"),
+        pl.col("level").alias("prev_level"),
+    )
+    return (
+        levels.join(prev, on="prev_month", how="left")
+        .with_columns((pl.col("level") - pl.col("prev_level")).alias("later_change_k"))
         .select(["ref_date", "later_change_k"])
         .drop_nulls("later_change_k")
     )
@@ -73,13 +100,25 @@ def _join_revision(fp: pl.DataFrame, later: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def build_revision_table(store_path=None) -> pl.DataFrame:
-    """[ref_date, first_print_change_k, later_change_k, revision_k] over the store."""
+def build_revision_table(store_path=None, industry_code: str = "05") -> pl.DataFrame:
+    """[ref_date, first_print_change_k, later_change_k, revision_k] over the store.
+
+    PRIVATE '05' by default (Track A): the model nowcasts private NFP, so both the
+    first-print and the third-print over-the-month changes are the CES total-private
+    SA series. ``first_print_change_k`` is ``first_print_changes(industry_code='05')``;
+    ``later_change_k`` is the gap-safe first-to-third private change; ``revision_k =
+    later_change_k - first_print_change_k`` for matched ADJACENT months only.
+    Public return columns are STABLE across the retarget so callers (run_a5_backtest,
+    run_tier1_diagnostics) keep working.
+    """
     from nfp_ingest.first_print import first_print_changes
 
-    fp = first_print_changes(**({"store_path": store_path} if store_path else {}))
+    fp = first_print_changes(
+        industry_code=industry_code,
+        **({"store_path": store_path} if store_path else {}),
+    )
     fp = fp.select(["ref_date", "first_print_change_k"])
-    later = _latest_ces_changes(store_path)
+    later = _third_print_changes(store_path, industry_code=industry_code)
     return _join_revision(fp, later)
 
 
@@ -185,21 +224,22 @@ def qcew_settled_changes(store_path=None) -> pl.DataFrame:
     Selects max(vintage_date) per ref month, level-differences, and returns the result
     in thousands (employment is already stored in thousands; no unit conversion needed).
 
-    Series used: industry_code='05' (total private, NSA). The store does NOT contain
-    industry_code='00' (total nonfarm) — total private is the only available QCEW proxy.
+    Series used: industry_code='05' (total private, NSA). This is the model's INTENDED
+    target, not a fallback: the model nowcasts PRIVATE NFP (it is QCEW-anchored, and
+    this store's QCEW is total-private), so the private QCEW-settled value is the
+    PRIMARY administrative truth the private nowcast is held to. The '00' (total
+    nonfarm) QCEW would belong to a future, unbuilt total-NFP extension (Track B), not
+    to this private track.
 
-    THREE KNOWN LIMITATIONS (DONE_WITH_CONCERNS):
+    TWO RESIDUAL CAVEATS (data-shape, not a target mismatch):
     1. NOT seasonally adjusted (NSA): The store holds only NSA QCEW; the model nowcast
        and CES first-print are seasonally adjusted. Comparing SA errors to this NSA truth
        mixes seasonality and overstates apparent errors in summer/winter months.
-    2. Private-only (industry_code='05'): Excludes government workers — not directly
-       comparable to CES total nonfarm (industry_code='00'). Total-nonfarm QCEW
-       (industry_code='00') is absent from this store.
-    3. Q1 hole (April gap): QCEW ref_dates cover months 4–12 only (Jan–Mar are absent
+    2. Q1 hole (April gap): QCEW ref_dates cover months 4–12 only (Jan–Mar are absent
        from the store). The April shift(1) entry is a 4-month gap (Dec→Apr), not a
        monthly change. May–Dec differences are genuine month-over-month changes.
        Callers scoring metrics must exclude April to avoid corrupting ME/MAE/RMSE.
-    These limitations are logged here so downstream callers can filter or caveat as needed.
+    These caveats are logged here so downstream callers can filter or caveat as needed.
     """
     from nfp_ingest.vintage_store import read_vintage_store
     from nfp_lookups.paths import VINTAGE_STORE_PATH
