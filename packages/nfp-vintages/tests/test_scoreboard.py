@@ -2,7 +2,13 @@
 from datetime import date
 
 import numpy as np
-from nfp_vintages.scoreboard import MonthTypeConfig, classify_month_types
+from nfp_vintages.scoreboard import (
+    MonthTypeConfig,
+    classify_month_types,
+    crps_sample,
+    interval_coverage,
+)
+from pytest import approx as pytest_approx
 
 
 def test_classify_month_types_buckets():
@@ -40,3 +46,26 @@ def test_classify_month_types_precedence_large_over_benchmark():
                           benchmark_months=(2,))
     out = classify_month_types(ref, revision_abs, claims_mom, cfg)
     assert out[date(2023, 2, 1)] == "large_revision"
+
+
+# Task 2: Calibration metrics — coverage and CRPS
+
+
+def test_interval_coverage_central_interval():
+    draws = np.linspace(-100.0, 100.0, 2001)  # symmetric around 0
+    assert interval_coverage(draws, actual=0.0, level=0.80) is True
+    assert interval_coverage(draws, actual=95.0, level=0.80) is False   # outside p10..p90
+    assert interval_coverage(draws, actual=95.0, level=0.95) is True    # inside p2.5..p97.5
+
+
+def test_crps_point_mass_is_absolute_error():
+    # CRPS of a degenerate (point-mass) forecast == |forecast - actual|.
+    draws = np.full(500, 10.0)
+    assert crps_sample(draws, actual=13.0) == pytest_approx(3.0)
+
+
+def test_crps_smaller_when_sharper_and_centered():
+    actual = 0.0
+    sharp = np.random.default_rng(0).normal(0.0, 5.0, 4000)
+    wide = np.random.default_rng(0).normal(0.0, 50.0, 4000)
+    assert crps_sample(sharp, actual) < crps_sample(wide, actual)

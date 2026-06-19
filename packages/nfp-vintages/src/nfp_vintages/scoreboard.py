@@ -54,3 +54,33 @@ def classify_month_types(
         else:
             out[m] = "normal"
     return out
+
+
+def interval_coverage(draws: np.ndarray, actual: float, level: float) -> bool:
+    """True iff ``actual`` lies in the central ``level`` predictive interval."""
+    d = np.asarray(draws, dtype=float)
+    d = d[np.isfinite(d)]
+    if d.size == 0 or not np.isfinite(actual):
+        return False
+    lo = np.percentile(d, 100.0 * (1.0 - level) / 2.0)
+    hi = np.percentile(d, 100.0 * (1.0 + level) / 2.0)
+    return bool(lo <= actual <= hi)
+
+
+def crps_sample(draws: np.ndarray, actual: float) -> float:
+    """Sample-based CRPS (energy form): E|X-y| - 0.5 E|X-X'|.
+
+    Lower is better. For a point-mass forecast this reduces to |forecast - y|.
+    """
+    d = np.asarray(draws, dtype=float)
+    d = d[np.isfinite(d)]
+    n = d.size
+    if n == 0 or not np.isfinite(actual):
+        return float("nan")
+    term1 = np.abs(d - actual).mean()
+    # 0.5 * mean_{i,j} |x_i - x_j| via the sorted-array O(n log n) identity.
+    s = np.sort(d)
+    i = np.arange(1, n + 1)
+    # mean pairwise abs diff = (2 / n^2) * sum_i (2i - n - 1) * s_i
+    mean_pairwise = (2.0 / (n * n)) * np.sum((2 * i - n - 1) * s)
+    return float(term1 - 0.5 * mean_pairwise)
