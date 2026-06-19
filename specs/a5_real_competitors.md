@@ -1,12 +1,30 @@
 # A5 — Real competitors in the harness (design)
 
-Status: **design, in review (2026-06-13)**. Implements the A5 gate in
-`plans/0-port_and_staged_plan.md` ("Real competitors in the harness") and
-resolves the evaluation-convention question left open by
+Status: **design, revised 2026-06-19** (retargeted to **private** NFP). Implements
+the A5 gate in `plans/0-port_and_staged_plan.md` ("Real competitors in the
+harness") and resolves the evaluation-convention question left open by
 `specs/ces_growth_convention.md` and the A4 dual-track finding
 (`plans/6-a4_vmap_backtests.md`) — by choosing **Option A (the first
-print)** as the sole A5 target (plans/0 SQ1, answered 2026-06-13). Companion
-spec for the consensus data source: `specs/bloomberg_consensus.md`.
+print)** as the first-print target over revised-CES targeting (plans/0 SQ1,
+answered 2026-06-13). The private retarget (2026-06-19) adds a second scored
+truth on a distinct axis — the **private QCEW-settled** administrative value,
+made the **primary** comparison (§2c) — which SQ1 did not speak to. The
+**model-side counterpart** (and the source of the private retarget) is
+`specs/model_improvements.md`. Companion spec for the Bloomberg consensus source —
+now a **Track B** (deferred Total-NFP) artifact, see below — is
+`specs/bloomberg_consensus.md`.
+
+**Private retarget (2026-06-19).** A5 scores the **private** nowcast
+(`industry_code='05'`), not total nonfarm (`'00'`). The model's signal is
+inherently private — it is QCEW-anchored (private in this store) and its richest
+inputs are private payroll providers — so it must be scored against the **private**
+first print and the **private** QCEW-settled truth. The run-path's `'00'` default
+is a latent mismatch corrected in `model_improvements.md`; `'00'` total data
+exists only for a future, unbuilt **Track B** ("private nowcast + government
+forecast = total"). On the private track the **only** competitors are the **naive
+floors**: ADP is removed entirely (competitor *and* regressor), and **consensus is
+removed** — it is a Total object with no meaning against the private nowcast alone,
+so it moves to the deferred Track B (which also needs a new government forecast).
 
 ## TL;DR
 
@@ -15,34 +33,44 @@ spec for the consensus data source: `specs/bloomberg_consensus.md`.
    report. It touches **no** `nfp-model` code, **no** `transform_to_panel`,
    **no** `build_model_data`, and **no** A1/A2/A3 golden-mastered path. The
    model already emits nowcasts through the A4 batched harness; A5 wraps
-   scoring around them. The parity firewall stays intact.
-2. **Target: the first print** (plans/0 strategic question 1, **answered
-   2026-06-13**). Every competitor is scored against the within-release
-   headline change BLS announces — Option A, an additive extractor over store
-   levels. This is exactly what consensus aims at, so the comparison is
-   apples-to-apples. Benchmark-informed / "revised-truth" targeting is
-   **deferred** to a separate later model (this model tweaked to target
-   benchmark revisions, or a new one). `final_view` revised truth may appear
-   as an *unscored* reference column (to show revision magnitude beside the
-   first-print scores) but is **not** an A5 target and gates nothing.
+   scoring around them. The parity firewall stays intact. Threading
+   `industry_code='05'` into the data-layer reads that *feed* the model
+   (`first_print_changes`, `panel_to_model_data`, the snapshot target) is a
+   data-layer change, not a model change — the firewall holds.
+2. **Targets: two PRIVATE truths** (`industry_code='05'`). The **private
+   QCEW-settled** value is the **primary** comparison (§2c) — the model is
+   QCEW-anchored, so the administrative private number is the closest truth it can
+   be held to. The **private first print** is the second scored truth (plans/0
+   SQ1, **answered 2026-06-13** — Option A, now read on `'05'`): the within-release
+   private headline change BLS announces, an additive extractor over store levels.
+   Both are scored at each regime.
+   Benchmark-informed / "revised-truth" targeting is **deferred** to a separate
+   later model. A `final_view` private revised-truth column may appear as an
+   *unscored* reference (to show revision magnitude) but is **not** an A5 target.
 3. **Two near-release regimes.** The model is scored at **T−7** and **T−1**
    (BLS-release(M) − 7 and − 1 days), both new grids. These sit in the window
    where the payroll-provider inputs are near-complete — provider series
    quality rises as more of month M's payrolls are processed, so day-12 of M
-   (the A4 grid) starves the model of its best input. Consensus is a **T−1**
-   competitor (the street median locks ~release-eve); the smart baseline and
-   naive floors run at both. T−7 is the model's read a week early; T−1 is the
-   fair head-to-head against the locked street.
-4. **Competitor set.** model · consensus (pluggable, Bloomberg-sourced —
-   staged, T−1) · smart baseline (bridge regression on **vintage-censored**
-   claims/JOLTS) · naive floors (random-walk, trailing-12-month mean). **ADP
-   is intentionally dropped** — see §4.
+   (the A4 grid) starves the model of its best input. The naive floors run at
+   both; the **T−7 → T−1 gap quantifies the value of the final week of provider
+   and claims information** before the print. (Consensus, formerly the T−1
+   head-to-head, is a Track-B Total object and no longer appears here.)
+4. **Competitor set (private track) — naive floors only.** model · naive floors
+   (random-walk, trailing-12-month mean), scored against the private first print
+   and the **primary** private QCEW-settled truth. **ADP is removed entirely**
+   (competitor *and* regressor). **Consensus is removed** from the private track
+   — a Total object, deferred to Track B. The former vintage-censored
+   claims/JOLTS **bridge baseline** is also out as a competitor ("naive floors
+   only"); the same regression survives as the Tier-1 **Aruoba diagnostic** in
+   `model_improvements.md` §4 — see §4 here.
 
 ## 1. Scope and non-goals
 
-**In scope.** New evaluation-side library code (targets + competitor
-adapters), two new near-release snapshot grids (T−7, T−1), and an
-`a5_report.md` scoreboard.
+**In scope.** New evaluation-side library code (private targets + naive-floor
+competitor adapters), two new near-release snapshot grids (T−7, T−1) on the
+**private** target, and an `a5_report.md` scoreboard. All series are
+`industry_code='05'` (private), threaded through the data-layer reads that feed
+the model.
 
 **Explicit non-goals (the firewall).**
 
@@ -52,57 +80,84 @@ adapters), two new near-release snapshot grids (T−7, T−1), and an
   or any golden-mastered selection/growth path. The first-print target is an
   **additive** read over store levels (per `ces_growth_convention.md` §5
   Option A) — it adds a new derived series, it does not alter the `growth`
-  column A1/A2 pin.
+  column A1/A2 pin. Passing `industry_code='05'` to the data-layer reads
+  (`first_print_changes`, `panel_to_model_data`, `read_vintage_store`) selects
+  the private series — it is the *data* fed to the model, not model code, and
+  these functions already accept the parameter (default `'00'`).
 - No new model features (Phase A's parity-is-done rule still holds; competitor
   comparison is measurement, not modeling).
 - The **store is append-only and read-only** for A5 (root CLAUDE.md hard
   rule). A5 reads levels; it never writes.
 
-## 2. Target — the first print (Option A)
+## 2. Targets — the private first print and the private QCEW-settled truth
 
-A5 scores against **one** actual: the within-release headline change BLS
-announces. plans/0 strategic question 1 is **answered (2026-06-13): the
-target is the first print.** Benchmark-informed ("revised-truth") targeting
-is a separate, later model's concern (this model tweaked to target benchmark
-revisions, or a new one) and is out of A5 scope.
+A5 scores against the **private** (`industry_code='05'`) actuals. Two truths are
+scored: the **private QCEW-settled** value — the **primary** comparison, the
+administrative number the QCEW-anchored model is closest to (§2c) — and the
+**private first print**, the within-release headline change BLS announces (§2a).
+plans/0 strategic question 1 is **answered (2026-06-13): Option A, the first
+print** (now read on `'05'`). Benchmark-informed ("revised-truth") targeting is a
+separate, later model's concern and is out of A5 scope.
 
-### 2a. First print (Option A) — the scored target
+### 2a. Private first print (Option A) — a scored target
 
-The within-release headline change BLS announces on release day:
-`headline(p, R) = log L(p at R) − log L(p−1 at R)`, both levels from the same
-release. Built by a new extractor reading store **levels** under the
-structural pairing rule from `ces_growth_convention.md` §5:
+The within-release **private** headline change BLS announces on release day:
+`headline(p, R) = log L(p at R) − log L(p−1 at R)`, both private (`'05'`) levels
+from the same release. Built by the existing extractor reading store **levels**
+under the structural pairing rule from `ces_growth_convention.md` §5 (the pairing
+mechanics are industry-agnostic; only the series read changes):
 
 - partner of `(p, rev r, bmr 0)` is `(p−1, rev r+1, bmr 0)` for r ∈ {0, 1};
 - at benchmark months, fall back to `p−1`'s latest `(rev 2, bmr ≥ 1)` row;
 - **never** join on `vintage_date` equality (historical stamps misalign);
 - for r = 2 outside benchmark season headline == cohort by construction.
 
-Coverage is 271/273 rev-0 months (the two misses — 2003-05 history edge,
-2026-01 Dec-rev-1 shadow with a bmr-1 fallback — are handled per the spec).
-Validated against published headlines (+73k for 2025-07, +143k for 2025-01,
-+130k for 2026-01).
+On the rebuilt private store, coverage is **106/108 rev-0 months** (2017-01 →
+2026-01; the two nulls are the 2017-01 history-start edge and the 2025-11
+Oct-2025-shutdown ref-date hole — see memory `ces-oct2025-shutdown`). Verified
+2026-06-19 against published **private** headlines: **+83k** for 2025-07, **+111k**
+for 2025-01, **+172k** for 2026-01. (The earlier total-nonfarm figures
+271/273-month coverage, a 2003 history edge, and +73k/+143k/+130k were `'00'`
+facts and do not apply to the private series.)
 
-**Home:** new `nfp_ingest/first_print.py` (alongside `model_data.py`, the
-spec's recommended home). Returns per-period
-`(first_print_growth, first_print_change_k, vintage_date)`. Unit-tested
-against the published headlines above. Zero contact with pinned paths.
+**Home:** existing `nfp_ingest/first_print.py` (alongside `model_data.py`).
+`first_print_changes(industry_code='05')` returns per-period
+`(ref_date, first_print_growth, first_print_change_k, vintage_date)`. Unit-tested
+against the private headlines above. Zero contact with pinned paths.
 
 ### 2b. Revised truth — unscored reference only (deferred)
 
-The diff of one internally coherent latest-published level path
-(`nfp_vintages.views.final_view` semantics) is basis-consistent by
-construction and remains trivially available. It MAY be rendered as an
-*unscored* reference column so the magnitude of subsequent revision is
-visible beside the first-print scores — but it is **not** an A5 target, it
-gates nothing, and the model is not scored on it. Full revised-truth
-evaluation belongs to the future benchmark-targeting model (plans/0 SQ1,
-resolved). If shown, it cleanly replaces the A4 report's rough
-"best-available" track.
+The diff of one internally coherent latest-published **private** level path
+(`nfp_vintages.views.final_view` semantics on `'05'`) is basis-consistent by
+construction and remains trivially available. It MAY be rendered as an *unscored*
+reference column so the magnitude of subsequent revision is visible beside the
+scores — but it is **not** an A5 target, it gates nothing, and the model is not
+scored on it. **NB:** this `final_view` revised truth (latest *published* CES) is
+distinct from the §2c **QCEW-settled** truth (the administrative anchor); the
+QCEW-settled value is a *scored* primary target, the `final_view` diff is only an
+optional reference. Full revised-truth evaluation belongs to the future
+benchmark-targeting model (plans/0 SQ1, resolved).
 
 **Home (only if the reference column is wanted):** `nfp_vintages.evaluation`
-gains a small `revised_truth_change_k(panel)` helper on `final_view`. Defer
-if not needed.
+gains a small `revised_truth_change_k(panel)` helper on the private `final_view`.
+Defer if not needed.
+
+### 2c. Private QCEW-settled truth — the primary scored target
+
+The model's latent is pinned to **private QCEW** (`industry_code='05'`,
+`model.py` Student-t anchor), so the **QCEW-settled private value** is the closest
+administrative truth it can be held to and is the **primary** scoreboard
+comparison (per `model_improvements.md` §3). The model is scored against this
+QCEW-settled private number *and* the private first print at each regime; the
+QCEW-settled column is the **primary** comparison (the closest administrative
+truth to the QCEW-anchored model). Naive floors are scored against it identically.
+**Basis caveat (open item, §8):** this store's QCEW `'05'` is **NSA-only** while
+the CES first print and the model nowcast are **SA** — the QCEW-settled scoring
+must reconcile that basis (via the model's existing QCEW-anchor basis handling, or
+an explicit SA/NSA bridge) before the comparison is apples-to-apples; neither this
+spec nor `model_improvements.md` §3 has pinned the mechanism. Home: the scoring
+path in `run_a5_backtest.py` reads the QCEW-settled private series alongside
+`first_print_changes('05')`; no pinned path is touched.
 
 ## 3. Information regimes — the harness shape
 
@@ -124,14 +179,16 @@ one.
 
 | Regime | As-of date | Competitors present | Measures |
 |---|---|---|---|
-| **T−7** | BLS-release(M) − 7 days | model, smart baseline, naive | the model's read **one week before** the print, on near-complete provider data (consensus has not locked yet) |
-| **T−1** | BLS-release(M) − 1 day (release-eve) | model, consensus, smart baseline, naive | the **fair head-to-head**: the model on the full pre-release information set, against the locked street median |
+| **T−7** | BLS-release(M) − 7 days | model, naive | the model's read **one week before** the print, on near-complete provider data |
+| **T−1** | BLS-release(M) − 1 day (release-eve) | model, naive | the model on the **full pre-release information set** — its best read before the print |
 
-The T−7 → T−1 gap quantifies how much the final week of provider payments and
-claims is worth; the T−1 regime is where the consensus comparison lives (the
-Bloomberg survey median is a release-eve snapshot, so it aligns to T−1 — see
-`specs/bloomberg_consensus.md`; a week earlier the street has not yet formed a
-reliable median, so consensus renders `—` at T−7).
+The T−7 → T−1 gap quantifies how much the **final week of provider payments and
+claims is worth**: T−7 is the model's read a week early, T−1 is its read on the
+complete pre-release information set, and the difference isolates the value of
+that last week of high-frequency data. Both regimes are scored against the same
+two private truths (QCEW-settled primary, first print). (The consensus
+head-to-head that formerly defined T−1 is a Track-B Total contest — see the
+TL;DR and §4 — and no longer lives in either private regime.)
 
 **Grid construction.** Two new snapshot grids analogous to the A4 `snapshot`
 command, with `as_of = _ces_publication_date(M) − {7, 1} days` (release date
@@ -147,42 +204,47 @@ day-12 grid is not reused for A5 scoring) but reuse `fit_model_batch`
 batched harness. Buildability failures surface cheaply via the A1
 negative-master pattern (record, don't crash).
 
-## 4. Competitors
+## 4. Competitors — naive floors only
 
-All competitors are reduced to a single comparable quantity per reference
-month: **MoM change in total nonfarm payrolls, thousands** (`change_k`), the
-same unit the model nowcast and the first-print target use.
+On the private (Track A) track the **only** competitors are the **naive floors**.
+All competitors are reduced to a single comparable quantity per reference month:
+**MoM change in private payrolls, thousands** (`change_k`, `industry_code='05'`),
+the same unit the model nowcast and the private targets use.
 
-- **Model.** Nowcast `change_k` from the batched fits at each regime's as-of
-  (produced by the T−7 / T−1 grids; A5 reads the reduction).
-- **Consensus.** Pluggable adapter `load_consensus(path=None) -> DataFrame |
-  None`: reads a configured file in the contract schema if present, else
-  returns `None` and the scoreboard renders the column as `—`. **Staged** —
-  structure ships now; the Bloomberg-sourced data drops in later per
-  `specs/bloomberg_consensus.md`. A **T−1-only** competitor: the final survey
-  median locks ~release-eve, so it aligns to the T−1 regime and is absent at
-  T−7.
-- **ADP — dropped (decision 2026-06-13).** Removed from the competitor set.
-  Post-Aug-2022 (the Stanford Digital Economy Lab redesign) ADP publicly
-  states it is "an independent measure of private-sector employment… not
-  intended to forecast the Bureau of Labor Statistics monthly jobs report,"
-  so for the recent half of the window it is not a fair first-print
-  competitor; pre-2022 history would cover only part of the sample, and as a
-  private-only measure it never aligned cleanly to total nonfarm anyway. The
-  literal plans/0 gate names ADP, but its *intent* (real competitors beyond
-  naive floors) is met by consensus plus the smart bridge baseline. This
-  amends the gate; the amendment is recorded in plans/0.
-- **Smart baseline.** A bridge regression predicting M's growth from
-  **vintage-censored** claims/JOLTS — the *same* as-of-censored cyclical
-  arrays the model consumes (via `build_model_data(as_of=D)` / the snapshot),
-  **not** revised series. Using revised regressors would be lookahead and
-  make it an unfair (cheating) competitor; the vintage discipline is what
-  makes this the honest *ceiling*. It is the one piece beyond the literal
-  gate and is the scope cut-line: if effort must be trimmed, the bridge
-  baseline is the first thing to defer (the gate is still met by
-  model/consensus/naive).
-- **Naive floors.** random-walk (last published print repeats) and
-  trailing-12-month mean. Sanity floors, never gates.
+- **Model.** Private nowcast `change_k` from the batched fits at each regime's
+  as-of (produced by the T−7 / T−1 grids on the `'05'` target; A5 reads the
+  reduction).
+- **Naive floors.** random-walk (last published **private** print repeats) and
+  trailing-12-month **private** mean. Sanity floors, scored against both private
+  truths (QCEW-settled primary, first print).
+
+**What is *not* here, and why.**
+
+- **ADP — removed entirely (competitor *and* regressor).** Not a competitor, not
+  a model input. Post-Aug-2022 ADP states it is "not intended to forecast" the
+  BLS report, and the model's private-vs-private framing makes a separate
+  private-employment proxy redundant rather than a fair scored competitor.
+- **Consensus — removed from the private track → deferred to Track B.** The
+  Bloomberg survey median forecasts the **Total** number; it has **no meaning**
+  against the private nowcast alone (the private nowcast cannot see government
+  employment). It moves to the deferred Track B (below), which also needs a new
+  **government forecast**. The pluggable consensus adapter and
+  `specs/bloomberg_consensus.md` become Track-B artifacts; nothing consensus
+  ships on the private scoreboard or in the private MZ.
+- **Bridge baseline — removed as a competitor.** The HARD RULE is "naive floors
+  only," and the vintage-censored claims/JOLTS bridge regression is not a naive
+  floor. The *same* regression is not lost: it survives as the **Tier-1 Aruoba
+  diagnostic** in `model_improvements.md` §4 (first→third private-revision
+  regression on the same vintage-censored cyclical arrays), feeding the §5A
+  first-print offset. It is demoted from competitor to diagnostic, not deleted.
+
+**Deferred Track B (spec-only, NOT built here).** The product that competes with
+**consensus** is **Total NFP = private nowcast + government forecast**, scored
+against the **Total-NFP consensus** + the Total first print. The **government
+forecast is a new, undesigned component** (Track B's critical path; see
+`model_improvements.md` §2, §9–11). Until it exists there is no valid consensus
+comparison, because consensus is a Total object. A5 captures Track B as the
+gateway to the consensus contest; it does not design or build it.
 
 ## 5. Report — the scoreboard
 
@@ -190,24 +252,28 @@ A new `scripts/run_a5_backtest.py` (sibling to `run_a4_backtest.py`, reusing
 its `snapshot`/`batched` machinery for the T−7 and T−1 grids) emits
 `data/backtests/a5_report.md` + `a5_results.parquet`:
 
-- a **scoreboard** of `competitor × regime` scored against the **first
-  print**, with ME / MAE / RMSE (and, where dispersion exists, hit-rate /
-  direction accuracy);
-- per-date detail (each reference month: every competitor's `change_k`, the
-  first-print actual, errors; plus the *unscored* revised-truth reference
-  column if enabled);
-- COVID (2020–2021) excluded from headline metrics (decided-questions rule).
+- a **scoreboard** of `competitor × regime` scored against the **private
+  QCEW-settled truth (primary)** and the **private first print**, with
+  ME / MAE / RMSE (and, where dispersion exists, hit-rate / direction accuracy);
+- per-date detail (each reference month: model + naive-floor `change_k`, the
+  private QCEW-settled and first-print actuals, errors; plus the *unscored*
+  private revised-truth reference column if enabled);
+- COVID (2020–2021) excluded from headline metrics (decided-questions rule);
+  shutdown-frontier months (e.g. 2025-11, 2026-01) flagged, not silently pooled.
 
 The A4 report (`a4_report.md`) stays as-is — it is a parity-gate artifact
 (batched-vs-serial). A5 is the evaluation layer above it; it does not modify
 A4 outputs.
 
-**Gate satisfied when** the report scores the model against consensus, the
-smart baseline, and the naive floors at each regime (ADP dropped per §4).
-Consensus may render `—` until the Bloomberg data is wired (staged) and is a
-T−1-only competitor; the column, join, and scoring path exist and are
-exercised by a fixture, so dropping in the file completes the gate with no
-code change.
+**Gate satisfied when** the report scores the **private** model against the
+**naive floors** at each regime, against both private truths (QCEW-settled
+primary + first print). This is a **reduced bar** relative to the literal plans/0
+gate ("model vs ADP vs consensus vs naive"): ADP is removed entirely and consensus
+moves to the deferred Track B (which needs the unbuilt government forecast), so on
+the private track the **private QCEW-settled administrative truth replaces the
+competitor contest** as the real benchmark. The ADP/consensus contest is met by
+Track B when it is built. This amends the gate; the amendment is **to be
+recorded** in plans/0's gate log (§7 step 8; mirror `model_improvements.md` §8).
 
 **Forward compatibility (B1).** The output consumer is decided (plans/0 SQ2,
 2026-06-13): an accurate first-print nowcast for Bloomberg publication, plus
@@ -221,49 +287,68 @@ a rebuild. This is a structural choice (one key column), **not** added scope
 ## 6. Module layout
 
 ```
-nfp_ingest/first_print.py            # Option A first-print extractor (store levels)
-nfp_vintages/evaluation.py           # + revised_truth_change_k(final_view), competitor protocol
+nfp_ingest/first_print.py            # first-print extractor (store levels, industry_code='05')
+nfp_vintages/evaluation.py           # + revised_truth_change_k(final_view '05'), competitor protocol
 nfp_vintages/competitors/
-    __init__.py                      # Competitor protocol + registry
-    consensus.py                     # load_consensus() pluggable adapter (see bloomberg_consensus.md)
-    bridge.py                        # vintage-censored claims/JOLTS bridge regression
-    naive.py                         # random-walk + trailing-mean floors
+    __init__.py                      # Competitor protocol + registry (naive floors)
+    naive.py                         # random-walk + trailing-mean floors (private)
 scripts/run_a5_backtest.py           # T−7 / T−1 grids + scoreboard; reuses A4 batched harness
 ```
 
-Tests: `nfp_ingest/tests/test_first_print.py` (extractor vs published
-headlines), `nfp_vintages/tests/test_competitors.py` (each adapter's
-units/alignment + the consensus fixture), `nfp_vintages/tests/test_a5_*`
-(scoreboard assembly, regime alignment).
+Track-B-only (deferred, NOT built here): `consensus.py` (the `load_consensus()`
+adapter, see `bloomberg_consensus.md`) and the government-forecast component live
+with the Total assembly, not on the private track. The vintage-censored bridge
+regression lives in `model_improvements.md` §4 as the Tier-1 Aruoba diagnostic.
+
+Tests: `nfp_ingest/tests/test_first_print.py` (extractor vs published **private**
+headlines, §2a), `nfp_vintages/tests/test_competitors.py` (naive-floor units /
+alignment), `nfp_vintages/tests/test_a5_*` (scoreboard assembly, regime alignment,
+both private truths).
 
 ## 7. Sequencing
 
 Retire risk first, then build outward from the cheapest pieces:
 
-1. **First-print extractor** (`first_print.py`) — pure store-levels read,
-   testable immediately against the published headlines. No grid needed.
-2. **Revised-truth reference** (optional, *unscored* — `evaluation.py` on
-   `final_view`) — small; build only if the reference column is wanted,
-   else skip.
-3. **Near-release grids (T−7, T−1)** — the new compute; reuse
-   `fit_model_batch`. Build both snapshot grids, fit them batched, surface
+1. **Private retarget** — thread `industry_code='05'` through the snapshot
+   target, `first_print_changes`, `panel_to_model_data`, and the a5 index;
+   confirm a `'05'` fit converges before any `'05'` eval is trusted
+   (`model_improvements.md` §8, §11).
+2. **First-print extractor** (`first_print.py`) — pure store-levels read,
+   testable immediately against the **private** headlines (§2a). No grid needed.
+3. **Private QCEW-settled truth** — wire the primary-truth column into the
+   scoring path (§2c), alongside the first print.
+4. **Revised-truth reference** (optional, *unscored* — `evaluation.py` on
+   private `final_view`) — small; build only if wanted, else skip.
+5. **Near-release grids (T−7, T−1)** on the `'05'` target — the new compute;
+   reuse `fit_model_batch`. Build both snapshot grids, fit them batched, surface
    unbuildable dates.
-4. **Competitor adapters** in increasing cost order: naive → consensus
-   (with staged fixture) → bridge baseline.
-5. **Scoreboard** (`run_a5_backtest.py`) wiring competitors × regimes scored
-   against the first print; emit `a5_report.md`.
-6. Gate annotation in plans/0; spec → archive on completion; memory updated.
+6. **Naive-floor adapters** (`naive.py`) — the only private-track competitors.
+7. **Scoreboard** (`run_a5_backtest.py`) wiring model + naive floors × regimes
+   scored against both private truths; emit `a5_report.md`.
+8. Gate annotation in plans/0 (record the reduced bar + Track-B deferral); spec
+   → archive on completion; memory updated.
 
 ## 8. Open items and risks
 
-- **Consensus data is staged.** The gate is structurally met now; the
-  consensus *column* fills when the Bloomberg file lands
-  (`specs/bloomberg_consensus.md`). Track as a follow-up, not a blocker.
+- **`'05'` is untested in the model.** A1–A3 goldens and A4 were all on `'00'`.
+  Before trusting any `'05'` A5 eval, confirm `first_print_changes('05')` yields a
+  sane private series (✓ verified 2026-06-19: 108 months 2017→2026, 106 valid)
+  **and** that one `'05'` model fit converges (`model_improvements.md` §8, §11).
+- **QCEW-settled basis (NSA vs SA).** The store's QCEW `'05'` is NSA-only; the CES
+  first print and the model nowcast are SA. The primary-truth comparison (§2c) must
+  reconcile the basis — reuse the model's QCEW-anchor handling or add an explicit
+  SA/NSA bridge — before it is apples-to-apples. Unresolved here and in
+  `model_improvements.md` §3; pin the mechanism before trusting the primary
+  scoreboard.
+- **`bloomberg_consensus.md` is now stale.** It still frames consensus as a live
+  A5 competitor; under this revision consensus is a Track-B (Total) artifact.
+  Out of scope to edit here — flag as a follow-up to recontextualize for Track B.
+- **Track B is undesigned.** The consensus contest needs a **government forecast**
+  (Track B's critical path; `model_improvements.md` §11). Captured here, not built;
+  consensus + `bloomberg_consensus.md` are Track-B artifacts until then.
 - **Near-release buildability (T−7, T−1)** — frontier/shutdown months may be
   unbuildable at either horizon; same negative-master handling, recorded not
-  fatal.
-- **Bridge-baseline fairness** hinges on vintage censoring of its regressors;
-  if that proves fiddly, defer the baseline (it is beyond the literal gate).
+  fatal. The 2025-11 hole and 2026-01 frontier are flagged, not pooled (§5).
 - Carry forward the `ces_growth_convention.md` §3 model-input observations
   (triple benchmark wedge at February as-ofs; permanent November rev-2
   outliers) into the Phase-B model-evidence agenda — not an A5 task.
@@ -276,9 +361,22 @@ Retire risk first, then build outward from the cheapest pieces:
 > sanity floors, not gates. **Gate:** every backtest report scores model vs.
 > ADP vs. consensus vs. naive, at each information regime.
 
-This design meets it with: consensus (staged, Bloomberg) + a smart bridge
-baseline + naive floors, scored against the **first print** across the
-**T−7 and T−1** regimes. **ADP is intentionally dropped** (§4): post-2022 it
-no longer forecasts the BLS print, so it is not a fair first-print
-competitor; the gate's intent (real competitors beyond naive floors) is met
-by consensus + the smart baseline.
+**This design meets a corrected, reduced bar.** The private retarget
+(2026-06-19) splits the literal gate across two tracks:
+
+- **Track A (now):** the **private** model vs **naive floors only**, scored
+  against the **private QCEW-settled truth (primary)** and the **private first
+  print**, across the **T−7 and T−1** regimes. On the private track the
+  QCEW-settled administrative truth *replaces* the ADP/consensus competitor
+  contest as the real benchmark — ADP is removed entirely (a private-employment
+  proxy, redundant here) and consensus is a Total object with no meaning against
+  the private nowcast.
+- **Track B (deferred, spec-only):** the ADP/consensus contest, recast as **Total
+  NFP = private nowcast + government forecast** vs the **Total-NFP consensus** +
+  Total first print. Its critical path is the new **government forecast**
+  (undesigned; `model_improvements.md` §11). This is the only valid consensus
+  comparison and is built later.
+
+This amends the literal plans/0 gate ("model vs ADP vs consensus vs naive"); the
+amendment is **to be recorded** in plans/0's gate log (§7 step 8) and mirrors
+`model_improvements.md` §8.
