@@ -1,6 +1,6 @@
 # Model improvements — first-print targeting, diagnostics, and turning-point edge (design)
 
-Status: **design, draft (2026-06-19)**. The **model-side counterpart** to `specs/a5_real_competitors.md` (which is an evaluation-side firewall — no `nfp-model` changes). Motivated by `model_research_1.md` + `model_research_2.md` (two independent literature reviews) and the **validate-first pivot** in `plans/0-port_and_staged_plan.md` (parity is a port-fidelity floor, **not** correctness). This spec is where Phase A's "parity-is-done" freeze is deliberately reopened — behind new baselines — to address what A5's prong-2 surfaced: the model is not yet modeling the target it is scored on.
+Status: **design, draft (2026-06-19)**. The **model-side counterpart** to `specs/a5_real_competitors.md` (which is an evaluation-side firewall — no `nfp-model` changes). Motivated by `specs/model_research.md` (consolidated literature review — forecastability, competitor targets, vintage design) and the **validate-first pivot** in `plans/0-port_and_staged_plan.md` (parity is a port-fidelity floor, **not** correctness). This spec is where Phase A's "parity-is-done" freeze is deliberately reopened — behind new baselines — to address what A5's prong-2 surfaced: the model is not yet modeling the target it is scored on.
 
 ## TL;DR
 
@@ -12,7 +12,7 @@ Status: **design, draft (2026-06-19)**. The **model-side counterpart** to `specs
 
 ## 1. Motivation — the model targets the wrong object
 
-**Literature** (condensed from `model_research_1.md`, `model_research_2.md`). CES monthly first prints are largely *news*, not *noise* (Guisinger–Smith 2019): small, slightly biased (\~+9k mean first→third; \~51k mean absolute), low forecastable share in normal months. Sampling error dominates — BLS pegs the monthly SE at \~67.5k (±122k 90% CI) — so the realistic ceiling over the first print is **low in normal regimes**. The forecastable structure concentrates in exactly two places: the **annual QCEW benchmark** (serially correlated; Cleveland Fed 2026) and **turning points** (the net birth/death model cannot see business deaths in real time, so it overstates jobs entering downturns). The fair, apples-to-apples bar is the **consensus median** (\~48k MAE / 60–65k RMSE vs the first print; itself \~11k-low and inefficient — Klein 2022), **not ADP**, which post-2022 targets the QCEW universe and is structurally mismatched to first-print scoring.
+**Literature** (condensed from `specs/model_research.md`). CES monthly first prints are largely *news*, not *noise* (Guisinger–Smith 2019): small, slightly biased (\~+9k mean first→third; \~51k mean absolute), low forecastable share in normal months. Sampling error dominates — BLS pegs the monthly SE at \~67.5k (±122k 90% CI) — so the realistic ceiling over the first print is **low in normal regimes**. The forecastable structure concentrates in exactly two places: the **annual QCEW benchmark** (serially correlated; Cleveland Fed 2026) and **turning points** (the net birth/death model cannot see business deaths in real time, so it overstates jobs entering downturns). The fair, apples-to-apples bar is the **consensus median** (\~48k MAE / 60–65k RMSE vs the first print; itself \~11k-low and inefficient — Klein 2022), **not ADP**, which post-2022 targets the QCEW universe and is structurally mismatched to first-print scoring.
 
 **The code-grounded reframe.** Our model sits on ADP's side of that line. The latent `g_total_sa` is pinned to QCEW (the benchmark universe) by the Student-t anchor (`model.py:187-193`), then passed through a **single, vintage-pooled** CES observation equation `alpha_ces + lambda_ces·g_total_sa` whose bias/loading are shared across all vintages (`model.py:198-202`; only `sigma_ces_sa` is vintage-indexed). The nowcast applies those pooled parameters directly (`nowcast.py:21-28`). Because the as-of training diagonal is dominated by third-print observations, the pooled `alpha_ces` encodes a *revised-print* bias — so the nowcast predicts a generic/revised print and, scored against the first print, carries a systematic offset. This is the same target mismatch the reports flag for ADP; the A5 spec's premise that the model "already emits nowcasts" scored fairly is therefore incomplete.
 
@@ -106,7 +106,7 @@ The public-info ceiling is low (sampling SE \~67.5k; consensus \~48k MAE). A pro
 
 ## Appendix — source map
 
-Which research finding motivates which section (full detail in `model_research_1.md`, `model_research_2.md`):
+Which research finding motivates which section (full detail in `specs/model_research.md`):
 
 | Section | Motivating findings |
 |------------------------------------|------------------------------------|
