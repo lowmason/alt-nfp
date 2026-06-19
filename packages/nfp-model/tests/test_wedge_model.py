@@ -1,8 +1,8 @@
-import numpy as np
 import jax
+import numpy as np
 import numpyro
+from nfp_model.wedge import wedge_model
 from numpyro.infer import Predictive
-from nfp_model.wedge import wedge_model, WEDGE_DETERMINISTIC_SITES
 
 numpyro.enable_x64()
 

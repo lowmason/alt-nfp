@@ -1,8 +1,11 @@
 from datetime import date
+
 import numpy as np
 from nfp_lookups.government import (
-    GovIntervention, KNOWN_INTERVENTIONS,
-    get_known_interventions_as_of, intervention_column,
+    KNOWN_INTERVENTIONS,
+    GovIntervention,
+    get_known_interventions_as_of,
+    intervention_column,
 )
 
 REF = [date(2025, m, 1) for m in range(1, 7)]  # Jan..Jun 2025
