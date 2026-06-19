@@ -448,7 +448,10 @@ Replace the scoring loop body (lines 184–199) with:
                         cov90 = interval_coverage(cd, actual, 0.90)
                         crps = crps_sample(cd, actual)
             providers_present = bool(t.get("n_providers", 0))
-            mtype = month_type.get(ref, "normal")
+            # month_type keys are month-start (day=1) — ref is the day-12 model
+            # date, so normalize before lookup (same day-12-vs-day-1 alignment the
+            # harness already does for fp_map at run_a5_backtest.py:111).
+            mtype = month_type.get(ref.replace(day=1), "normal")
             preds = {
                 "model": model,
                 "consensus": consensus.predict(ref, as_of=as_of),
@@ -559,12 +562,13 @@ Add a second scoreboard scoring the model (and ADP, when present) against the **
 
 ```python
 # append to packages/nfp-vintages/tests/test_diagnostics.py
-import pytest
-
+# (pytest + _store_available were added to this file in Task 7 — reuse them; do
+#  not re-import/redefine. Use the SAME @real_store + skipif double-decoration.)
 from nfp_vintages.diagnostics import qcew_settled_changes
 
 
 @pytest.mark.real_store
+@pytest.mark.skipif(not _store_available(), reason="vintage store unavailable")
 def test_qcew_settled_changes_shape():
     df = qcew_settled_changes()
     assert {"ref_date", "qcew_settled_change_k"} <= set(df.columns)
@@ -573,6 +577,8 @@ def test_qcew_settled_changes_shape():
     vals = df["qcew_settled_change_k"].drop_nulls().to_numpy()
     assert (abs(vals) < 5000).all()
 ```
+
+> **Follow Task 7's pattern exactly:** bare `@pytest.mark.real_store` does **not** skip in this repo (the root `conftest.py` only uses the marker to blank credentials). Every store test pairs it with `@pytest.mark.skipif(not _store_available(), ...)`. Task 7 already added the `_store_available()` helper + `import pytest` to this test file — reuse them.
 
 - [ ] **Step 2: Run to verify it fails (or skips without store)**
 
@@ -601,6 +607,7 @@ def qcew_settled_changes(store_path=None) -> "pl.DataFrame":
     )
     df = (
         lf.collect()
+        .with_columns(pl.col("ref_date").dt.truncate("1mo"))  # store ref_date is day-12; align to month-start
         .sort(["ref_date", "vintage_date"])
         .group_by("ref_date").agg(pl.col("employment").last().alias("level"))
         .sort("ref_date")
@@ -611,7 +618,7 @@ def qcew_settled_changes(store_path=None) -> "pl.DataFrame":
     return df
 ```
 
-> If the store's QCEW employment column is already in thousands, the diff is already in `k`; if in persons, multiply by `1/1000`. Verify against one known month in Step 4 and adjust the unit factor with a comment.
+> **Date-axis alignment (same hazard Task 7 fixed):** the store's `ref_date` is the survey day (12th); the truncation above maps it to month-start so it joins cleanly with the day-1 series. Confirm the real QCEW `ref_date` granularity against the store before trusting the diff (QCEW may be monthly or quarterly in this store — if quarterly, the `shift(1)` is a quarter-over-quarter change, which is **not** the monthly truth target; in that case key the lookup to the appropriate reference month and note it). **Units:** if QCEW `employment` is already in thousands the diff is already in `k`; if in persons, multiply by `1/1000`. Verify against one known month in Step 4 and adjust with a comment.
 
 - [ ] **Step 4: Verify units against a known month, then append the second report section in `cmd_score`**
 
@@ -637,7 +644,8 @@ After writing `a5_report.md` in Task 4 Step 4 (before `return 0`), append:
             sub = model_rows.filter(pl.col("regime") == rname)
             errs = []
             for r in sub.iter_rows(named=True):
-                truth = qcew.get(r["ref_month"])
+                # qcew keys are month-start; ref_month rows are the day-12 model date.
+                truth = qcew.get(r["ref_month"].replace(day=1))
                 if truth is not None and r["pred_change_k"] is not None:
                     errs.append(truth - r["pred_change_k"])
             mm = score(np.array(errs, dtype=float))
@@ -768,6 +776,8 @@ git commit -m "feat(eval): OLS helper for Tier 1 diagnostics"
 ## Task 7: Revision table (first-print vs later-vintage)
 
 Build the Aruoba LHS: per ref month, `revision_k = later_change − first_print_change`. `first_print_changes()` supplies the first print; the later/settled change comes from the latest CES vintage. Used by Task 1's classifier and Task 9.
+
+> **As-built (commit `b2ee1e4`):** two corrections were folded in during implementation and the same patterns apply to Tasks 4–5: (1) `_latest_ces_changes` truncates the store's day-12 `ref_date` to month-start (`dt.truncate("1mo")`) so it joins with the day-1 `first_print_changes()` series — without it the join is empty; (2) the `real_store` test pairs `@pytest.mark.real_store` with `@pytest.mark.skipif(not _store_available(), ...)` because the bare marker does not skip in this repo. A `_store_available()` helper was added to `test_diagnostics.py`.
 
 **Files:**
 - Modify: `packages/nfp-vintages/src/nfp_vintages/diagnostics.py`
