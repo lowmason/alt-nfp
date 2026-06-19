@@ -2,13 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend the A5 evaluation harness with a regime-decomposed, calibration-aware scoreboard (Tier 0) and a diagnostics suite — Aruoba revision regression, Mincer–Zarnowitz efficiency, provider-ablation — whose outputs gate the model-side Tiers 2/3 (Tier 1).
+**Goal:** Extend the A5 evaluation harness with a regime-decomposed, calibration-aware scoreboard (Tier 0) and a diagnostics suite — Aruoba revision regression, Mincer–Zarnowitz efficiency, provider-ablation — whose outputs gate the model-side Tiers 2/3 (Tier 1). **Target = PRIVATE NFP (`industry_code='05'`), not total nonfarm (`'00'`).** The model's signal is inherently private (QCEW anchor is private in this store; payroll-provider microdata and firm births/deaths are private), so it must be trained on, predicted as, and scored against the **private** series. The run-path's `'00'` default is a latent mismatch being corrected in parallel — see `specs/model_improvements.md` §1. The scoreboard scores the **private nowcast vs naive floors only** (random-walk, trailing-mean): **no consensus** (a Total object → Track B, deferred) and **no ADP** (removed entirely, competitor and regressor).
 
-**Architecture:** Pure, unit-testable logic lives in two new `nfp-vintages` modules (`scoreboard.py`, `diagnostics.py`); the `scripts/` files stay thin CLIs that plumb store/manifest data into those functions. No `nfp-model` code is touched (firewall, `specs/model_improvements.md` §2/§8) — calibration is computed from the posterior draws the batch step *already* persists (`nowcast_pred_draws`). OLS is hand-rolled on `numpy`/`scipy` (no statsmodels in the workspace).
+**Architecture:** Pure, unit-testable logic lives in two new `nfp-vintages` modules (`scoreboard.py`, `diagnostics.py`); the `scripts/` files stay thin CLIs that plumb store/manifest data into those functions. No `nfp-model` code is touched (firewall, `specs/model_improvements.md` §2/§8) — calibration is computed from the posterior draws the batch step *already* persists (`nowcast_pred_draws`). OLS is hand-rolled on `numpy`/`scipy` (no statsmodels in the workspace). **All CES/QCEW/first-print data-layer reads thread `industry_code='05'`** — `first_print_changes`, `read_vintage_store`, `panel_to_model_data`. Threading the private code into these data-layer calls is *allowed* (it is the data fed to the model, not model code); the firewall forbids changes to `nfp-model` and to `transform_to_panel`/`build_model_data`/A1–A3 goldens.
 
 **Tech Stack:** Python 3.12, polars, numpy, scipy (`scipy.stats.chi2` for the MZ Wald test), the existing `nfp_ingest` / `nfp_vintages` data APIs. Tests with pytest (markers `slow`, `real_store`).
 
 **Source of truth:** `specs/model_improvements.md` §3 (Tier 0), §4 (Tier 1), §8 (parity governance); evidence base `specs/model_research.md`; the harness being extended is `scripts/run_a5_backtest.py` + `specs/a5_real_competitors.md`.
+
+**Track B (deferred — spec-only, do NOT build here).** The product that competes with **consensus** is **Total NFP = private nowcast + a government forecast** (the government forecast is a *new, undesigned* component — the critical path). Consensus is a **Total** object; it has no meaning against the private nowcast alone, so it is **removed from the private (Track A) scoreboard and from the private MZ** and reserved for Track B. This plan builds **Track A only** (the private nowcast vs naive floors). See `specs/model_improvements.md` §2/§9.
+
+**Prerequisite — confirm a `'05'` fit converges first.** The model's A1–A3 goldens and A4 were all on `'00'`; `'05'` is *untested in the model*. Before trusting any `'05'` eval produced by this harness, confirm one `'05'` model fit converges (no divergences, sane R-hat/posterior) and pin a `'05'` reference fit — see `specs/model_improvements.md` §8 (parity governance) and §11 (open items). This is upstream of the scoreboard; this plan consumes a converged `'05'` run, it does not produce one.
 
 ---
 
@@ -17,7 +21,7 @@
 - **NO changes to `packages/nfp-model`.** Not `model.py`, not `config.py`, not `batch.py`, not `nowcast.py`. Tier 0/1 are evaluation-side only (`specs/model_improvements.md` §2). Tiers 2/3 (model changes behind new parity baselines) are **out of scope** for this plan.
 - **NO changes to `transform_to_panel`, `build_model_data`, or any A1/A2/A3 golden-mastered path** (`specs/a5_real_competitors.md` firewall).
 - **Read-only on the vintage store.** Never call a store-writing function in a test (see `store-write-test-safety`). Store-touching tests are marked `@pytest.mark.real_store` and self-skip when the store is unavailable.
-- **Skeleton vs full venue is first-class.** Locally (public store) there is no ADP/NFCI/consensus data; diagnostics run on the public regressor set (claims, JOLTS, lagged revisions, cyclical state) and every output is venue-tagged. A providerless local result is *expected*, never a failure (`specs/model_improvements.md` §10).
+- **Skeleton vs full venue is first-class.** Locally (public store) there is no provider data and no NFCI; diagnostics run on the public regressor set (claims, JOLTS, biz_apps, lagged revisions, cyclical state) and every output is venue-tagged. NFCI is the legitimate full-regime regressor that fills in on Bloomberg. A providerless local result is *expected*, never a failure (`specs/model_improvements.md` §10). (Consensus and ADP are **not** "missing data to backfill" — they are removed from the private track entirely.)
 
 ## File structure
 
@@ -397,7 +401,6 @@ Replace the import block + setup at the start of `cmd_score` (lines 160–170) w
 
     from nfp_ingest.first_print import first_print_changes
     from nfp_vintages.a5 import score
-    from nfp_vintages.competitors.consensus import Consensus, load_consensus
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
     from nfp_vintages.diagnostics import build_revision_table
     from nfp_vintages.scoreboard import (
@@ -412,9 +415,10 @@ Replace the import block + setup at the start of `cmd_score` (lines 160–170) w
     manifest = _read_json(root / "grid_manifest.json")
     prov = manifest["provenance"]
     idx_to_level = float(prov["idx_to_level"])
-    fp = first_print_changes()
+    # PRIVATE target: score against the private first print ('05'), not total ('00').
+    fp = first_print_changes(industry_code="05")
     fp_hist = fp.select(["ref_date", "first_print_change_k", "vintage_date"])
-    consensus = Consensus(load_consensus())  # None until Bloomberg file lands → "—"
+    # Naive floors are the ONLY private-track competitors (no consensus, no ADP).
     naive_rw, naive_mean = RandomWalk(fp_hist), TrailingMean(fp_hist, window=12)
 
     # Month-type inputs (skeleton-safe: empty maps degrade to "normal"/"benchmark").
@@ -452,9 +456,9 @@ Replace the scoring loop body (lines 184–199) with:
             # date, so normalize before lookup (same day-12-vs-day-1 alignment the
             # harness already does for fp_map at run_a5_backtest.py:111).
             mtype = month_type.get(ref.replace(day=1), "normal")
+            # Private-track competitors: naive floors only (no consensus, no ADP).
             preds = {
                 "model": model,
-                "consensus": consensus.predict(ref, as_of=as_of),
                 "naive_rw": naive_rw.predict(ref, as_of=as_of),
                 "naive_mean": naive_mean.predict(ref, as_of=as_of),
             }
@@ -476,7 +480,7 @@ Replace the scoring loop body (lines 184–199) with:
                 })
 ```
 
-> NOTE on `prev_index` / `n_providers`: `cmd_snapshot` already records `prev_index` per target (run_a5_backtest.py ~line 100). If `n_providers` is not yet in the manifest, add it in `cmd_snapshot` where the snapshot meta is read: `target_entry["n_providers"] = len(meta.get("provider_names", []))`. Locally this is 0 or 1 (no ADP) → `public-only`.
+> NOTE on `prev_index` / `n_providers`: `cmd_snapshot` already records `prev_index` per target (run_a5_backtest.py ~line 100). If `n_providers` is not yet in the manifest, add it in `cmd_snapshot` where the snapshot meta is read: `target_entry["n_providers"] = len(meta.get("provider_names", []))`. `n_providers` counts **payroll-provider microdata** sources (Bloomberg-only); locally it is 0 → `public-only`. (Provider counting is unrelated to ADP, which is removed entirely.)
 
 - [ ] **Step 4: Decompose the report by month type and add a calibration block**
 
@@ -492,10 +496,13 @@ Replace the report-rendering loop (lines 211–237) with:
     df.write_parquet(root / "a5_results.parquet")
 
     venues = sorted({v for v in df["venue"].unique() if v is not None})
-    lines = ["# A5 backtest report", "",
-             "Model vs competitors on the CES **first print**, at T−7 and T−1, "
+    lines = ["# A5 backtest report (PRIVATE NFP, industry_code='05')", "",
+             "Private nowcast vs **naive floors only** on the private CES **first "
+             "print** (`first_print_changes(industry_code='05')`), at T−7 and T−1, "
              "decomposed by month type.",
-             "Consensus is T−1-only and renders `—` until the Bloomberg file lands.",
+             "No consensus (a Total object → Track B, deferred) and no ADP on the "
+             "private track — naive floors (RW, trailing-mean) are the only "
+             "competitors.",
              f"Venue(s) in this run: **{', '.join(venues) or 'public-only'}** — a "
              "`public-only` run scores a providerless skeleton (spec section 10).",
              "COVID (2020–2021) and shutdown-flagged months excluded from metrics.", ""]
@@ -507,7 +514,7 @@ Replace the report-rendering loop (lines 211–237) with:
             n_months = sub.select(pl.col("ref_month").n_unique()).item()
             lines += [f"### {mtype} ({n_months} months)", "",
                       "| competitor | n | ME | MAE | RMSE |", "|---|---|---|---|---|"]
-            for comp in ["model", "consensus", "naive_rw", "naive_mean"]:
+            for comp in ["model", "naive_rw", "naive_mean"]:
                 e = sub.filter(pl.col("competitor") == comp)["error_k"].to_numpy()
                 m = score(e)
                 if m["n"] == 0:
@@ -536,7 +543,7 @@ Replace the report-rendering loop (lines 211–237) with:
 
 If a populated `data/backtests/a5` exists locally:
 Run: `uv run python scripts/run_a5_backtest.py score data/backtests/a5`
-Expected: a Markdown report with four month-type subsections per regime and a `model calibration` line; `consensus` rows render `—` at T−7 and where the Bloomberg file is absent. If no backtest dir exists, instead run the lint + targeted import check:
+Expected: a Markdown report with four month-type subsections per regime and a `model calibration` line; competitor rows are `model`, `naive_rw`, `naive_mean` only (no consensus/ADP). If no backtest dir exists, instead run the lint + targeted import check:
 Run: `uv run python -c "import ast; ast.parse(open('scripts/run_a5_backtest.py').read())"` and `uv run ruff check scripts/run_a5_backtest.py`
 Expected: no syntax/lint errors.
 
@@ -549,7 +556,7 @@ git commit -m "feat(eval): Tier 0 — regime-decomposed, calibration-aware score
 
 ## Task 5: Second QCEW-scored scoreboard
 
-Add a second scoreboard scoring the model (and ADP, when present) against the **QCEW-settled** change — the fair target for QCEW-anchored competitors (spec §1/§3; `specs/model_research.md` §3 target map). Locally the model-vs-QCEW comparison runs for settled months; the ADP column self-renders `—` (ADP is Bloomberg-only). The truth extractor lives in `diagnostics.py` (store access) and is reused by Tier 1.
+Add a second scoreboard scoring the **private nowcast** against the **private QCEW-settled** change (`industry_code='05'`). This is the **PRIMARY truth comparison** (intended, not a fallback): the model is QCEW-anchored and the QCEW anchor in this store is private, so the private QCEW-settled value is the closest administrative truth the private nowcast can be held to (spec §1/§3; `specs/model_research.md` §3 target map). No ADP row (ADP removed entirely). The truth extractor lives in `diagnostics.py` (store access) and is reused by Tier 1. **Caveat (note, do not solve here):** in this store QCEW is **NSA-only** while CES is SA — an NSA-QCEW change vs an SA-CES first print is a seasonal apples-to-oranges; flag it for the design layer, it is above a docs/harness edit.
 
 **Files:**
 - Modify: `packages/nfp-vintages/src/nfp_vintages/diagnostics.py` (created in Task 6; this task adds `qcew_settled_changes` — implement after Task 6, or stub the module first)
@@ -590,10 +597,14 @@ Expected: FAIL (`ImportError`/`AttributeError`) — or SKIP if no store env. (Se
 ```python
 # add to packages/nfp-vintages/src/nfp_vintages/diagnostics.py
 def qcew_settled_changes(store_path=None) -> "pl.DataFrame":
-    """Latest-vintage QCEW national total over-the-month change (thousands).
+    """Latest-vintage PRIVATE QCEW national over-the-month change (thousands).
 
-    The 'truth' target for QCEW-anchored competitors. Selects max(vintage_date)
-    per ref month, level-differences, and converts to thousands.
+    The PRIMARY truth target for the QCEW-anchored private nowcast. Selects
+    max(vintage_date) per ref month, level-differences, and converts to thousands.
+
+    PRIVATE: industry_code='05' (the model's object). NSA: QCEW is NSA-only in this
+    store for both '00' and '05' — there is no SA QCEW to read (geographic_code
+    stays '00' = national; only the industry code is private).
     """
     import polars as pl
     from nfp_ingest.vintage_store import read_vintage_store
@@ -601,9 +612,9 @@ def qcew_settled_changes(store_path=None) -> "pl.DataFrame":
 
     store_path = store_path or VINTAGE_STORE_PATH
     lf = read_vintage_store(
-        store_path, source="qcew", seasonally_adjusted=True,
-        geographic_type="national", geographic_code="00",
-        industry_type="total", industry_code="00",
+        store_path, source="qcew", seasonally_adjusted=False,  # QCEW is NSA-only
+        geographic_type="national", geographic_code="00",       # national (NOT industry)
+        industry_type="private", industry_code="05",            # PRIVATE target
     )
     df = (
         lf.collect()
@@ -611,21 +622,32 @@ def qcew_settled_changes(store_path=None) -> "pl.DataFrame":
         .sort(["ref_date", "vintage_date"])
         .group_by("ref_date").agg(pl.col("employment").last().alias("level"))
         .sort("ref_date")
-        .with_columns(((pl.col("level") - pl.col("level").shift(1))).alias("qcew_settled_change_k"))
+        # Gap-safe diff: only difference CONSECUTIVE months. The 2025-10 shutdown
+        # hole means a naive shift(1) would span a 2-month gap (the -223k gap bug);
+        # null the change unless prev ref_date is exactly one month earlier.
+        .with_columns(pl.col("ref_date").dt.offset_by("-1mo").alias("_prev_expected"))
+        .with_columns(
+            pl.when(pl.col("ref_date").shift(1) == pl.col("_prev_expected"))
+            .then(pl.col("level") - pl.col("level").shift(1))
+            .otherwise(None)
+            .alias("qcew_settled_change_k")
+        )
         .select(["ref_date", "qcew_settled_change_k"])
         .drop_nulls("qcew_settled_change_k")
     )
     return df
 ```
 
-> **Date-axis alignment (same hazard Task 7 fixed):** the store's `ref_date` is the survey day (12th); the truncation above maps it to month-start so it joins cleanly with the day-1 series. Confirm the real QCEW `ref_date` granularity against the store before trusting the diff (QCEW may be monthly or quarterly in this store — if quarterly, the `shift(1)` is a quarter-over-quarter change, which is **not** the monthly truth target; in that case key the lookup to the appropriate reference month and note it). **Units:** if QCEW `employment` is already in thousands the diff is already in `k`; if in persons, multiply by `1/1000`. Verify against one known month in Step 4 and adjust with a comment.
+> **Private + NSA:** `industry_code='05'` (private, the model's object), `seasonally_adjusted=False` (QCEW is NSA-only in this store — there is no SA QCEW '05' to read). `geographic_code='00'` is **national** and must stay '00' (it is the geography arg, not the industry arg — do not "promote" it to '05'). The NSA-QCEW-vs-SA-CES seasonal mismatch is a design-layer caveat (see the Task 5 header); note it, do not solve it here.
+> **Gap-safety (avoid the −223k gap bug):** the diff is **adjacency-guarded** — it only differences a month against its *immediately preceding* month, nulling the change across any hole. The concrete hazard is the **2025-10 shutdown** ref-month gap (memory `ces-oct2025-shutdown`): a naive `shift(1)` would difference across the 2-month gap and emit a spurious ~−223k change. The guard above (`shift(1) == ref_date.dt.offset_by("-1mo")`) is required, not optional.
+> **Date-axis alignment (same hazard Task 7 fixed):** the store's `ref_date` is the survey day (12th); the truncation above maps it to month-start so it joins cleanly with the day-1 series. Confirm the real QCEW `ref_date` granularity against the store before trusting the diff (QCEW may be monthly or quarterly in this store — if quarterly, the diff is a quarter-over-quarter change, **not** the monthly truth target; in that case key the lookup to the appropriate reference month and note it). **Units:** if QCEW `employment` is already in thousands the diff is already in `k`; if in persons, multiply by `1/1000`. Verify against one known month in Step 4 and adjust with a comment.
 
 - [ ] **Step 4: Verify units against a known month, then append the second report section in `cmd_score`**
 
 After writing `a5_report.md` in Task 4 Step 4 (before `return 0`), append:
 
 ```python
-    # ---- Second scoreboard: model & ADP vs QCEW-settled truth ----
+    # ---- PRIMARY truth scoreboard: private nowcast vs private QCEW-settled ----
     from nfp_vintages.diagnostics import qcew_settled_changes
     try:
         qcew = {r["ref_date"]: r["qcew_settled_change_k"]
@@ -634,9 +656,12 @@ After writing `a5_report.md` in Task 4 Step 4 (before `return 0`), append:
         qcew = {}
         print(f"[qcew scoreboard] skipped: {exc}")
     if qcew:
-        qlines = ["", "## Truth scoreboard (vs QCEW-settled change)", "",
-                  "Fair target for QCEW-anchored competitors (model, ADP). "
-                  "ADP renders `—` until Bloomberg data lands.",
+        qlines = ["", "## Primary truth scoreboard (private nowcast vs private "
+                  "QCEW-settled change, industry_code='05')", "",
+                  "The PRIMARY truth comparison: the private nowcast is QCEW-anchored, "
+                  "so the private QCEW-settled value is its closest administrative "
+                  "truth. No ADP row (ADP removed entirely). Note: NSA QCEW vs SA CES "
+                  "first print is a seasonal apples-to-oranges (design caveat).",
                   "| regime | competitor | n | ME | MAE | RMSE |",
                   "|---|---|---|---|---|---|"]
         model_rows = df.filter(pl.col("competitor") == "model")
@@ -653,7 +678,6 @@ After writing `a5_report.md` in Task 4 Step 4 (before `return 0`), append:
                     f"| {mm['mae']:,.0f}k | {mm['rmse']:,.0f}k |") if mm["n"] else \
                    f"| {rname} | model | 0 | — | — | — |"
             qlines.append(cell)
-            qlines.append(f"| {rname} | adp | 0 | — | — | — |")  # Bloomberg-only
         with (root / "a5_report.md").open("a") as fh:
             fh.write("\n".join(qlines) + "\n")
 ```
@@ -775,7 +799,7 @@ git commit -m "feat(eval): OLS helper for Tier 1 diagnostics"
 
 ## Task 7: Revision table (first-print vs later-vintage)
 
-Build the Aruoba LHS: per ref month, `revision_k = later_change − first_print_change`. `first_print_changes()` supplies the first print; the later/settled change comes from the latest CES vintage. Used by Task 1's classifier and Task 9.
+Build the Aruoba LHS: per ref month, the **first-to-third PRIVATE revision** `revision_k = later_change − first_print_change` on `industry_code='05'`. `first_print_changes(industry_code='05')` supplies the private first print; the later/settled change comes from the latest private CES vintage. **Gap-safe:** the over-the-month diff must be adjacency-guarded (only difference consecutive months) — a naive `shift(1)` across the 2025-10 shutdown hole produces the spurious ~−223k gap change (memory `ces-oct2025-shutdown`); avoid that hazard. (Benchmark-window exclusion is a known subtlety carried as an open item — spec §11; do not re-architect the extractor to isolate a strict third print here.) Used by Task 1's classifier and Task 9.
 
 > **As-built (commit `b2ee1e4`):** two corrections were folded in during implementation and the same patterns apply to Tasks 4–5: (1) `_latest_ces_changes` truncates the store's day-12 `ref_date` to month-start (`dt.truncate("1mo")`) so it joins with the day-1 `first_print_changes()` series — without it the join is empty; (2) the `real_store` test pairs `@pytest.mark.real_store` with `@pytest.mark.skipif(not _store_available(), ...)` because the bare marker does not skip in this repo. A `_store_available()` helper was added to `test_diagnostics.py`.
 
@@ -823,7 +847,11 @@ Expected: FAIL — `ImportError: cannot import name '_join_revision'`.
 ```python
 # add to packages/nfp-vintages/src/nfp_vintages/diagnostics.py
 def _latest_ces_changes(store_path=None) -> "pl.DataFrame":
-    """Latest-vintage CES SA national total over-the-month change (thousands)."""
+    """Latest-vintage PRIVATE CES SA national over-the-month change (thousands).
+
+    PRIVATE: industry_code='05' (the model's object). geographic_code='00' stays
+    national. CES '05' IS seasonally adjusted in this store.
+    """
     import polars as pl
     from nfp_ingest.vintage_store import read_vintage_store
     from nfp_lookups.paths import VINTAGE_STORE_PATH
@@ -831,15 +859,23 @@ def _latest_ces_changes(store_path=None) -> "pl.DataFrame":
     store_path = store_path or VINTAGE_STORE_PATH
     lf = read_vintage_store(
         store_path, source="ces", seasonally_adjusted=True,
-        geographic_type="national", geographic_code="00",
-        industry_type="total", industry_code="00",
+        geographic_type="national", geographic_code="00",  # national (NOT industry)
+        industry_type="private", industry_code="05",        # PRIVATE target
     )
     return (
         lf.collect()
         .sort(["ref_date", "vintage_date"])
         .group_by("ref_date").agg(pl.col("employment").last().alias("level"))
         .sort("ref_date")
-        .with_columns((pl.col("level") - pl.col("level").shift(1)).alias("later_change_k"))
+        # Gap-safe: adjacency-guarded diff. A naive shift(1) across the 2025-10
+        # shutdown ref-month hole emits a spurious ~-223k change (the gap bug).
+        .with_columns(pl.col("ref_date").dt.offset_by("-1mo").alias("_prev_expected"))
+        .with_columns(
+            pl.when(pl.col("ref_date").shift(1) == pl.col("_prev_expected"))
+            .then(pl.col("level") - pl.col("level").shift(1))
+            .otherwise(None)
+            .alias("later_change_k")
+        )
         .select(["ref_date", "later_change_k"])
         .drop_nulls("later_change_k")
     )
@@ -854,13 +890,21 @@ def _join_revision(fp: "pl.DataFrame", later: "pl.DataFrame") -> "pl.DataFrame":
 
 
 def build_revision_table(store_path=None) -> "pl.DataFrame":
-    """[ref_date, first_print_change_k, later_change_k, revision_k] over the store."""
+    """Private first-to-third revision table over the store.
+
+    [ref_date, first_print_change_k, later_change_k, revision_k] on the PRIVATE
+    series (industry_code='05'). Both the first print and the later change are the
+    private object — the model's target.
+    """
     import polars as pl  # noqa: F401  (re-exported types for callers)
     from nfp_ingest.first_print import first_print_changes
 
-    fp = first_print_changes(**({"store_path": store_path} if store_path else {}))
+    fp = first_print_changes(
+        industry_code="05",  # PRIVATE target
+        **({"store_path": store_path} if store_path else {}),
+    )
     fp = fp.select(["ref_date", "first_print_change_k"])
-    later = _latest_ces_changes(store_path)
+    later = _latest_ces_changes(store_path)  # private '05', gap-safe
     return _join_revision(fp, later)
 ```
 
@@ -880,7 +924,7 @@ git commit -m "feat(eval): revision table (first-print vs latest-vintage) for Ti
 
 ## Task 8: Aruoba design matrix
 
-Assemble the as-of-censored regressor matrix `X_t` at first-print time from the **public** regressor set (claims momentum, JOLTS level, lagged revision, cyclical state). ADP/NFCI/biz_apps are full-regime additions, included only when their series are present — `available_regressors` records which were used so the report can tag skeleton vs full.
+Assemble the as-of-censored regressor matrix `X_t` at first-print time from `X = {claims, jolts, biz_apps, nfci, lagged revision, cyclical-state}` (spec §4 — all **public** indicators; **no ADP**, removed entirely as a regressor). Locally the skeleton set is `{claims, jolts, biz_apps, lagged revision, cyclical-state}`; **NFCI** is the full-regime addition that fills in on Bloomberg, included only when its series is present — `available_regressors` records which were used so the report can tag skeleton vs full.
 
 **Files:**
 - Modify: `packages/nfp-vintages/src/nfp_vintages/diagnostics.py`
@@ -1041,7 +1085,7 @@ git commit -m "feat(eval): Aruoba revision regression (intercept=bias, R2=foreca
 
 ## Task 10: Mincer–Zarnowitz efficiency regression
 
-Regress `actual = α + β·forecast`; Wald-test the joint null `α=0, β=1` (χ² with 2 dof, `scipy.stats.chi2`). Applied to both the model nowcast and consensus (Task 12 supplies the paired series).
+Regress `actual = α + β·forecast`; Wald-test the joint null `α=0, β=1` (χ² with 2 dof, `scipy.stats.chi2`). On the private track this is a **model-only** self-check — applied to the **private nowcast** vs the private first print (Task 12 supplies the paired series). **Consensus MZ moves to Track B (deferred):** consensus forecasts the *Total* number, so an MZ on consensus belongs with the Total assembly, not the private track (spec §4). The `mincer_zarnowitz` helper itself stays a generic 2-arg regression — only its *application* is restricted to the model row.
 
 **Files:**
 - Modify: `packages/nfp-vintages/src/nfp_vintages/diagnostics.py`
@@ -1298,17 +1342,10 @@ def main() -> int:
             mz = mincer_zarnowitz(actual, pred)
             mz_lines = [f"- model: alpha={mz.alpha:+.1f}k, beta={mz.beta:.3f}, "
                         f"joint p(alpha=0,beta=1)={mz.joint_p:.3f}, n={mz.n}"]
-        # consensus MZ only if consensus predictions are present
-        crows = df.filter((pl.col("competitor") == "consensus")
-                          & pl.col("error_k").is_not_null())
-        if crows.height > 5:
-            mzc = mincer_zarnowitz(crows["actual_first_print_k"].to_numpy(),
-                                   crows["pred_change_k"].to_numpy())
-            mz_lines.append(f"- consensus: alpha={mzc.alpha:+.1f}k, beta={mzc.beta:.3f}, "
-                            f"joint p={mzc.joint_p:.3f}, n={mzc.n}")
-        else:
-            mz_lines.append("- consensus: — (no consensus predictions present; "
-                            "Bloomberg file not landed)")
+        # Private-track MZ is MODEL-ONLY. Consensus MZ is a Track B (Total) object
+        # and is deliberately NOT computed here (spec §4; no consensus on this track).
+        mz_lines.append("- consensus: not on the private track (Track B, deferred — "
+                        "consensus is a Total object; spec §4/§9).")
 
     gate = gate_decision(r2_by_type, GateConfig())
 
@@ -1350,7 +1387,7 @@ Expected: no errors.
 - [ ] **Step 3: Real-store smoke (requires store env; otherwise document as pending)**
 
 Run: `NFP_STORE_URI=$NFP_STORE_URI uv run python scripts/run_tier1_diagnostics.py data/backtests/a5`
-Expected: prints a Tier 1 report with a pooled Aruoba intercept + R², an R²-by-month-type line, the model MZ row (consensus `—`), provider-ablation skipped, and a gate decision. If no store/backtest dir is available locally, record this smoke as a follow-up to run in the full regime (note it in the commit body).
+Expected: prints a Tier 1 report with a pooled Aruoba intercept + R² (on the private first-to-third revision), an R²-by-month-type line, the model-only MZ row (consensus noted as Track B, not computed), provider-ablation skipped, and a gate decision. If no store/backtest dir is available locally, record this smoke as a follow-up to run in the full regime (note it in the commit body).
 
 - [ ] **Step 4: Commit**
 
@@ -1383,13 +1420,14 @@ Expected: `test_build_revision_table_real` and `test_qcew_settled_changes_shape`
 - [ ] **Step 3: Spec-coverage self-review (checklist, fix inline)**
 
 Confirm each §3/§4 deliverable maps to a task:
-- §3 month-type decomposition → Tasks 1, 4. §3 calibration (coverage, CRPS) → Tasks 2, 4. §3 venue tag → Tasks 3, 4. §3 second QCEW scoreboard → Task 5. §3 COVID/shutdown handling → Task 4 Step 4.
-- §4 Aruoba (intercept + R²) → Tasks 7–9, 12. §4 Mincer–Zarnowitz (model + consensus) → Tasks 10, 12. §4 provider-ablation (forward-looking) → Task 12. §4 gate thresholds → Tasks 11, 12.
-- Firewall: grep the diff for forbidden paths — `git diff --name-only main... | grep -E 'nfp-model|transform_to_panel|build_model_data'` must be **empty**. Fix any leak before proceeding.
+- Private target `'05'` threaded into all data-layer reads → Tasks 4 (`first_print_changes`), 5 (`qcew_settled_changes`), 7 (`_latest_ces_changes` + `build_revision_table`). No consensus/ADP on the private track → Tasks 4, 5, 10, 12.
+- §3 month-type decomposition → Tasks 1, 4. §3 calibration (coverage, CRPS) → Tasks 2, 4. §3 venue tag → Tasks 3, 4. §3 PRIMARY private-QCEW truth scoreboard → Task 5. §3 COVID/shutdown handling → Task 4 Step 4.
+- §4 Aruoba (intercept + R², private first-to-third LHS, gap-safe) → Tasks 7–9, 12. §4 Mincer–Zarnowitz (**model only**; consensus → Track B) → Tasks 10, 12. §4 provider-ablation (forward-looking) → Task 12. §4 gate thresholds → Tasks 11, 12.
+- Firewall: grep the diff for forbidden paths — `git diff --name-only main... | grep -E 'nfp-model|transform_to_panel|build_model_data'` must be **empty**. Fix any leak before proceeding. (Threading `industry_code='05'` into `first_print_changes` / `read_vintage_store` / `panel_to_model_data` is data-layer and allowed.)
 
 - [ ] **Step 4: Update the gate log in `plans/0-port_and_staged_plan.md`**
 
-Add a line under the staged-plan gate log recording: "Tier 0 + Tier 1 (plan 13) implemented — regime-decomposed/calibration scoreboard + Aruoba/MZ diagnostics + gate; no nfp-model change; Aruoba R² and gate decision pending a full store run." Keep wording consistent with the existing gate-log entries.
+Add a line under the staged-plan gate log recording: "Tier 0 + Tier 1 (plan 13) implemented — PRIVATE ('05') regime-decomposed/calibration scoreboard (naive floors only; no consensus/ADP) + private QCEW-settled PRIMARY truth + Aruoba (private first-to-third, gap-safe)/MZ (model-only) diagnostics + gate; no nfp-model change; Aruoba R² and gate decision pending a converged '05' fit + full store run." Keep wording consistent with the existing gate-log entries.
 
 - [ ] **Step 5: Commit**
 
@@ -1403,6 +1441,6 @@ git commit -m "docs(plans): record Tier 0 + Tier 1 completion in the gate log"
 ## Open items carried forward (not blockers)
 
 - **Aruoba R² readout is data-gated.** The intercept that feeds §5A and the R² that gates §6/§7 require a full store run; locally the suite proves the *machinery* (against synthetic priors), not the NFP-specific numbers.
-- **Consensus MZ + provider-ablation are forward-looking.** Both render `—`/skip until the Bloomberg consensus file and provider microdata land (`specs/model_improvements.md` §11; `specs/bloomberg_consensus.md`).
+- **Consensus MZ is Track B, not just forward-looking.** Consensus is a *Total* object; an MZ on it belongs with the Total assembly (private nowcast + government forecast), not the private track — it is **out of scope here**, not "pending a Bloomberg file" (`specs/model_improvements.md` §4/§9). **Provider-ablation** *is* forward-looking — it self-skips until provider microdata lands on the Bloomberg full regime (`specs/model_improvements.md` §11).
 - **QCEW change unit factor** (Task 5 Step 4) must be eyeballed against one known month before trusting the truth scoreboard.
 - **Next plan (14+)** picks up §5A (the locally-testable first-print offset, which *does* touch `nowcast.py` and therefore starts the model-side sequence behind the §8 parity governance) — only after Task 13's gate readout justifies it.
