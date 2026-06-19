@@ -152,6 +152,32 @@ def mincer_zarnowitz(actual: np.ndarray, forecast: np.ndarray) -> MZResult:
                     joint_stat=wald, joint_p=p, r2=res.r2, n=res.n)
 
 
+@dataclass(frozen=True)
+class GateConfig:
+    normal_r2_floor: float = 0.10           # below this, monthly revisions ~ noise
+    turning_point_excess: float = 0.15      # tp R2 must exceed normal by this to fund BD
+
+
+def gate_decision(r2_by_month_type: dict[str, float], cfg: GateConfig) -> dict:
+    """Translate Aruoba R^2-by-month-type into Tier 2/3 funding decisions."""
+    normal = r2_by_month_type.get("normal", 0.0)
+    tp = r2_by_month_type.get("turning_point", 0.0)
+    bench = r2_by_month_type.get("benchmark_window", 0.0)
+    fund_rebuild = normal >= cfg.normal_r2_floor
+    fund_bd = (tp - normal) >= cfg.turning_point_excess
+    rationale = (
+        f"normal R²={normal:.3f} ({'>=' if fund_rebuild else '<'} {cfg.normal_r2_floor}); "
+        f"turning_point R²={tp:.3f}, benchmark R²={bench:.3f}; "
+        f"BD funded={fund_bd} (turning_point excess {tp - normal:+.3f} "
+        f"vs {cfg.turning_point_excess})."
+    )
+    return {
+        "fund_first_release_rebuild": bool(fund_rebuild),
+        "fund_tier3_bd": bool(fund_bd),
+        "rationale": rationale,
+    }
+
+
 def qcew_settled_changes(store_path=None) -> pl.DataFrame:
     """Latest-vintage QCEW national total-private over-the-month change (thousands).
 

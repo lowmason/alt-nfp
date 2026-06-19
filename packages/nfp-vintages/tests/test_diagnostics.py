@@ -163,3 +163,23 @@ def test_mz_biased_forecast_rejected():
     actual = 30.0 + 0.5 * forecast + rng.normal(0.0, 1.0, 400)  # inefficient
     res = mincer_zarnowitz(actual, forecast)
     assert res.joint_p < 0.01                         # null rejected
+
+
+# ---------------------------------------------------------------------------
+# Task 11: Gate decision
+# ---------------------------------------------------------------------------
+from nfp_vintages.diagnostics import GateConfig, gate_decision  # noqa: E402
+
+
+def test_gate_diagonal_adequate_when_normal_r2_low():
+    r2_by_type = {"normal": 0.04, "turning_point": 0.05, "benchmark_window": 0.06}
+    g = gate_decision(r2_by_type, GateConfig())
+    assert g["fund_first_release_rebuild"] is False
+    assert g["fund_tier3_bd"] is False
+
+
+def test_gate_funds_bd_when_turning_point_r2_concentrated():
+    r2_by_type = {"normal": 0.05, "turning_point": 0.40, "benchmark_window": 0.08}
+    g = gate_decision(r2_by_type, GateConfig())
+    assert g["fund_tier3_bd"] is True
+    assert "turning_point" in g["rationale"]
