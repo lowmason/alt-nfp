@@ -32,6 +32,12 @@ except Exception:
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 DATE = "20260618"
+# LOCAL-ONLY, NOT CONTAINER-SAFE (plans/15 Tier D, by design). This is a
+# one-time, dated cutover that was already run locally on 2026-06-18; the local
+# backup is the PERSISTENT safety net taken before the canonical store is
+# touched, so it must NOT be a tempfile (it has to survive the run). It is not
+# meant to run on Bloomberg's footprint-limited container — if it ever must,
+# point LOCAL_BACKUP at a persistent S3/host path, never ./data.
 LOCAL_BACKUP = Path("data/canonical_backup_" + DATE).resolve()
 MANIFEST = LOCAL_BACKUP / "backup_manifest.json"
 
