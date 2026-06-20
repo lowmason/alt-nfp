@@ -227,3 +227,28 @@ def test_gate_funds_bd_when_turning_point_r2_concentrated():
     g = gate_decision(r2_by_type, GateConfig())
     assert g["fund_tier3_bd"] is True
     assert "turning_point" in g["rationale"]
+
+
+# ---------------------------------------------------------------------------
+# §5A: pooled first-print bias (the post-hoc offset δ)
+# ---------------------------------------------------------------------------
+from nfp_vintages.diagnostics import pooled_first_print_bias  # noqa: E402
+
+
+def test_pooled_first_print_bias_median_resists_outlier():
+    # Central first-print bias ≈ -8k with one extreme benchmark-month outlier
+    # (+871k, the real 2022-11 row). The robust median ignores it; the mean is
+    # contaminated. This is exactly the §5A δ-contamination guard.
+    rev = pl.DataFrame({
+        "ref_date": [_d(2023, m, 1) for m in range(1, 8)],
+        "revision_k": [-8.0, -7.0, -9.0, -8.0, -8.0, -7.0, 871.0],
+    })
+    assert pooled_first_print_bias(rev, method="median") == approx(-8.0)
+    assert pooled_first_print_bias(rev) == approx(-8.0)          # median is the default
+    assert pooled_first_print_bias(rev, method="mean") > 100.0   # contaminated
+
+
+def test_pooled_first_print_bias_drops_null_revisions():
+    rev = pl.DataFrame({"revision_k": [-8.0, None, -8.0, -8.0]})
+    assert pooled_first_print_bias(rev, method="median") == approx(-8.0)
+    assert pooled_first_print_bias(rev, method="mean") == approx(-8.0)

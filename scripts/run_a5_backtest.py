@@ -156,7 +156,11 @@ def cmd_snapshot(root: Path) -> None:
                     # build_model_data exactly otherwise: as_of to BOTH
                     # build_panel(as_of_ref=) and panel_to_model_data(as_of=), and
                     # start_year left at its shared 2012 default.
-                    providers = list(PROVIDERS_DEFAULT)
+                    # Public-only skeleton when A5_NO_PROVIDERS is set: the §5A
+                    # offset is provider-independent, and dropping the placeholder
+                    # provider G avoids its backtest-frontier no-observations edge
+                    # (pad_model_inputs requires uniform provider coverage per batch).
+                    providers = [] if os.environ.get("A5_NO_PROVIDERS") else list(PROVIDERS_DEFAULT)
                     panel = build_panel(
                         providers=providers, end_year=END_YEAR, as_of_ref=as_of
                     )
@@ -252,7 +256,7 @@ def cmd_score(root: Path) -> int:
     from nfp_ingest.first_print import first_print_changes
     from nfp_vintages.a5 import score
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
-    from nfp_vintages.diagnostics import build_revision_table
+    from nfp_vintages.diagnostics import build_revision_table, pooled_first_print_bias
     from nfp_vintages.scoreboard import (
         MonthTypeConfig,
         change_draws_k,
@@ -274,6 +278,16 @@ def cmd_score(root: Path) -> int:
 
     # Month-type inputs (skeleton-safe: empty maps degrade to "normal"/"benchmark").
     rev_tbl = build_revision_table()  # [ref_date, first_print_change_k, later_change_k, revision_k]
+    # §5A post-hoc first-print offset δ: the pooled private first-print bias (robust
+    # median of revision_k). The model predicts a third-print-ish value, so against the
+    # first print its error is ~+|δ|; model_5a subtracts δ (jobs space) from the point
+    # AND the predictive draws (δ=0 ⇒ model_5a==model). The local ME-shift is a
+    # sign-and-wiring check on a pooled in-sample δ — not an accuracy verdict; a
+    # month-type / as-of δ is the refinement. Spec: model_improvements.md §5A.
+    delta_k = pooled_first_print_bias(rev_tbl)
+    print(f"[5A] pooled first-print bias δ={delta_k:+.1f}k "
+          f"(median; mean={pooled_first_print_bias(rev_tbl, method='mean'):+.1f}k); "
+          f"model_5a = model − δ")
     rev_months = [r["ref_date"] for r in rev_tbl.iter_rows(named=True)]
     rev_abs = np.array([abs(r["revision_k"]) if r["revision_k"] is not None else np.nan
                         for r in rev_tbl.iter_rows(named=True)], dtype=float)
@@ -294,8 +308,9 @@ def cmd_score(root: Path) -> int:
             if actual is None:
                 continue
             model = batched[key]["nowcast_change_k"]
-            # Predictive draws for calibration (model only) from the persisted npz.
-            cov80 = cov90 = crps = None
+            # Predictive draws → calibration for the model AND its §5A offset row
+            # (model_5a uses the δ-shifted draws so coverage/CRPS reflect the offset).
+            calib: dict[str, tuple] = {}
             npz_path = root / f"{rname}_batched_{key}.npz"
             if npz_path.exists() and actual is not None:
                 with np.load(npz_path) as z:
@@ -305,9 +320,12 @@ def cmd_score(root: Path) -> int:
                             z["nowcast_pred_draws"],
                             prev_index=prev_index, idx_to_level=idx_to_level,
                         )
-                        cov80 = interval_coverage(cd, actual, 0.80)
-                        cov90 = interval_coverage(cd, actual, 0.90)
-                        crps = crps_sample(cd, actual)
+                        for _name, _draws in (("model", cd), ("model_5a", cd - delta_k)):
+                            calib[_name] = (
+                                interval_coverage(_draws, actual, 0.80),
+                                interval_coverage(_draws, actual, 0.90),
+                                crps_sample(_draws, actual),
+                            )
             providers_present = bool(t.get("n_providers", 0))
             # month_type keys are month-start (day=1) — ref is the day-12 model
             # date, so normalize before lookup (same day-12-vs-day-1 alignment the
@@ -315,10 +333,12 @@ def cmd_score(root: Path) -> int:
             mtype = month_type.get(ref.replace(day=1), "normal")
             preds = {
                 "model": model,
+                "model_5a": model - delta_k,   # §5A post-hoc first-print offset
                 "naive_rw": naive_rw.predict(ref, as_of=as_of),
                 "naive_mean": naive_mean.predict(ref, as_of=as_of),
             }
             for comp, pred in preds.items():
+                c80, c90, ck = calib.get(comp, (None, None, None))
                 rows.append({
                     "regime": rname,
                     "ref_month": ref,
@@ -329,10 +349,10 @@ def cmd_score(root: Path) -> int:
                     "pred_change_k": pred,
                     "actual_first_print_k": actual,
                     "error_k": None if pred is None else actual - pred,
-                    # calibration only meaningful for the model row
-                    "coverage_80": cov80 if comp == "model" else None,
-                    "coverage_90": cov90 if comp == "model" else None,
-                    "crps_k": crps if comp == "model" else None,
+                    # calibration meaningful for the model + model_5a rows only
+                    "coverage_80": c80,
+                    "coverage_90": c90,
+                    "crps_k": ck,
                 })
 
     if not rows:
@@ -372,7 +392,7 @@ def cmd_score(root: Path) -> int:
             n_months = sub.select(pl.col("ref_month").n_unique()).item()
             lines += [f"### {mtype} ({n_months} months)", "",
                       "| competitor | n | ME | MAE | RMSE |", "|---|---|---|---|---|"]
-            for comp in ["model", "naive_rw", "naive_mean"]:
+            for comp in ["model", "model_5a", "naive_rw", "naive_mean"]:
                 e = sub.filter(pl.col("competitor") == comp)["error_k"].to_numpy()
                 m = score(e)
                 if m["n"] == 0:
@@ -381,17 +401,17 @@ def cmd_score(root: Path) -> int:
                     lines.append(
                         f"| {comp} | {m['n']} | {m['me']:+,.0f}k | {m['mae']:,.0f}k "
                         f"| {m['rmse']:,.0f}k |")
-            # Model calibration row for this bucket.
-            mc = sub.filter(pl.col("competitor") == "model")
-            cov80 = mc["coverage_80"].drop_nulls().mean()
-            cov90 = mc["coverage_90"].drop_nulls().mean()
-            crps = mc["crps_k"].drop_nulls().mean()
-            if cov80 is not None:
-                lines += ["",
-                          f"model calibration — 80% coverage: {cov80:.0%}, "
-                          f"90% coverage: {cov90:.0%}, mean CRPS: {crps:,.0f}k", ""]
-            else:
-                lines.append("")
+            # Calibration rows for the model and its §5A offset (before/after).
+            for _c in ("model", "model_5a"):
+                mc = sub.filter(pl.col("competitor") == _c)
+                cov80 = mc["coverage_80"].drop_nulls().mean()
+                cov90 = mc["coverage_90"].drop_nulls().mean()
+                crps = mc["crps_k"].drop_nulls().mean()
+                if cov80 is not None:
+                    lines += ["",
+                              f"{_c} calibration — 80% coverage: {cov80:.0%}, "
+                              f"90% coverage: {cov90:.0%}, mean CRPS: {crps:,.0f}k"]
+            lines.append("")
     (root / "a5_report.md").write_text("\n".join(lines) + "\n")
     print((root / "a5_report.md").read_text())
 

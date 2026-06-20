@@ -12,10 +12,13 @@ lives in `nfp_download.bls.bulk` since the A2 seam fix). Provides:
 - **Evaluation** (`evaluation.py`): `vintage_diff()`, noise multiplier construction
 - **A5 / Tier 0–1 eval** (`a5.py`, `scoreboard.py`, `diagnostics.py`, `competitors/`):
   the **private** first-print scoreboard — month-type/calibration/CRPS metrics
-  (`scoreboard.py`), Aruoba revision + Mincer–Zarnowitz diagnostics
-  (`diagnostics.py`), and the competitor adapters (`competitors/naive.py`
-  random-walk + trailing-mean floors; `competitors/consensus.py` `load_consensus`/
-  `Consensus`). Evaluation-side only — no `nfp-model` import.
+  (`scoreboard.py`), Aruoba revision + Mincer–Zarnowitz diagnostics +
+  `pooled_first_print_bias` (the §5A post-hoc offset δ) (`diagnostics.py`), and the
+  competitor adapters (`competitors/naive.py` random-walk + trailing-mean floors;
+  `competitors/consensus.py` `load_consensus`/`Consensus`). The §5A offset surfaces
+  in `run_a5_backtest.py:cmd_score` as a `model_5a` competitor row (point + draws
+  shifted by δ); `A5_NO_PROVIDERS=1` builds the public-only skeleton. Evaluation-side
+  only — no `nfp-model` import.
 - **Track B — Total assembly** (`assembly.py`, `wedge_diagnostics.py`):
   `assemble_total()` convolves the private nowcast posterior with the government
   **wedge** posterior into a Total-NFP posterior; `score_total()` scores it vs the
@@ -49,7 +52,7 @@ uv run alt-nfp build --releases PATH
 uv run alt-nfp snapshot --as-of 2026-01-12 [--grid-end 2026-06-12]  # hash-pinned ModelData snapshots
 
 # Run vintage tests
-pytest tests/
+pytest src/nfp_vintages/tests/
 
 # Lint
 ruff check src/nfp_vintages/
@@ -125,6 +128,6 @@ data/
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
+Tests live in `src/nfp_vintages/tests/` within this package:
 - `test_vintages.py` — vintage view & evaluation tests
-- (download transport tests moved to `packages/nfp-download/tests/bls/test_bulk_network.py`)
+- (download transport tests moved to `packages/nfp-download/src/nfp_download/tests/bls/test_bulk_network.py`)

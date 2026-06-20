@@ -122,6 +122,31 @@ def build_revision_table(store_path=None, industry_code: str = "05") -> pl.DataF
     return _join_revision(fp, later)
 
 
+def pooled_first_print_bias(rev_tbl: pl.DataFrame, *, method: str = "median") -> float:
+    """Pooled private first-print bias δ (k-jobs) — the §5A post-hoc offset.
+
+    The central location of ``revision_k = later_change_k - first_print_change_k``
+    over the store. δ < 0 means the first print prints *above* the settled third
+    print, so a model predicting the third-print value reads low against the first
+    print; §5A subtracts δ from the nowcast to push it toward the first print.
+
+    ``method="median"`` (default) is robust to the benchmark/COVID outlier months
+    (e.g. the real +871k 2022-11 revision) that contaminate the mean; ``method=
+    "mean"`` matches the unconditional Aruoba intercept. Null/non-finite revisions
+    are dropped. This is a pooled constant — a month-type-specific δ is the obvious
+    refinement (the harness already classifies month types).
+    """
+    vals = np.asarray(rev_tbl["revision_k"].to_list(), dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        raise ValueError("no finite revision_k values to pool")
+    if method == "median":
+        return float(np.median(vals))
+    if method == "mean":
+        return float(np.mean(vals))
+    raise ValueError(f"unknown method {method!r}; expected 'median' or 'mean'")
+
+
 def build_aruoba_design(
     ref_months: list, regressors: dict[str, dict]
 ) -> tuple[np.ndarray, list[str], list[str]]:
