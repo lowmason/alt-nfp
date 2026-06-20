@@ -346,7 +346,7 @@ def build_vintage_dates(release_dates_path: Path | None = None) -> pl.DataFrame:
         revision, benchmark_revision).
     """
     path = release_dates_path or RELEASE_DATES_PATH
-    df = pl.read_parquet(path)
+    df = pl.read_parquet(path, storage_options=storage_options_for(path))
 
     # Merge supplemental + pre-scrape release dates for gaps
     all_supplemental = (

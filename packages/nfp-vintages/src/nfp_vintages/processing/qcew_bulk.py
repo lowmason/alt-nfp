@@ -36,7 +36,12 @@ from nfp_lookups.industry import (
     get_supersector_components,
     qcew_to_sector,
 )
-from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR, VINTAGE_DATES_PATH
+from nfp_lookups.paths import (
+    DOWNLOADS_DIR,
+    INTERMEDIATE_DIR,
+    VINTAGE_DATES_PATH,
+    storage_options_for,
+)
 from nfp_lookups.revision_schedules import get_qcew_vintage_date
 
 OUTPUT_PATH = INTERMEDIATE_DIR / 'qcew_revisions.parquet'
@@ -399,7 +404,7 @@ def _process_revisions_csv() -> pl.DataFrame:
     # Join vintage dates
     if VINTAGE_DATES_PATH.exists():
         vintage_dates = (
-            pl.read_parquet(VINTAGE_DATES_PATH)
+            pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
             .filter(pl.col('publication').eq('qcew'))
             .select(
                 qtr_date=pl.col('ref_date'),

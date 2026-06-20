@@ -182,3 +182,44 @@ class TestNoWarningForRealData:
             result = _load_cyclical_indicators(MODEL_DATES, T, [], tmp_path)
 
         assert result == {}, "empty indicators list should produce empty result"
+
+
+# ---------------------------------------------------------------------------
+# Storage-options threading test
+# ---------------------------------------------------------------------------
+
+
+class TestStorageOptionsThreaded:
+    """Verify _load_cyclical_indicators passes storage_options to pl.read_parquet."""
+
+    def test_storage_options_for_called_with_fpath(self, tmp_path, monkeypatch):
+        """storage_options_for must be called with the indicator fpath on each read.
+
+        Strategy: monkeypatch nfp_ingest.model_data.storage_options_for with a
+        recorder that returns None (local behaviour unchanged).  Write a real
+        indicator parquet so the read path is actually exercised.  Assert the
+        recorder was invoked with the expected fpath.
+        """
+        captured_paths: list = []
+
+        def recording_storage_options(path):
+            captured_paths.append(path)
+            return None  # local behaviour: no extra options
+
+        import nfp_ingest.model_data as model_data_mod
+
+        monkeypatch.setattr(model_data_mod, 'storage_options_for', recording_storage_options)
+
+        # Write a real indicator parquet so the file-exists branch is taken
+        values = [float(i + 1) for i in range(T)]
+        _write_monthly_parquet(tmp_path, MONTHLY_SPEC.name, values)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            _load_cyclical_indicators(MODEL_DATES, T, [MONTHLY_SPEC], tmp_path)
+
+        expected_fpath = tmp_path / f"{MONTHLY_SPEC.name}.parquet"
+        assert expected_fpath in captured_paths, (
+            f"storage_options_for was not called with {expected_fpath}; "
+            f"captured calls: {captured_paths}"
+        )

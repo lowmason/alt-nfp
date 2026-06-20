@@ -21,7 +21,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 from nfp_lookups.industry import CES_SECTOR_TO_NAICS, SINGLE_SECTOR_SUPERSECTORS
-from nfp_lookups.paths import INTERMEDIATE_DIR, VINTAGE_DATES_PATH
+from nfp_lookups.paths import INTERMEDIATE_DIR, VINTAGE_DATES_PATH, storage_options_for
 
 OUTPUT_PATH = INTERMEDIATE_DIR / 'sae_revisions.parquet'
 CHECKPOINT_PATH = INTERMEDIATE_DIR / 'sae_checkpoint.parquet'
@@ -510,7 +510,7 @@ def main() -> None:
     )
 
     vintage_dates = (
-        pl.read_parquet(VINTAGE_DATES_PATH)
+        pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
         .filter(pl.col('publication').eq('sae'))
         .select(
             ref_date=pl.col('ref_date'),

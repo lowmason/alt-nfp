@@ -15,7 +15,12 @@ from nfp_lookups.industry import (
     INDUSTRY_MAP,
     SINGLE_SECTOR_SUPERSECTORS,
 )
-from nfp_lookups.paths import DOWNLOADS_DIR, INTERMEDIATE_DIR, VINTAGE_DATES_PATH
+from nfp_lookups.paths import (
+    DOWNLOADS_DIR,
+    INTERMEDIATE_DIR,
+    VINTAGE_DATES_PATH,
+    storage_options_for,
+)
 from polars import selectors as cs
 
 CES_DIR = DOWNLOADS_DIR / 'ces' / 'cesvinall'
@@ -249,7 +254,7 @@ def main(ces_dir: Path | None = None) -> None:
     )
 
     vintage_dates = (
-        pl.read_parquet(VINTAGE_DATES_PATH)
+        pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
         .filter(pl.col('publication') == 'ces')
         .drop('publication')
     )

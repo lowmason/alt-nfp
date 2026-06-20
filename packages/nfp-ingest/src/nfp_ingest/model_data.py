@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from nfp_lookups.paths import INDICATORS_DIR
+from nfp_lookups.paths import INDICATORS_DIR, storage_options_for
 from nfp_lookups.provider_config import (
     CYCLICAL_INDICATORS_DEFAULT,
     PROVIDERS_DEFAULT,
@@ -561,7 +561,7 @@ def _load_cyclical_indicators(
             continue
 
         try:
-            raw = pl.read_parquet(fpath).sort('ref_date')
+            raw = pl.read_parquet(fpath, storage_options=storage_options_for(fpath)).sort('ref_date')
         except (OSError, pl.exceptions.ComputeError) as e:
             logger.warning("Failed to read indicator %s from %s: %s", key, fpath, e)
             result[key] = None
