@@ -56,11 +56,14 @@ _SINGLE_FILES = [
 _FORBIDDEN_SEGMENTS = {"store", "store-rebuild"}
 
 
-def _is_forbidden_key(key: str) -> bool:
-    """Return True if the S3 key starts with a protected store prefix."""
-    # key may be "bucket/path/…" or just "path/…"; strip bucket first.
-    # We receive the full key (after bucket) so just check the first segment.
-    segment = key.lstrip("/").split("/")[0]
+def _is_forbidden_key(relpath: str) -> bool:
+    """Return True if the path-within-bucket starts with a protected store prefix.
+
+    Args:
+        relpath: The key path relative to the bucket root (NOT prefixed with the
+            bucket name), e.g. ``"store/x.parquet"`` or ``"indicators/foo.parquet"``.
+    """
+    segment = relpath.lstrip("/").split("/")[0]
     if segment in _FORBIDDEN_SEGMENTS:
         return True
     # also match store-prev* variants
@@ -110,9 +113,6 @@ def main() -> None:
     apply_mode = "--apply" in sys.argv
 
     # Resolve DATA_DIR
-    uv_run = "uv" in sys.executable or any("uv" in a for a in sys.argv)
-    _ = uv_run  # informational only
-
     from nfp_lookups.paths import DATA_DIR  # noqa: PLC0415
 
     data_dir = DATA_DIR
@@ -139,7 +139,7 @@ def main() -> None:
     print("Planned uploads:")
     for local_path, relpath in files:
         s3_key = f"{bucket}/{relpath}"
-        if _is_forbidden_key(s3_key):
+        if _is_forbidden_key(relpath):
             sys.exit(
                 f"ABORT: key {s3_key!r} starts with a forbidden store prefix. "
                 "This script must not touch the vintage store."
@@ -177,6 +177,11 @@ def main() -> None:
     failed = 0
     for local_path, relpath in files:
         s3_key = f"{bucket}/{relpath}"
+        if _is_forbidden_key(relpath):
+            sys.exit(
+                f"ABORT: key {s3_key!r} starts with a forbidden store prefix. "
+                "This script must not touch the vintage store."
+            )
         fs.put_file(str(local_path), s3_key)
 
         # Verify by MD5 comparison
