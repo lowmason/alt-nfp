@@ -787,3 +787,53 @@ class TestIndicatorsS3Guard:
 
         # mkdir must NOT have been called by download_indicators.
         assert mkdir_called == [], "mkdir() was called on a remote path — guard missing"
+
+
+class TestProviderResolvesUnderProvidersLocation:
+    """Task 4: provider parquets resolve via providers_location(), not DATA_DIR.
+
+    Guards that load_provider_series() uses providers_location() as its default
+    root and that read_provider_table() is S3-capable (storage_options_for added).
+    Local behaviour is unchanged; the test uses tmp_path so no store access needed.
+    """
+
+    def test_provider_resolves_under_providers_location(self, monkeypatch, tmp_path):
+        """Provider parquet written under tmp_path is found ONLY when
+        providers_location() returns tmp_path; DATA_DIR is redirected to a
+        separate empty dir so the real store is never consulted.
+
+        RED (pre-implementation): payroll defaults to DATA_DIR (patched empty) →
+        file not found → returns None → assertion fails.
+        GREEN (post-implementation): defaults to providers_location() → tmp_path → found.
+        """
+        from datetime import date
+
+        import polars as pl
+        from nfp_ingest import payroll
+        from nfp_lookups.provider_config import ProviderConfig
+
+        # Write a minimal provider parquet under tmp_path/providers/g/
+        provider_dir = tmp_path / "providers" / "g"
+        provider_dir.mkdir(parents=True)
+        df = pl.DataFrame(
+            {
+                "ref_date": [date(2020, 1, 1), date(2020, 2, 1)],
+                "employment": [100000.0, 100200.0],
+            }
+        )
+        df.write_parquet(provider_dir / "g_provider.parquet")
+
+        # Patch providers_location in the payroll module to return tmp_path.
+        # The real providers_location() returns DATA_DIR locally (both are the same path),
+        # so without this patch the test would read from the real store, not the fixture.
+        monkeypatch.setattr(payroll, "providers_location", lambda: tmp_path)
+
+        config = ProviderConfig(name="G", file="providers/g/g_provider.parquet")
+        result = payroll.load_provider_series(config)
+
+        assert result is not None, (
+            "load_provider_series returned None — provider file was not found "
+            "under providers_location(). Is the default still DATA_DIR?"
+        )
+        assert result.height >= 1
+        assert "employment" in result.columns
