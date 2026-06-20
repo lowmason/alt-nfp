@@ -36,7 +36,7 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 
 ```bash
 # Run ingest tests
-pytest tests/
+pytest src/nfp_ingest/tests/
 
 # Lint
 ruff check src/nfp_ingest/
@@ -83,15 +83,15 @@ src/nfp_ingest/
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
+Tests live in `src/nfp_ingest/tests/` within this package:
 - `test_ingest.py` — panel validation & schema tests
 - `test_new_ingest.py` — new ingest module tests
 - `test_release_dates.py` — release date parsing/scraping tests
 - `test_vintage_store.py` — vintage store + rank-based censoring + validation guards
 - `test_compositing.py` — QCEW-weighted compositing tests
 - `test_store_coverage.py` — store data-integrity + CES censored diagonal invariant
-- `test_golden_masters.py` — A1 golden masters: censored panels vs frozen-reference fixtures in `s3://…/golden/a1/` (manifest in `tests/golden/`); self-skips without store env
+- `test_golden_masters.py` — A1 golden masters: censored panels vs frozen-reference fixtures in `s3://…/golden/a1/` (manifest in `src/nfp_ingest/tests/golden/`); self-skips without store env
 - `test_model_data_golden.py` — A2 golden masters: `build_model_data` arrays/frames vs frozen-reference `panel_to_model_data` outputs in `s3://…/golden/a2/`; self-skips without store env + local providers/indicators
 - `test_snapshots.py` — snapshot content hash (deterministic, order-insensitive, corruption-detecting), round-trip, and build-twice hash stability
 - `test_cyclical_indicators.py` — NOT yet ported: depends on `nfp_models.panel_adapter`; comes over when knowability logic moves into the data layer (Phase A2)
-- `test_fred.py` — lives in `packages/nfp-download/tests/` (imports only `nfp_download.fred`)
+- `test_fred.py` — lives in `packages/nfp-download/src/nfp_download/tests/` (imports only `nfp_download.fred`)

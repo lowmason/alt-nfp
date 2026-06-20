@@ -237,6 +237,10 @@ class TestBoundary:
         src = pathlib.Path(nfp_model.__file__).parent
         offenders = []
         for py in src.rglob("*.py"):
+            # Tests now live under src/nfp_model/tests/ and import data packages
+            # by design; the boundary governs shippable inference code only.
+            if "tests" in py.relative_to(src).parts:
+                continue
             source = py.read_text()
             for violation in _find_nfp_boundary_violations(source):
                 offenders.append(f"{py.name}: {violation}")

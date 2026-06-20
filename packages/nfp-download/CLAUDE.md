@@ -22,7 +22,7 @@ Generic download layer — no data transformation, just fetching. Provides:
 
 ```bash
 # Run download tests
-pytest tests/
+pytest src/nfp_download/tests/
 
 # Lint
 ruff check src/nfp_download/
@@ -68,11 +68,11 @@ src/nfp_download/
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
-- `tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
-- `tests/bls/test_http.py` — BLS HTTP client tests
-- `tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
-- `tests/bls/test_bulk_network.py` — live www.bls.gov bulk-download transport tests (network-marked)
-- `tests/release_dates/test_scraper_network.py` — live BLS scraper transport tests (network-marked)
-- `tests/test_fred.py` — FRED client tests
-- `tests/test_client.py` — HTTP client retry logic tests
+Tests live in `src/nfp_download/tests/` within this package:
+- `src/nfp_download/tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
+- `src/nfp_download/tests/bls/test_http.py` — BLS HTTP client tests
+- `src/nfp_download/tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
+- `src/nfp_download/tests/bls/test_bulk_network.py` — live www.bls.gov bulk-download transport tests (network-marked)
+- `src/nfp_download/tests/release_dates/test_scraper_network.py` — live BLS scraper transport tests (network-marked)
+- `src/nfp_download/tests/test_fred.py` — FRED client tests
+- `src/nfp_download/tests/test_client.py` — HTTP client retry logic tests

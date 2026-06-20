@@ -28,7 +28,7 @@ This is the foundation package with no internal dependencies. It provides:
 
 ```bash
 # Run lookups tests
-pytest tests/
+pytest src/nfp_lookups/tests/
 
 # Lint
 ruff check src/nfp_lookups/
@@ -71,7 +71,7 @@ src/nfp_lookups/
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
+Tests live in `src/nfp_lookups/tests/` within this package:
 - `test_lookups.py` — industry hierarchy & revision schedule tests
 - `test_series_ids.py` — BLS series-ID grammar (registry, build/parse) tests
 - `test_paths.py` — base-dir discovery (env override, marker walk, fallback), store location (`NFP_STORE_URI` → UPath, `storage_options_for`), derived layout

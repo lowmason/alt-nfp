@@ -22,3 +22,4 @@ nfp-lookups = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfp_download"]
+exclude = ["src/nfp_download/tests"]

@@ -84,7 +84,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "packages/nfp-vintages/src/nfp_vintages/__main__.py" = ["B008"]  # typer.Option in defaults is idiomatic
-"packages/*/tests/**" = ["B017", "B011"]  # blind exception + assert False are common in tests
+"packages/*/src/*/tests/**" = ["B017", "B011"]  # blind exception + assert False are common in tests
 
 [tool.pytest.ini_options]
 testpaths = ["packages"]

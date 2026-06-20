@@ -61,7 +61,7 @@ Provides:
 
 **`nfp_model` imports only jax, numpyro, numpy** — no `nfp_*` packages, no
 polars, no store access, no plotting. Enforced by
-`tests/test_model_unit.py::TestBoundary`. Provider configs are duck-typed
+`src/nfp_model/tests/test_model_unit.py::TestBoundary`. Provider configs are duck-typed
 (dataclass or dict). Importing the package enables **JAX float64 globally**
 (`numpyro.enable_x64()`): the parity contract is double precision.
 
@@ -76,7 +76,7 @@ polars, no store access, no plotting. Enforced by
 ```bash
 pytest packages/nfp-model -m "not slow"      # fast structure/intake tests
 pytest packages/nfp-model -m slow            # MCMC smoke incl. vmapped batch (~4 min)
-NFP_A3_PARITY=1 pytest packages/nfp-model/tests/test_parity_golden.py  # minutes
+NFP_A3_PARITY=1 pytest packages/nfp-model/src/nfp_model/tests/test_parity_golden.py  # minutes
 
 # Full A3 parity (14 fits; restartable; see plans/5)
 uv run python scripts/run_a3_parity.py fit data/golden_a3_staging data/a3
@@ -108,7 +108,7 @@ uv run python scripts/run_a4_backtest.py compare  data/backtests   # report + ex
 - `test_wedge_fit.py` — wedge `fit_wedge`/`wedge_pred_draws` smoke (`slow`)
 - `test_parity_golden.py` — single-fixture parity spot check vs
   `s3://alt-nfp/golden/a3` (opt-in: `NFP_A3_PARITY=1` + store env;
-  manifest committed in `tests/golden/`)
+  manifest committed in `src/nfp_model/tests/golden/`)
 - `synthetic_data.py` — shared synthetic ModelData builders (not a test)
 
 ## Key Patterns
