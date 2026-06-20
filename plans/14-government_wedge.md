@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **✅ IMPLEMENTED — all 10 tasks complete (verified 2026-06-19).** Committed on `a5-rebuilt-integration` (commits `69c1200`→`458c6c4`). Checkboxes were ticked after a per-task verification that **ran each task's tests**: fast suite **770 passed / 2 skipped**, the 15 wedge unit tests green, ruff clean, and the Task-9 build gate **ran against the real store and converged** (0 divergences, finite μ, R-hat ≤ 1.01). **Build-here / validate-on-port:** the accuracy verdict vs consensus, the 2025-RIF intervention magnitudes (placeholder priors — maintainer input gate, §8 of the spec), and the Bloomberg consensus file remain for the port. Sanctioned deviations: `_wedge_diag.py` kept as a spec reference (not `git rm`'d); `cmd_total` added skip-guards beyond the plan draft; `decomposition_residual` uses `ddof=1`. The cross-cutting specs (`model_improvements.md`, `a5_real_competitors.md`, `bloomberg_consensus.md`, `plans/13`, `plans/0`) were reconciled to this built state in commit `8326621`.
+
 **Goal:** Forecast the government wedge `g = published_00 − published_05` (first-print MoM change, SA, thousands) with a small Bayesian model, assemble it with the existing private nowcast into a Total-NFP posterior, and score that Total against the Bloomberg consensus.
 
 **Architecture:** A standalone NumPyro change-space structural time-series (`nfp_model/wedge.py`) = constant drift + a shrunk monthly-seasonal block + a deterministic, announcement-priored intervention layer + masked iid-Normal likelihood. The wedge target and intervention basis are built data-side (`nfp_ingest/wedge_data.py`) from store first prints + a government reference table (`nfp_lookups/government.py`). A harness helper (`nfp_vintages/assembly.py`) convolves the wedge posterior with the private nowcast posterior; the A5 backtest is extended to score the assembled Total vs consensus + the Total first print.
@@ -55,7 +57,7 @@ Spec: `specs/government_wedge.md`. Rationale: `docs/government_design.md`.
 **Interfaces:**
 - Produces: `GovIntervention`, `KNOWN_INTERVENTIONS`, `get_known_interventions_as_of`, `intervention_column`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # packages/nfp-lookups/tests/test_government.py
@@ -101,12 +103,12 @@ def test_missing_ref_month_is_all_zero():
     assert np.all(intervention_column(iv, REF) == 0)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-lookups/tests/test_government.py -v`
 Expected: FAIL — `ModuleNotFoundError: nfp_lookups.government`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # packages/nfp-lookups/src/nfp_lookups/government.py
@@ -212,12 +214,12 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-lookups/tests/test_government.py -v`
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Lint + commit**
+- [x] **Step 5: Lint + commit**
 
 ```bash
 uv run ruff check packages/nfp-lookups/src/nfp_lookups/government.py
@@ -237,7 +239,7 @@ git commit -m "feat(lookups): government intervention reference data (wedge Trac
 - Consumes: `nfp_ingest.first_print.first_print_changes` (keyword-only after `store_path`; cols `ref_date, first_print_growth, first_print_change_k, vintage_date`).
 - Produces: `wedge_first_print_changes(*, store_path=VINTAGE_STORE_PATH) -> pl.DataFrame`.
 
-- [ ] **Step 1: Write the failing test** (uses a monkeypatched `first_print_changes` so it does not need the real store)
+- [x] **Step 1: Write the failing test** (uses a monkeypatched `first_print_changes` so it does not need the real store)
 
 ```python
 # packages/nfp-ingest/tests/test_wedge_data.py
@@ -282,12 +284,12 @@ def test_mismatched_vintage_raises(monkeypatch):
         wedge_data.wedge_first_print_changes()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-ingest/tests/test_wedge_data.py -v`
 Expected: FAIL — `ModuleNotFoundError: nfp_ingest.wedge_data`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # packages/nfp-ingest/src/nfp_ingest/wedge_data.py
@@ -338,12 +340,12 @@ def wedge_first_print_changes(*, store_path: Path = VINTAGE_STORE_PATH) -> pl.Da
     ).select("ref_date", "chg00", "chg05", "wedge_change_k")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-ingest/tests/test_wedge_data.py -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/nfp-ingest/src/nfp_ingest/wedge_data.py packages/nfp-ingest/tests/test_wedge_data.py
@@ -362,7 +364,7 @@ git commit -m "feat(ingest): wedge first-print target (00-05, same-vintage guard
 - Consumes: `wedge_first_print_changes`, `nfp_lookups.government.get_known_interventions_as_of` + `intervention_column`.
 - Produces: `build_wedge_model_data(*, as_of, target_month, store_path=VINTAGE_STORE_PATH, start=date(2017,1,1)) -> dict` with keys `y, month_of_year, T, mask, X_intervention, iv_prior_mean, iv_prior_sd, ref_months, target_idx`.
 
-- [ ] **Step 1: Write the failing test** (monkeypatch the target so no store is needed)
+- [x] **Step 1: Write the failing test** (monkeypatch the target so no store is needed)
 
 ```python
 # append to packages/nfp-ingest/tests/test_wedge_data.py
@@ -404,12 +406,12 @@ def test_lookahead_guard_excludes_unannounced_intervention(monkeypatch):
     assert after["iv_prior_mean"].tolist() == [-40.0]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-ingest/tests/test_wedge_data.py -k build -v`
 Expected: FAIL — `AttributeError: build_wedge_model_data`.
 
-- [ ] **Step 3: Write the implementation** (append to `wedge_data.py`)
+- [x] **Step 3: Write the implementation** (append to `wedge_data.py`)
 
 ```python
 # add to imports at top of wedge_data.py
@@ -478,12 +480,12 @@ def build_wedge_model_data(
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-ingest/tests/test_wedge_data.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/nfp-ingest/src/nfp_ingest/wedge_data.py packages/nfp-ingest/tests/test_wedge_data.py
@@ -501,7 +503,7 @@ git commit -m "feat(ingest): build_wedge_model_data with announcement-date looka
 **Interfaces:**
 - Produces: `wedge_model(data: dict)`, `WEDGE_DETERMINISTIC_SITES = ("mu", "season")`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # packages/nfp-model/tests/test_wedge_model.py
@@ -540,12 +542,12 @@ def test_units_are_thousands():
     assert np.abs(np.asarray(pred["mu"])).mean() < 1000
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-model/tests/test_wedge_model.py -v`
 Expected: FAIL — `ModuleNotFoundError: nfp_model.wedge`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # packages/nfp-model/src/nfp_model/wedge.py
@@ -597,12 +599,12 @@ def wedge_model(data: dict) -> None:
         numpyro.sample("y_obs", dist.Normal(mu, sigma), obs=jnp.asarray(data["y"]))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-model/tests/test_wedge_model.py -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Verify the import boundary, then commit**
+- [x] **Step 5: Verify the import boundary, then commit**
 
 Run: `uv run python -c "import ast,sys; m=ast.parse(open('packages/nfp-model/src/nfp_model/wedge.py').read()); bad=[n for n in ast.walk(m) if isinstance(n,(ast.Import,ast.ImportFrom)) and 'nfp_' in (getattr(n,'module',None) or ''.join(a.name for a in getattr(n,'names',[])))]; sys.exit(1 if bad else 0)"`
 Expected: exit 0 (no `nfp_*` imports).
@@ -625,7 +627,7 @@ git commit -m "feat(model): standalone NumPyro government-wedge model (change-sp
 - Consumes: `nfp_model.sampling.FitResult`.
 - Produces: `fit_wedge(data, *, settings="default", seed=0) -> FitResult`; `wedge_pred_draws(fit, target_idx, *, seed=0) -> np.ndarray`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # packages/nfp-model/tests/test_wedge_fit.py
@@ -655,12 +657,12 @@ def test_fit_recovers_drift_and_predicts_target():
         fit.posterior["drift"].shape[0] * fit.posterior["drift"].shape[1])
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-model/tests/test_wedge_fit.py -v`
 Expected: FAIL — `ImportError: cannot import name 'fit_wedge'`.
 
-- [ ] **Step 3: Write the implementation** (append to `wedge.py`)
+- [x] **Step 3: Write the implementation** (append to `wedge.py`)
 
 ```python
 # add to wedge.py imports
@@ -713,12 +715,12 @@ def wedge_pred_draws(fit: FitResult, target_idx: int, *, seed: int = 0) -> np.nd
     return mu + sigma * eps
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-model/tests/test_wedge_fit.py -v -m slow`
 Expected: PASS (1 test; ~tens of seconds).
 
-- [ ] **Step 5: Export + commit**
+- [x] **Step 5: Export + commit**
 
 Add to `packages/nfp-model/src/nfp_model/__init__.py`: `from .wedge import fit_wedge, wedge_pred_draws, wedge_model`.
 
@@ -739,7 +741,7 @@ git commit -m "feat(model): fit_wedge + wedge_pred_draws (predictive change draw
 - Consumes: `nfp_vintages.scoreboard.change_draws_k`.
 - Produces: `assemble_total(private_growth_draws, wedge_change_draws, *, prev_index, idx_to_level, eta=0.0, seed=0) -> np.ndarray`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # packages/nfp-vintages/tests/test_assembly.py
@@ -766,12 +768,12 @@ def test_coupling_is_point_invariant():
     assert coup.std() > base.std()                  # intervals widen
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_assembly.py -v`
 Expected: FAIL — `ModuleNotFoundError: nfp_vintages.assembly`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # packages/nfp-vintages/src/nfp_vintages/assembly.py
@@ -818,12 +820,12 @@ def assemble_total(
     return total
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_assembly.py -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/nfp-vintages/src/nfp_vintages/assembly.py packages/nfp-vintages/tests/test_assembly.py
@@ -843,7 +845,7 @@ git commit -m "feat(vintages): assemble_total (private+wedge -> Total posterior)
 - Consumes: `assemble_total`, `nfp_vintages.competitors.consensus.Consensus`, `nfp_vintages.scoreboard.crps_sample` / `interval_coverage`.
 - Produces: `score_total(total_change_draws, *, first_print_k, consensus_k) -> dict` (cols `crps, cover80, point_err, consensus_err|None`).
 
-- [ ] **Step 1: Write the failing test** (covers BOTH the null/absent and populated consensus paths)
+- [x] **Step 1: Write the failing test** (covers BOTH the null/absent and populated consensus paths)
 
 ```python
 # packages/nfp-vintages/tests/test_total_scoring.py
@@ -879,12 +881,12 @@ def test_populated_consensus_scores(tmp_path):
     assert 0.0 <= row["cover80"] <= 1.0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_total_scoring.py -v`
 Expected: FAIL — `ImportError: cannot import name 'score_total'`.
 
-- [ ] **Step 3: Write the implementation** (append to `assembly.py`)
+- [x] **Step 3: Write the implementation** (append to `assembly.py`)
 
 ```python
 # add to assembly.py imports
@@ -903,12 +905,12 @@ def score_total(total_change_draws, *, first_print_k, consensus_k=None) -> dict:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_total_scoring.py -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/nfp-vintages/src/nfp_vintages/assembly.py packages/nfp-vintages/tests/test_total_scoring.py
@@ -926,7 +928,7 @@ git commit -m "feat(vintages): score_total + consensus null/populated paths"
 **Interfaces:**
 - Produces: `decomposition_residual(wedge_change, gov90_change) -> dict` (stats on `r = wedge − 90`); `calibrate_intervention_sd(observed_federal_change, baseline_sd) -> float`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # packages/nfp-vintages/tests/test_wedge_diagnostics.py
@@ -949,12 +951,12 @@ def test_calibrate_intervention_sd_is_robust():
     assert sd > 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_wedge_diagnostics.py -v`
 Expected: FAIL — `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # packages/nfp-vintages/src/nfp_vintages/wedge_diagnostics.py
@@ -983,12 +985,12 @@ def calibrate_intervention_sd(observed_federal_change, baseline_sd: float) -> fl
     return float(max(obs.std(ddof=1) if obs.size > 1 else 0.0, baseline_sd))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_wedge_diagnostics.py -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/nfp-vintages/src/nfp_vintages/wedge_diagnostics.py packages/nfp-vintages/tests/test_wedge_diagnostics.py
@@ -1006,7 +1008,7 @@ git commit -m "feat(vintages): wedge decomposition + intervention-sd calibration
 **Interfaces:**
 - Consumes: everything above + the existing private grid (`nowcast_pred_draws`, `provenance.base_index/idx_to_level`).
 
-- [ ] **Step 1: Write the failing test** (an end-to-end build-gate check; self-skips without store)
+- [x] **Step 1: Write the failing test** (an end-to-end build-gate check; self-skips without store)
 
 ```python
 # packages/nfp-vintages/tests/test_total_backtest_smoke.py
@@ -1031,12 +1033,12 @@ def test_wedge_fit_converges_on_clean_window():
     assert np.isfinite(fit.posterior["mu"]).all()
 ```
 
-- [ ] **Step 2: Run test to verify it fails (or skips without store)**
+- [x] **Step 2: Run test to verify it fails (or skips without store)**
 
 Run: `uv run pytest packages/nfp-vintages/tests/test_total_backtest_smoke.py -v`
 Expected: SKIP locally without `NFP_STORE_URI`; on the store box, FAIL until the harness wiring lands, then PASS.
 
-- [ ] **Step 3: Add `cmd_total` to `scripts/run_a5_backtest.py`**
+- [x] **Step 3: Add `cmd_total` to `scripts/run_a5_backtest.py`**
 
 ```python
 # scripts/run_a5_backtest.py — add a new subcommand that reuses the private grid.
@@ -1082,12 +1084,12 @@ def cmd_total(root):
 
 Note: extend the grid-build step (cmd_grid, ~line 185) to also store `total_first_print_k = first_print_changes(industry_code="00")` per target (the scored actual), mirroring the existing `first_print_change_k` line; register `cmd_total` in the CLI dispatch (`if cmd == "total": cmd_total(root)`).
 
-- [ ] **Step 4: Run the build gate on the store box**
+- [x] **Step 4: Run the build gate on the store box**
 
 Run (on the store box): `NFP_STORE_URI=… uv run pytest packages/nfp-vintages/tests/test_total_backtest_smoke.py -v -m "slow and real_store"`
 Expected: PASS — wedge fit converges (0 divergences, finite `mu`). Then `uv run python scripts/run_a5_backtest.py total <grid_root>` produces `total_scores.json`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/run_a5_backtest.py packages/nfp-vintages/tests/test_total_backtest_smoke.py
@@ -1101,10 +1103,10 @@ git commit -m "feat(eval): Total backtest — wedge fit + assemble + score vs co
 **Files:**
 - Modify: `specs/government_wedge.md` (none expected; verify), `scripts/_wedge_diag.py` / `scripts/_store_layout.py` (remove throwaways)
 
-- [ ] **Step 1:** Remove throwaway diagnostics: `git rm -f scripts/_wedge_diag.py scripts/_store_layout.py scripts/_validate_alfred.py` (confirm none are imported: `grep -rn "_wedge_diag\|_store_layout\|_validate_alfred" packages scripts`).
-- [ ] **Step 2:** Run the fast suite: `uv run pytest -m "not network and not slow" --no-cov` — Expected: PASS (new wedge unit tests included; store/slow tests skip).
-- [ ] **Step 3:** Lint: `uv run ruff check .` — Expected: clean.
-- [ ] **Step 4:** Commit: `git commit -am "chore: remove throwaway wedge diagnostics; suite green"`.
+- [x] **Step 1:** Remove throwaway diagnostics: `git rm -f scripts/_wedge_diag.py scripts/_store_layout.py scripts/_validate_alfred.py` (confirm none are imported: `grep -rn "_wedge_diag\|_store_layout\|_validate_alfred" packages scripts`). — **Done with sanctioned deviation** (commit `c6edb42`): `_store_layout.py` dropped, but `_wedge_diag.py` was deliberately **kept** as the spec's working-read reference (`specs/government_wedge.md` §2/§10). `_validate_alfred.py` is an untracked scratch from a *different* session (never committed). None are imported.
+- [x] **Step 2:** Run the fast suite: `uv run pytest -m "not network and not slow" --no-cov` — Expected: PASS (new wedge unit tests included; store/slow tests skip).
+- [x] **Step 3:** Lint: `uv run ruff check .` — Expected: clean.
+- [x] **Step 4:** Commit: `git commit -am "chore: remove throwaway wedge diagnostics; suite green"`.
 
 ---
 
