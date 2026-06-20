@@ -221,3 +221,24 @@ class TestContextManager:
     def test_context_manager(self):
         with BLSHttpClient() as client:
             assert client.session is not None
+
+
+class TestCacheDirDefault:
+    """plans/15 Tier C: the default HTTP cache must not write under the CWD.
+
+    Bloomberg's container forbids writes outside /tmp and S3, so an unset
+    ``cache_dir`` must resolve to a per-process tempdir, never the old
+    CWD-relative ``.cache/bls``.  An explicit ``cache_dir=`` still persists.
+    """
+
+    def test_default_cache_dir_is_under_tempdir(self):
+        import tempfile
+
+        with BLSHttpClient() as client:
+            assert client.cache_dir.startswith(tempfile.gettempdir())
+            assert '.cache/bls' not in client.cache_dir
+
+    def test_explicit_cache_dir_is_honored(self, tmp_path):
+        explicit = str(tmp_path / 'mycache')
+        with BLSHttpClient(cache_dir=explicit) as client:
+            assert client.cache_dir == explicit
