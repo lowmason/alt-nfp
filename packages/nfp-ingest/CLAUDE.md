@@ -23,7 +23,7 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
   target_month)` (the wedge ModelData dict + announcement-date lookahead guard via
   `nfp_lookups.government.get_known_interventions_as_of`), and `read_government_signal`
   (diagnostic reader). Feeds the standalone `nfp_model.wedge` model; **not** part of
-  the A2 `build_model_data` firewall. Spec: `specs/government_wedge.md`.
+  the A2 `build_model_data` firewall. Spec: `specs/completed/government_wedge.md`.
 
 ## Tech Stack
 

@@ -16,7 +16,7 @@ This is the foundation package with no internal dependencies. It provides:
   the **announcement-dated** `KNOWN_INTERVENTIONS` table, `get_known_interventions_as_of(as_of)`
   (the lookahead-safe censor — a DATE comparison), `intervention_column()` (change-space
   `pulse`/`box`/`tc` shape encoders), and `GOVERNMENT_INDICATORS` (FRED `90–93` SA entries,
-  diagnostics-only). Reference data for the government-wedge model. Spec: `specs/government_wedge.md`.
+  diagnostics-only). Reference data for the government-wedge model. Spec: `specs/completed/government_wedge.md`.
 
 ## Tech Stack
 

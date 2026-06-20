@@ -6,8 +6,8 @@ layer is rewritten in JAX/NumPyro as `nfp-model`. The port was gated against the
 old repo for **fidelity** (did the rewrite reproduce it?) — but that repo is a
 work-in-progress with bugs, **not validated truth**. Parity is a port-fidelity
 floor, not a correctness certificate; correctness is validated against **external
-ground truth** (published BLS / ALFRED real-time vintages) — see `plans/0`.
-Roadmap: `plans/`; design record: `specs/` (active) and `archive/`
+ground truth** (published BLS / ALFRED real-time vintages) — see `specs/plans/0`.
+Roadmap: `specs/plans/`; design record: `specs/` (active) and `specs/completed/`
 (implemented/superseded).
 
 ## Workspace
@@ -73,7 +73,10 @@ to `main`.
   per partition (filenames encode vintage ranges, so a plain overwrite would leave
   both files and corrupt the store). `is_canonical_store` still guards
   `build_store`/`mirror_store` against accidental clobber.
-- **Specs workflow**: implemented specs move from `specs/` to `archive/`.
+- **Specs workflow**: implemented specs move from `specs/` to `specs/completed/`;
+  implemented plans move from `specs/plans/` to `specs/plans/completed/`. Superseded
+  pre-port material (old todos, reference articles) lives in `specs/completed/todos/`
+  and `references/`.
 - The old repo at `~/Projects/alt_nfp` is the frozen **port reference** — read it
   to see what the JAX rewrite was ported from, never modify it. But it is a buggy
   WIP, **not an oracle**: a reference value is not automatically correct. When code

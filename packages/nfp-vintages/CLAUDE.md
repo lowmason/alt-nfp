@@ -23,7 +23,7 @@ lives in `nfp_download.bls.bulk` since the A2 seam fix). Provides:
   `assemble_total()` convolves the private nowcast posterior with the government
   **wedge** posterior into a Total-NFP posterior; `score_total()` scores it vs the
   Total `00` first print + consensus; `wedge_diagnostics.py` holds the wedge
-  decomposition + RIF intervention-sd calibration. Spec: `specs/government_wedge.md`.
+  decomposition + RIF intervention-sd calibration. Spec: `specs/completed/government_wedge.md`.
 - **CLI**: `alt-nfp` (or `python -m nfp_vintages`)
 
 ## Tech Stack
@@ -77,7 +77,7 @@ src/nfp_vintages/
 │   # ── Track B — Total assembly (private nowcast ⊕ government wedge) ──
 ├── assembly.py             # assemble_total() + score_total() (vs Total first print + consensus)
 ├── wedge_diagnostics.py    # wedge decomposition residual + RIF intervention-sd calibration
-│   # (store-rebuild infra rebuild_store.py / rebuild_gates.py — see plans/10–12)
+│   # (store-rebuild infra rebuild_store.py / rebuild_gates.py — see specs/plans/completed/10–12)
 └── processing/
     ├── __init__.py
     ├── ces_triangular.py   # CES triangular-revision CSV processing

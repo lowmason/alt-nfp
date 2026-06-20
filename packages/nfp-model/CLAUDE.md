@@ -7,11 +7,11 @@ ModelData arrays in, posterior out.
 
 Faithful translation of the frozen PyMC reference
 (`~/Projects/alt_nfp/packages/nfp-model-hmc`), gated by A3 posterior parity
-(`plans/5-a3_model_parity.md`).
+(`specs/plans/5-a3_model_parity.md`).
 
 **Parity here is port-fidelity — the JAX model reproduces the reference's
 posterior — not correctness: the reference is a WIP, and model correctness is
-validated against external ground truth (see `plans/0`). A3 parity is banked,
+validated against external ground truth (see `specs/plans/0`). A3 parity is banked,
 but a correctness-driven change to a pinned default is legitimate behind a new
 baseline.** (The Track-B government-wedge model `wedge.py` is the exception to the
 A3 frame: it is a *separate* model, not a translation of the reference, and is
@@ -55,7 +55,7 @@ Provides:
   parity-gated change). Its predictive draws are convolved with the private
   nowcast into a Total-NFP posterior by `nfp_vintages.assembly.assemble_total`
   (harness side; `nfp-model` stays assembly-free). Spec:
-  `specs/government_wedge.md`; plan: `plans/14`.
+  `specs/completed/government_wedge.md`; plan: `specs/plans/completed/14`.
 
 ## Hard boundary
 
@@ -78,7 +78,7 @@ pytest packages/nfp-model -m "not slow"      # fast structure/intake tests
 pytest packages/nfp-model -m slow            # MCMC smoke incl. vmapped batch (~4 min)
 NFP_A3_PARITY=1 pytest packages/nfp-model/src/nfp_model/tests/test_parity_golden.py  # minutes
 
-# Full A3 parity (14 fits; restartable; see plans/5)
+# Full A3 parity (14 fits; restartable; see specs/plans/5)
 uv run python scripts/run_a3_parity.py fit data/golden_a3_staging data/a3
 uv run python scripts/run_a3_parity.py compare data/golden_a3_staging data/a3
 
