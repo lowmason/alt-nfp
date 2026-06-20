@@ -481,7 +481,14 @@ SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
 
 # Phase 3 — Dev scripts + docs + verification
 
-### Task 11: fix the two `data/`-hardcoders; document the script contract
+> **STATUS (2026-06-20):** Mostly DONE. `.env.example` + root/package CLAUDE.md container-contract
+> docs + `_t8_promote.py` banner committed (`55a20b5`, `9c74e6e`). **`_05_convergence_fit.py` left
+> AS-IS** (out of scope: local do-not-commit scratch, never imported/shipped; its `BASELINE_DIR`
+> output is a PERSISTENT reference baseline, so the planned tempfile default would delete it — Bloomberg
+> escape hatch is a one-line `s3://` at point of use). **MinIO end-to-end verify (Task 12 Step 2) still
+> BLOCKED** on the Task 6 `--apply` seed (Tier-A artifacts not yet in S3).
+
+### Task 11: fix the two `data/`-hardcoders; document the script contract — **`_t8` DONE (`55a20b5`); `_05` left as-is (see Phase 3 status)**
 
 **Files:**
 - Modify: `scripts/_05_convergence_fit.py:61` (`BASELINE_DIR`)
@@ -498,7 +505,7 @@ SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
   path or an `s3://` URI on Bloomberg, never `data/`.
 - [ ] **Step 3: Commit** — `git commit -m "refactor(scripts): de-hardcode data/ in _05_convergence_fit; document /tmp|s3 output contract"`
 
-### Task 12: docs, `.env.example`, and MinIO end-to-end verification
+### Task 12: docs, `.env.example`, and MinIO end-to-end verification — **docs+`.env.example` DONE (`55a20b5`,`9c74e6e`); MinIO verify BLOCKED on Task 6 seed**
 
 **Files:**
 - Modify: root `CLAUDE.md` "Hard rules" (add `NFP_DATA_URI`), `packages/*/CLAUDE.md` data-layout
