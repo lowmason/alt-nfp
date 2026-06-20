@@ -520,7 +520,9 @@ def main() -> None:
     )
 
     vintage_dates = (
-        pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
+        pl.read_parquet(
+            str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+        )
         .filter(pl.col('publication').eq('sae'))
         .select(
             ref_date=pl.col('ref_date'),

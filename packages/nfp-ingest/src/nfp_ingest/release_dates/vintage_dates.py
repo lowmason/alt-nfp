@@ -346,7 +346,7 @@ def build_vintage_dates(release_dates_path: Path | None = None) -> pl.DataFrame:
         revision, benchmark_revision).
     """
     path = release_dates_path or RELEASE_DATES_PATH
-    df = pl.read_parquet(path, storage_options=storage_options_for(path))
+    df = pl.read_parquet(str(path), storage_options=storage_options_for(path))
 
     # Merge supplemental + pre-scrape release dates for gaps
     all_supplemental = (
@@ -418,5 +418,7 @@ def build_and_save(release_dates_path: Path | None = None) -> pl.DataFrame:
     df = build_vintage_dates(release_dates_path)
     if not is_remote(VINTAGE_DATES_PATH):
         VINTAGE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
+    df.write_parquet(
+        str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+    )
     return df

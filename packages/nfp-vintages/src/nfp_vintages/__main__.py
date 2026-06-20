@@ -161,14 +161,18 @@ def _build_release_calendar() -> None:
 
     if not is_remote(RELEASE_DATES_PATH):
         RELEASE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(RELEASE_DATES_PATH, storage_options=storage_options_for(RELEASE_DATES_PATH))
+    df.write_parquet(
+        str(RELEASE_DATES_PATH), storage_options=storage_options_for(RELEASE_DATES_PATH)
+    )
     print(f'Wrote {RELEASE_DATES_PATH} ({len(df)} rows)')
 
     print('Building vintage_dates...')
     vdf = build_vintage_dates()
     if not is_remote(VINTAGE_DATES_PATH):
         VINTAGE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    vdf.write_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
+    vdf.write_parquet(
+        str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+    )
     print(f'Wrote {VINTAGE_DATES_PATH} ({len(vdf)} rows)')
 
 

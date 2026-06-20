@@ -561,7 +561,9 @@ def _load_cyclical_indicators(
             continue
 
         try:
-            raw = pl.read_parquet(fpath, storage_options=storage_options_for(fpath)).sort('ref_date')
+            raw = pl.read_parquet(
+                str(fpath), storage_options=storage_options_for(fpath)
+            ).sort('ref_date')
         except (OSError, pl.exceptions.ComputeError) as e:
             logger.warning("Failed to read indicator %s from %s: %s", key, fpath, e)
             result[key] = None

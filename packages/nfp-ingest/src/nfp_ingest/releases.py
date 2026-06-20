@@ -82,7 +82,9 @@ def _latest_ces_vintage_dates() -> pl.DataFrame:
         )
 
     return (
-        pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
+        pl.read_parquet(
+            str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+        )
         .filter(pl.col('publication') == 'ces')
         # Latest published row wins within each track; break vintage_date ties
         # by revision so the kept row stays a coherent (vintage, revision) pair.

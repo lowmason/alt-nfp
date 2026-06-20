@@ -51,7 +51,7 @@ def load_consensus(path: str | Path | None = None) -> pl.DataFrame | None:
     p = consensus_path(path)
     if not p.exists():
         return None
-    df = pl.read_parquet(p, storage_options=storage_options_for(p))
+    df = pl.read_parquet(str(p), storage_options=storage_options_for(p))
     missing = set(_REQUIRED) - set(df.columns)
     if missing:
         raise ValueError(f"consensus file missing required columns: {sorted(missing)}")

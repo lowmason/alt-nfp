@@ -254,7 +254,9 @@ def main(ces_dir: Path | None = None) -> None:
     )
 
     vintage_dates = (
-        pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
+        pl.read_parquet(
+            str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+        )
         .filter(pl.col('publication') == 'ces')
         .drop('publication')
     )

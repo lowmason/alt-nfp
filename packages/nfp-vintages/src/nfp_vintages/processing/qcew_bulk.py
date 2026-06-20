@@ -404,7 +404,9 @@ def _process_revisions_csv() -> pl.DataFrame:
     # Join vintage dates
     if VINTAGE_DATES_PATH.exists():
         vintage_dates = (
-            pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
+            pl.read_parquet(
+                str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+            )
             .filter(pl.col('publication').eq('qcew'))
             .select(
                 qtr_date=pl.col('ref_date'),

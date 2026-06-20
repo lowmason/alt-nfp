@@ -51,7 +51,7 @@ def read_indicator(
     if not fpath.exists():
         return None
     try:
-        return pl.read_parquet(fpath, storage_options=storage_options_for(fpath))
+        return pl.read_parquet(str(fpath), storage_options=storage_options_for(fpath))
     except (OSError, pl.exceptions.ComputeError) as e:
         logger.warning("Failed to read indicator %s from %s: %s", name, fpath, e)
         return None
@@ -110,7 +110,7 @@ def download_indicators(
             continue
 
         out_path = indicator_path(name, store_dir)
-        df.write_parquet(out_path, storage_options=storage_options_for(out_path))
+        df.write_parquet(str(out_path), storage_options=storage_options_for(out_path))
         results[name] = len(df)
         logger.info("Wrote %d rows to %s", len(df), out_path)
         print(f"  Wrote {len(df)} rows → {out_path}")

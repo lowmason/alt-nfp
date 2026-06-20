@@ -223,3 +223,63 @@ class TestStorageOptionsThreaded:
             f"storage_options_for was not called with {expected_fpath}; "
             f"captured calls: {captured_paths}"
         )
+
+
+class TestRemotePathStringified:
+    """Regression (plans/15 MinIO verify): pl.read_parquet cannot consume a UPath
+    OBJECT for an ``s3://`` source — it raises 'Object does not have a .read()
+    method' because UPath is not a ``pathlib.Path`` subclass, so polars treats it
+    as a file handle. The path must be ``str()``-ed. A local ``tmp_path`` (a real
+    ``pathlib.Path``) reads fine either way, which is why this needs a non-Path
+    remote-typed stand-in rather than network.
+    """
+
+    def test_read_parquet_source_is_str_for_remote_dir(self, monkeypatch):
+        import nfp_ingest.model_data as md
+
+        captured: dict = {}
+
+        def fake_read_parquet(source, **kwargs):
+            captured["type"] = type(source).__name__
+            captured["source"] = source
+            return pl.DataFrame({"ref_date": MODEL_DATES, "value": [1.0] * T})
+
+        class FakeRemoteFile:
+            """os.PathLike that str()s to an s3:// URI but is NOT a pathlib.Path."""
+
+            def __init__(self, uri: str):
+                self._uri = uri
+
+            def __fspath__(self) -> str:
+                return self._uri
+
+            def __str__(self) -> str:
+                return self._uri
+
+            def exists(self) -> bool:
+                return True
+
+        class FakeRemoteDir:
+            def __init__(self, uri: str):
+                self._uri = uri
+
+            def __truediv__(self, other) -> FakeRemoteFile:
+                return FakeRemoteFile(f"{self._uri}/{other}")
+
+            def __str__(self) -> str:
+                return self._uri
+
+        monkeypatch.setattr(md.pl, "read_parquet", fake_read_parquet)
+        monkeypatch.setattr(md, "storage_options_for", lambda p: {"remote": True})
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            md._load_cyclical_indicators(
+                MODEL_DATES, T, [MONTHLY_SPEC], FakeRemoteDir("s3://alt-nfp/indicators")
+            )
+
+        assert captured.get("type") == "str", (
+            f"pl.read_parquet received a {captured.get('type')!r}; it must be a plain "
+            "str — a UPath object fails on s3:// ('Object does not have a .read() method')"
+        )
+        assert captured["source"] == "s3://alt-nfp/indicators/test_ind.parquet"
