@@ -72,6 +72,12 @@ def build_wedge_model_data(
     The target month's own row is present but masked (its first print is the scored
     actual, revealed at release). Interventions are censored to ``as_of`` via the
     announcement-date guard. Returns plain numpy arrays (no Polars reaches JAX).
+
+    The historical wedge as-of censor is bound-safe: the ref-month axis ends at
+    ``target_month`` and the target row is masked, so every remaining
+    ``rm < target_month`` already had its first print published by any release-eve
+    ``as_of``. The load-bearing job of the ``as_of`` arg is therefore the
+    intervention censor (the announcement-date guard), not the wedge-history filter.
     """
     wedge = wedge_first_print_changes(store_path=store_path)
     known = {r["ref_date"]: r["wedge_change_k"]

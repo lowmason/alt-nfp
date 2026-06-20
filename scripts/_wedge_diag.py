@@ -1,6 +1,6 @@
 """Read-only diagnostic: characterize the 00-05 government wedge.
 
-Throwaway orientation script for Track-B brainstorming. Not committed.
+Committed as a read-only diagnostic reference (reproduces the wedge std ≈ 24k).
 """
 
 from dotenv import load_dotenv

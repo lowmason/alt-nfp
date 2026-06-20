@@ -115,8 +115,9 @@ def cmd_snapshot(root: Path) -> None:
     )
     # Total ('00') first-print — the scored actual for the Track B Total backtest
     # (cmd_total). Stored per target alongside the private first print; never used
-    # to score the private nowcast (Track A scores '05'). KeyError-by-design in
-    # cmd_total if a target lacks a '00' first print — no silent fallback.
+    # to score the private nowcast (Track A scores '05'). Stored via ``.get`` so a
+    # target lacking a '00' first print yields ``None`` (not KeyError); cmd_total
+    # skips such unscoreable months — never a silent fallback to the '05' print.
     total_fp = first_print_changes(industry_code="00")
     total_fp_map = dict(
         total_fp.select(["ref_date", "first_print_change_k"]).iter_rows()
@@ -472,8 +473,23 @@ def cmd_total(root: Path) -> None:
             # raises ValueError (its month grid is day-1).
             target = date.fromisoformat(key).replace(day=1)
             as_of = date.fromisoformat(t["as_of"])
-            # private leg: persisted nowcast_pred_draws from the batched private fit
+            # private leg: persisted nowcast_pred_draws from the batched private fit.
+            # Guard the key (mirrors cmd_score): a private fit may lack the
+            # predictive draws — skip the target rather than KeyError the whole run.
             batched = np.load(root / f"{rname}_batched_{key}.npz")
+            if "nowcast_pred_draws" not in batched:
+                print(f"[{rname}] {key}: no nowcast_pred_draws — skipping", flush=True)
+                continue
+            # Scored actual = the Total (00) first print, stored at grid-build time
+            # (cmd_snapshot) via ``.get`` → ``None`` when a target lacks a '00'
+            # first print (an unscoreable month). Skip such targets — never score
+            # against None (a confusing TypeError in score_total) and never fall
+            # back to the '05' first print, which would score Total against the
+            # wrong actual.
+            total_actual = t["total_first_print_k"]
+            if total_actual is None:
+                print(f"[{rname}] {key}: no '00' first print — skipping", flush=True)
+                continue
             priv_growth = batched["nowcast_pred_draws"]                # growth/index
             # wedge leg: as-of-censored fit for this release-eve
             wdata = build_wedge_model_data(as_of=as_of, target_month=target)
@@ -482,12 +498,9 @@ def cmd_total(root: Path) -> None:
             total = assemble_total(priv_growth, wedge,
                                    prev_index=float(t["prev_index"]),
                                    idx_to_level=float(prov["idx_to_level"]))
-            # Scored actual = the Total (00) first print, stored at grid-build time
-            # (cmd_snapshot). KeyError if missing — never silently fall back to the
-            # 05 first print, which would score Total against the wrong actual.
             cons = consensus.predict(target, as_of=as_of)
             rows[f"{rname}:{key}"] = score_total(
-                total, first_print_k=t["total_first_print_k"], consensus_k=cons)
+                total, first_print_k=total_actual, consensus_k=cons)
     _write_json(root / "total_scores.json", rows)
     print(f"Scored {len(rows)} Total targets → {root / 'total_scores.json'}")
 

@@ -13,8 +13,10 @@ def decomposition_residual(wedge_change, gov90_change) -> dict:
     w = np.asarray(wedge_change, float)
     g = np.asarray(gov90_change, float)
     r = w - g
-    return {"r_mean": float(r.mean()), "r_std": float(r.std()),
-            "wedge_std": float(w.std()), "r_share": float(r.std() / (w.std() or 1.0))}
+    # Sample std (ddof=1) for consistency with calibrate_intervention_sd.
+    return {"r_mean": float(r.mean()), "r_std": float(r.std(ddof=1)),
+            "wedge_std": float(w.std(ddof=1)),
+            "r_share": float(r.std(ddof=1) / (w.std(ddof=1) or 1.0))}
 
 
 def calibrate_intervention_sd(observed_federal_change, baseline_sd: float) -> float:
