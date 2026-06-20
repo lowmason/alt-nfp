@@ -221,29 +221,39 @@ from nfp_lookups.paths import INDICATORS_DIR, is_remote, storage_options_for
 
 ---
 
-### Task 3: consensus path → S3-correct
+### Task 3: consensus path → S3-correct (+ promote `_upath` to public `upath_for`)
+
+**Why the rename:** consensus lives in `nfp_vintages` and needs the credentialed-UPath builder,
+but the repo's hard boundary rule forbids cross-package imports of underscore-private names. Task 1
+created it as `_upath` (private); promote it to a public `upath_for` so `nfp_vintages` may import it.
 
 **Files:**
+- Modify: `packages/nfp-lookups/src/nfp_lookups/paths.py` (rename `_upath` → `upath_for`; update its two callers `data_location`/`providers_location`)
+- Modify: `packages/nfp-lookups/src/nfp_lookups/__init__.py` (export `upath_for`)
 - Modify: `packages/nfp-vintages/src/nfp_vintages/competitors/consensus.py`
-- Test: `packages/nfp-vintages/src/nfp_vintages/tests/test_vintages.py` (add a consensus case) or the A5 test module that already exercises consensus.
+- Test: `packages/nfp-vintages/src/nfp_vintages/tests/test_competitors.py` (consensus tests already live here)
 
 **Interfaces:**
-- Consumes: `COMPETITORS_DIR`, `is_remote`, `storage_options_for`.
+- Consumes: `upath_for` (public, from `nfp_lookups.paths`), `COMPETITORS_DIR`, `storage_options_for`.
 
-- [ ] **Step 1: Failing test** — an `s3://` env value must survive resolution (today
+- [ ] **Step 1: Promote the helper.** In `paths.py` rename `def _upath(uri)` → `def upath_for(uri)`
+  and update the two call sites (`data_location`, `providers_location`). Export `upath_for` from
+  `__init__.py`. Confirm no `_upath` references remain: `grep -rn "_upath" packages/` returns nothing.
+
+- [ ] **Step 2: Failing test** — an `s3://` env value must survive resolution (today
   `Path("s3://…")` collapses the `//`):
 
 ```python
 def test_consensus_path_preserves_s3_uri(monkeypatch):
     monkeypatch.setenv("NFP_CONSENSUS_PATH", "s3://alt-nfp/competitors/consensus.parquet")
     from nfp_vintages.competitors.consensus import consensus_path
-    assert str(consensus_path()) == "s3://alt-nfp/competitors/consensus.parquet"
+    assert str(consensus_path()).startswith("s3://alt-nfp/competitors/consensus.parquet")
 ```
 
-- [ ] **Step 2: Run, verify fail** (`Path` mangles `s3://` → `s3:/`).
+- [ ] **Step 3: Run, verify fail** (`Path` mangles `s3://` → `s3:/`).
 
-- [ ] **Step 3: Implement.** Resolve env URIs as UPath, default through `COMPETITORS_DIR`, and
-  pass storage options on read:
+- [ ] **Step 4: Implement.** Resolve env URIs as UPath via the public `upath_for`, default through
+  `COMPETITORS_DIR`, and pass storage options on read:
 
 ```python
 def consensus_path(path=None):
@@ -259,8 +269,8 @@ def consensus_path(path=None):
 def _as_path(p):
     s = str(p)
     if s.startswith(("s3://", "s3a://")):
-        from nfp_lookups.paths import _upath  # the shared credentialed-UPath builder (Task 1)
-        return _upath(s)
+        from nfp_lookups.paths import upath_for  # public credentialed-UPath builder
+        return upath_for(s)
     return Path(p)
 
 # load_consensus():
@@ -268,12 +278,11 @@ def _as_path(p):
     df = pl.read_parquet(p, storage_options=storage_options_for(p))
 ```
 
-- [ ] **Step 4: Run** `uv run pytest packages/nfp-vintages/src/nfp_vintages/tests/ -k consensus -v` → PASS.
-- [ ] **Step 5: Commit** — `git commit -m "feat(consensus): preserve s3:// URIs and default through COMPETITORS_DIR"`
+- [ ] **Step 5: Run** `uv run pytest packages/nfp-vintages/src/nfp_vintages/tests/test_competitors.py -q --no-cov` → PASS.
+- [ ] **Step 6: Commit** — `git commit -m "feat(consensus): s3:// URIs + COMPETITORS_DIR; promote paths.upath_for to public"`
 
-> **DRY note:** the shared `paths._upath(uri)` helper (defined in Task 1) is the single
-> credentialed-`UPath` constructor; `data_location`, `providers_location`, and
-> `consensus._as_path` all call it.
+> **DRY note:** the shared `paths.upath_for(uri)` helper is the single credentialed-`UPath`
+> constructor; `data_location`, `providers_location`, and `consensus._as_path` all call it.
 
 ---
 
