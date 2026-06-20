@@ -314,6 +314,20 @@ regime (first print = target).
 > beat naive baselines?* The single shutdown-frontier month scored so far (Jan-2026: −309k vs
 > +130k actual, losing to a trailing-mean) is a frontier artifact on the light preset — the
 > clean-window run is what decides it.
+>
+> **Gate amendment (2026-06-19) — the gate splits into two tracks** (recording the
+> `specs/a5_real_competitors.md` §5 / `specs/model_improvements.md` §8 amendment here, as those specs
+> direct). The model nowcasts **private** NFP (`'05'`), not total (`'00'`), so the literal "model vs
+> consensus vs naive" gate splits: **Track A** = the **private** nowcast vs **naive floors only**,
+> scored on the **private** first print + the **private QCEW-settled** truth (ADP removed entirely;
+> consensus is a Total object, meaningless against a private nowcast). **Track B** = **Total NFP =
+> private nowcast + government forecast** vs the **Total-NFP consensus** + Total first print — the only
+> valid consensus contest. Track B's government forecast — once the undesigned critical path — is now
+> **built**: the `00 − 05` **wedge** (`specs/government_wedge.md`, `plans/14-government_wedge.md`;
+> committed + unit-tested), with Total assembly + consensus scoring running via
+> `run_a5_backtest.py:cmd_total`. Per **build-here / validate-on-port**, the **accuracy verdict vs
+> consensus** (both tracks) is taken on the Bloomberg full regime; locally we confirm the machinery
+> runs and converges.
 
 ---
 
@@ -346,9 +360,12 @@ measures.)**
    > stays national first-print scoring; supersector scoring is B1's extension.
 3. **Does the model actually beat consensus/naive, and at which horizons?**
    > **This is prong-2 of validate-first** (above) — A5 answers it empirically with the existing
-   > model before any Phase B investment. If the answer is "no at all horizons," the edge most
-   > plausibly lives in benchmark-revision prediction (where consensus doesn't compete), and
-   > Phase B should be re-planned around that.
+   > model before any Phase B investment. **Split by track (gate amendment, above):** *vs naive* is the
+   > **private** Track-A question (private nowcast vs naive floors on private truth); *vs consensus* is
+   > the **Total** Track-B question (Total = private nowcast + government **wedge** vs consensus) — its
+   > vehicle is now **built** (`plans/14`), with the accuracy verdict deferred to the Bloomberg port.
+   > If the answer is "no at all horizons," the edge most plausibly lives in benchmark-revision
+   > prediction (where consensus doesn't compete), and Phase B should be re-planned around that.
 
 ---
 

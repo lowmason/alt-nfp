@@ -11,8 +11,9 @@ truth on a distinct axis — the **private QCEW-settled** administrative value,
 made the **primary** comparison (§2c) — which SQ1 did not speak to. The
 **model-side counterpart** (and the source of the private retarget) is
 `specs/model_improvements.md`. Companion spec for the Bloomberg consensus source —
-now a **Track B** (deferred Total-NFP) artifact, see below — is
-`specs/bloomberg_consensus.md`.
+a **Track B** (Total-NFP) artifact, now **built** and consumed by the Total
+scoreboard (see below) — is `specs/bloomberg_consensus.md`; the government forecast
+that completes Track B is `specs/government_wedge.md` / `plans/14`.
 
 **Private retarget (2026-06-19).** A5 scores the **private** nowcast
 (`industry_code='05'`), not total nonfarm (`'00'`). The model's signal is
@@ -20,11 +21,13 @@ inherently private — it is QCEW-anchored (private in this store) and its riche
 inputs are private payroll providers — so it must be scored against the **private**
 first print and the **private** QCEW-settled truth. The run-path's `'00'` default
 is a latent mismatch corrected in `model_improvements.md`; `'00'` total data
-exists only for a future, unbuilt **Track B** ("private nowcast + government
-forecast = total"). On the private track the **only** competitors are the **naive
-floors**: ADP is removed entirely (competitor *and* regressor), and **consensus is
-removed** — it is a Total object with no meaning against the private nowcast alone,
-so it moves to the deferred Track B (which also needs a new government forecast).
+exists for **Track B** ("private nowcast + government forecast = total"), whose
+government forecast is now **built** (the `00 − 05` wedge —
+`specs/government_wedge.md` / `plans/14`). On the private track the **only**
+competitors are the **naive floors**: ADP is removed entirely (competitor *and*
+regressor), and **consensus is removed** — it is a Total object with no meaning
+against the private nowcast alone, so it lives on **Track B** (the built Total
+scoreboard: private nowcast + government wedge vs the Total-NFP consensus).
 
 ## TL;DR
 
@@ -59,7 +62,8 @@ so it moves to the deferred Track B (which also needs a new government forecast)
    (random-walk, trailing-12-month mean), scored against the private first print
    and the **primary** private QCEW-settled truth. **ADP is removed entirely**
    (competitor *and* regressor). **Consensus is removed** from the private track
-   — a Total object, deferred to Track B. The former vintage-censored
+   — a Total object, scored instead on the now-**built** Track-B Total scoreboard
+   (`cmd_total`: private nowcast + government wedge vs consensus). The former vintage-censored
    claims/JOLTS **bridge baseline** is also out as a competitor ("naive floors
    only"); the same regression survives as the Tier-1 **Aruoba diagnostic** in
    `model_improvements.md` §4 — see §4 here.
@@ -224,13 +228,14 @@ the same unit the model nowcast and the private targets use.
   a model input. Post-Aug-2022 ADP states it is "not intended to forecast" the
   BLS report, and the model's private-vs-private framing makes a separate
   private-employment proxy redundant rather than a fair scored competitor.
-- **Consensus — removed from the private track → deferred to Track B.** The
+- **Consensus — removed from the private track → lives on the (now built) Track B.** The
   Bloomberg survey median forecasts the **Total** number; it has **no meaning**
   against the private nowcast alone (the private nowcast cannot see government
-  employment). It moves to the deferred Track B (below), which also needs a new
-  **government forecast**. The pluggable consensus adapter and
-  `specs/bloomberg_consensus.md` become Track-B artifacts; nothing consensus
-  ships on the private scoreboard or in the private MZ.
+  employment). It is scored on **Track B** (below), which is now built: the
+  pluggable consensus adapter (`nfp_vintages/competitors/consensus.py:load_consensus`)
+  and `specs/bloomberg_consensus.md` are **live Track-B artifacts** consumed by
+  `cmd_total`. Nothing consensus ships on the **private** scoreboard or in the
+  private MZ — that separation is unchanged.
 - **Bridge baseline — removed as a competitor.** The HARD RULE is "naive floors
   only," and the vintage-censored claims/JOLTS bridge regression is not a naive
   floor. The *same* regression is not lost: it survives as the **Tier-1 Aruoba
@@ -238,13 +243,18 @@ the same unit the model nowcast and the private targets use.
   regression on the same vintage-censored cyclical arrays), feeding the §5A
   first-print offset. It is demoted from competitor to diagnostic, not deleted.
 
-**Deferred Track B (spec-only, NOT built here).** The product that competes with
-**consensus** is **Total NFP = private nowcast + government forecast**, scored
-against the **Total-NFP consensus** + the Total first print. The **government
-forecast is a new, undesigned component** (Track B's critical path; see
-`model_improvements.md` §2, §9–11). Until it exists there is no valid consensus
-comparison, because consensus is a Total object. A5 captures Track B as the
-gateway to the consensus contest; it does not design or build it.
+**Track B — the Total contest (built locally 2026-06-19; accuracy on the port).** The
+product that competes with **consensus** is **Total NFP = private nowcast +
+government forecast**, scored against the **Total-NFP consensus** + the Total first
+print. The **government forecast is now built** — the `00 − 05` **wedge**
+(`specs/government_wedge.md` / `plans/14`: `nfp_model/wedge.py`, `assemble_total`,
+`load_consensus`, `score_total`, the `cmd_total` backtest — committed + unit-tested).
+A5's harness was extended to run it (`cmd_total` reuses the private grids' persisted
+`nowcast_pred_draws`, fits the wedge as-of-censored, assembles Total, and scores it).
+Remaining: the **accuracy/keep-drop verdict vs consensus** (port), plus two input
+gates — the **2025 RIF intervention magnitudes** (maintainer input) and the
+**Bloomberg consensus file** (Bloomberg-only; column `—` locally). See
+`model_improvements.md` §2, §9, §11.
 
 ## 5. Report — the scoreboard
 
@@ -269,11 +279,13 @@ A4 outputs.
 **naive floors** at each regime, against both private truths (QCEW-settled
 primary + first print). This is a **reduced bar** relative to the literal plans/0
 gate ("model vs ADP vs consensus vs naive"): ADP is removed entirely and consensus
-moves to the deferred Track B (which needs the unbuilt government forecast), so on
-the private track the **private QCEW-settled administrative truth replaces the
-competitor contest** as the real benchmark. The ADP/consensus contest is met by
-Track B when it is built. This amends the gate; the amendment is **to be
-recorded** in plans/0's gate log (§7 step 8; mirror `model_improvements.md` §8).
+moves to **Track B** (now built — the government wedge supplies its government
+forecast; `plans/14`), so on the private track the **private QCEW-settled
+administrative truth replaces the competitor contest** as the real benchmark. The
+consensus side of the ADP/consensus contest is met by **Track B**, whose government
+forecast is now **built** (the wedge; `plans/14`) — the accuracy verdict vs consensus
+is taken on the port. This amends the gate; the amendment is **recorded (2026-06-19)**
+in plans/0's gate log (the A5 §A5 "gate amendment" note; mirror `model_improvements.md` §8).
 
 **Forward compatibility (B1).** The output consumer is decided (plans/0 SQ2,
 2026-06-13): an accurate first-print nowcast for Bloomberg publication, plus
@@ -295,10 +307,14 @@ nfp_vintages/competitors/
 scripts/run_a5_backtest.py           # T−7 / T−1 grids + scoreboard; reuses A4 batched harness
 ```
 
-Track-B-only (deferred, NOT built here): `consensus.py` (the `load_consensus()`
-adapter, see `bloomberg_consensus.md`) and the government-forecast component live
-with the Total assembly, not on the private track. The vintage-censored bridge
-regression lives in `model_improvements.md` §4 as the Tier-1 Aruoba diagnostic.
+Track-B modules (now **built**, on the Total track — not the private one): the
+consensus adapter `nfp_vintages/competitors/consensus.py` (`load_consensus`,
+`Consensus`, see `bloomberg_consensus.md`); the government forecast
+`nfp_model/wedge.py` + `nfp_ingest/wedge_data.py` + `nfp_lookups/government.py`; the
+Total assembly `nfp_vintages/assembly.py` (`assemble_total`, `score_total`); wedge
+diagnostics `nfp_vintages/wedge_diagnostics.py`; and `run_a5_backtest.py:cmd_total`
+(`specs/government_wedge.md` / `plans/14`). The vintage-censored bridge regression
+lives in `model_improvements.md` §4 as the Tier-1 Aruoba diagnostic.
 
 Tests: `nfp_ingest/tests/test_first_print.py` (extractor vs published **private**
 headlines, §2a), `nfp_vintages/tests/test_competitors.py` (naive-floor units /
@@ -340,12 +356,16 @@ Retire risk first, then build outward from the cheapest pieces:
   SA/NSA bridge — before it is apples-to-apples. Unresolved here and in
   `model_improvements.md` §3; pin the mechanism before trusting the primary
   scoreboard.
-- **`bloomberg_consensus.md` is now stale.** It still frames consensus as a live
-  A5 competitor; under this revision consensus is a Track-B (Total) artifact.
-  Out of scope to edit here — flag as a follow-up to recontextualize for Track B.
-- **Track B is undesigned.** The consensus contest needs a **government forecast**
-  (Track B's critical path; `model_improvements.md` §11). Captured here, not built;
-  consensus + `bloomberg_consensus.md` are Track-B artifacts until then.
+- **`bloomberg_consensus.md` — RESOLVED 2026-06-19.** Recontextualized as a **live
+  Track-B (Total) artifact**: its contract is unchanged (total-nonfarm SA
+  `change_k`) and is now consumed by `cmd_total` via `load_consensus`. No longer a
+  stale private-track competitor.
+- **Track B — RESOLVED 2026-06-19 (built).** The consensus contest's **government
+  forecast** is built (the `00 − 05` wedge — `specs/government_wedge.md` / `plans/14`;
+  `model_improvements.md` §2/§9/§11). Total assembly + consensus scoring run locally
+  (`cmd_total`). What remains is the **accuracy verdict vs consensus** (port) and two
+  input gates: the **2025 RIF intervention magnitudes** (maintainer) and the
+  **Bloomberg consensus file** (column `—` locally until it lands).
 - **Near-release buildability (T−7, T−1)** — frontier/shutdown months may be
   unbuildable at either horizon; same negative-master handling, recorded not
   fatal. The 2025-11 hole and 2026-01 frontier are flagged, not pooled (§5).
@@ -371,12 +391,14 @@ Retire risk first, then build outward from the cheapest pieces:
   contest as the real benchmark — ADP is removed entirely (a private-employment
   proxy, redundant here) and consensus is a Total object with no meaning against
   the private nowcast.
-- **Track B (deferred, spec-only):** the ADP/consensus contest, recast as **Total
-  NFP = private nowcast + government forecast** vs the **Total-NFP consensus** +
-  Total first print. Its critical path is the new **government forecast**
-  (undesigned; `model_improvements.md` §11). This is the only valid consensus
-  comparison and is built later.
+- **Track B (built locally 2026-06-19; accuracy on the port):** the ADP/consensus
+  contest, recast as **Total NFP = private nowcast + government forecast** vs the
+  **Total-NFP consensus** + Total first print. Its critical path — the **government
+  forecast** — is now built (the `00 − 05` wedge; `specs/government_wedge.md` /
+  `plans/14`), with Total assembly + consensus scoring running via `cmd_total`. This
+  is the only valid consensus comparison; the accuracy verdict vs consensus is taken
+  on the Bloomberg port (`model_improvements.md` §9/§11).
 
 This amends the literal plans/0 gate ("model vs ADP vs consensus vs naive"); the
-amendment is **to be recorded** in plans/0's gate log (§7 step 8) and mirrors
-`model_improvements.md` §8.
+amendment is **recorded (2026-06-19)** in plans/0's gate log (the A5-section "gate
+amendment" note) and mirrors `model_improvements.md` §8.

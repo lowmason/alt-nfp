@@ -1,11 +1,19 @@
 # Bloomberg consensus integration (independent spec)
 
-Status: **independent / portable**. Self-contained so it can be lifted into a
-Bloomberg-terminal workspace where the survey data is readily available. It
-defines (a) the **contract** the `alt-nfp` consensus adapter expects — the
-part this repo owns and pins — and (b) a **Bloomberg-side retrieval recipe**
-to produce a file in that contract. Companion: `specs/a5_real_competitors.md`
-(the consensus adapter is one of A5's competitors).
+Status: **independent / portable; adapter built, file pending (2026-06-19).** The
+`alt-nfp` consensus adapter (`nfp_vintages/competitors/consensus.py`:
+`load_consensus`, `Consensus`) is **built and wired** — it is consumed by the
+**Total-track (Track B)** backtest `run_a5_backtest.py:cmd_total`, which scores the
+assembled Total NFP (private nowcast + government wedge) against this consensus.
+What remains is the **file itself**: it is proprietary Bloomberg-derived data, absent
+from this public repo, so locally the consensus column renders `—` until the file
+lands (the `None`-tolerant path below). This spec stays self-contained so it can be
+lifted into a Bloomberg-terminal workspace. It defines (a) the **contract** the
+adapter expects — the part this repo owns and pins — and (b) a **Bloomberg-side
+retrieval recipe** to produce a file in that contract. Companions:
+`specs/a5_real_competitors.md` (the harness this consensus scores in) and
+`specs/government_wedge.md` (the government forecast that makes the Total contest
+valid — consensus is a Total object, meaningless against the private nowcast alone).
 
 The split matters: **the contract is normative; the retrieval recipe is a
 reference implementation.** As long as the file matches the contract, the
@@ -152,13 +160,16 @@ file — not the API path.
 ## 4. Wiring into `alt-nfp`
 
 The adapter lives at `nfp_vintages/competitors/consensus.py` (per
-`a5_real_competitors.md` §6). The A5 scoreboard
-(`scripts/run_a5_backtest.py`) calls `load_consensus()`, joins on
-`ref_month`, and scores `consensus_median_change_k` against the A5 target
-(the first print) in the **release-eve** regime. Until the file
-exists, `load_consensus()` returns `None` and the column renders `—`; the
-join and scoring are still exercised by a committed synthetic fixture so the
-path cannot rot.
+`a5_real_competitors.md` §6). It is consumed on the **Total track (Track B)**, not
+the private one: `run_a5_backtest.py:cmd_total` calls `load_consensus()`, wraps it in
+`Consensus`, and for each release-eve target scores
+`consensus_median_change_k` against the **assembled Total** (private nowcast +
+government wedge) and the **Total `00` first print** — consensus forecasts the Total
+number, so it is meaningless against the private nowcast alone. (It does **not**
+appear on the private scoreboard or in the private MZ.) Until the file exists,
+`load_consensus()` returns `None`, `Consensus.predict` returns `None`, and the
+consensus column renders `—`; the join and scoring are still exercised by committed
+synthetic fixtures (null + populated) so the path cannot rot.
 
 ## 5. Acceptance test (certifies any file, any source)
 
