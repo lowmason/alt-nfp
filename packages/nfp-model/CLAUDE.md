@@ -13,7 +13,9 @@ Faithful translation of the frozen PyMC reference
 posterior — not correctness: the reference is a WIP, and model correctness is
 validated against external ground truth (see `plans/0`). A3 parity is banked,
 but a correctness-driven change to a pinned default is legitimate behind a new
-baseline.**
+baseline.** (The Track-B government-wedge model `wedge.py` is the exception to the
+A3 frame: it is a *separate* model, not a translation of the reference, and is
+A3-parity-free — see Provides below.)
 
 Provides:
 - **Model** (`model.py`): `nfp_model(data, priors)` — non-centered AR(1)
@@ -41,6 +43,19 @@ Provides:
   `fit_model_batch(...)` fits the whole grid in one `jit(vmap(MCMC.run))`
   program (vectorized inner chains) and reduces each date *in graph* to
   the A3 fixture schema (`BatchFitResult.date_arrays(i)`).
+- **Government wedge** (`wedge.py`, Track B — a **separate, standalone** model):
+  a NumPyro change-space STS for the government wedge
+  `published_00 − published_05` — constant drift + shrunk monthly-seasonal block
+  + an announcement-priored intervention layer + masked iid-Normal likelihood.
+  Exposes `wedge_model`, `fit_wedge`, `wedge_pred_draws`,
+  `WEDGE_DETERMINISTIC_SITES` (all re-exported from `__init__`). Honors the import
+  boundary (jax/numpyro/numpy only) and **reimplements the mask idiom inline** —
+  it does **not** import `model._maybe_mask`. It does **not** touch
+  `model.py`/`nowcast.py` and needs **no A3 parity baseline** (a new model, not a
+  parity-gated change). Its predictive draws are convolved with the private
+  nowcast into a Total-NFP posterior by `nfp_vintages.assembly.assemble_total`
+  (harness side; `nfp-model` stays assembly-free). Spec:
+  `specs/government_wedge.md`; plan: `plans/14`.
 
 ## Hard boundary
 
@@ -88,6 +103,9 @@ uv run python scripts/run_a4_backtest.py compare  data/backtests   # report + ex
   ar1), uniform-structure assertions, mask bookkeeping
 - `test_batch_smoke.py` — vmapped batch vs serial fits (`slow`): scalar/
   path/nowcast agreement under the A3 criteria, batch seed reproducibility
+- `test_wedge_model.py` — wedge model sites/shapes/log-density + change-space
+  intervention-shape encodings on synthetic data (no store, no MCMC)
+- `test_wedge_fit.py` — wedge `fit_wedge`/`wedge_pred_draws` smoke (`slow`)
 - `test_parity_golden.py` — single-fixture parity spot check vs
   `s3://alt-nfp/golden/a3` (opt-in: `NFP_A3_PARITY=1` + store env;
   manifest committed in `tests/golden/`)

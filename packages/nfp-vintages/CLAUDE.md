@@ -10,6 +10,17 @@ lives in `nfp_download.bls.bulk` since the A2 seam fix). Provides:
 - **Store builder** (`build_store.py`): merge revisions + current estimates into `data/store/`
 - **Views** (`views.py`): `real_time_view()`, `final_view()`, `specific_vintage_view()`
 - **Evaluation** (`evaluation.py`): `vintage_diff()`, noise multiplier construction
+- **A5 / Tier 0–1 eval** (`a5.py`, `scoreboard.py`, `diagnostics.py`, `competitors/`):
+  the **private** first-print scoreboard — month-type/calibration/CRPS metrics
+  (`scoreboard.py`), Aruoba revision + Mincer–Zarnowitz diagnostics
+  (`diagnostics.py`), and the competitor adapters (`competitors/naive.py`
+  random-walk + trailing-mean floors; `competitors/consensus.py` `load_consensus`/
+  `Consensus`). Evaluation-side only — no `nfp-model` import.
+- **Track B — Total assembly** (`assembly.py`, `wedge_diagnostics.py`):
+  `assemble_total()` convolves the private nowcast posterior with the government
+  **wedge** posterior into a Total-NFP posterior; `score_total()` scores it vs the
+  Total `00` first print + consensus; `wedge_diagnostics.py` holds the wedge
+  decomposition + RIF intervention-sd calibration. Spec: `specs/government_wedge.md`.
 - **CLI**: `alt-nfp` (or `python -m nfp_vintages`)
 
 ## Tech Stack
@@ -53,6 +64,17 @@ src/nfp_vintages/
 ├── views.py                # real_time_view(), final_view(), specific_vintage_view()
 ├── evaluation.py           # vintage_diff(), build_noise_multiplier_vector()
 ├── build_store.py          # Merge revisions + current → Hive-partitioned store
+│   # ── A5 / Tier 0–1 evaluation layer (private first-print scoreboard) ──
+├── a5.py                   # A5 first-print index / target extraction (private '05')
+├── scoreboard.py           # month-type classify, interval coverage, CRPS, change_draws_k, venue
+├── diagnostics.py          # OLS, first→third revision table, Aruoba + Mincer–Zarnowitz
+├── competitors/
+│   ├── naive.py            # RandomWalk + TrailingMean floors
+│   └── consensus.py        # load_consensus() + Consensus (Track B; None-tolerant → '—')
+│   # ── Track B — Total assembly (private nowcast ⊕ government wedge) ──
+├── assembly.py             # assemble_total() + score_total() (vs Total first print + consensus)
+├── wedge_diagnostics.py    # wedge decomposition residual + RIF intervention-sd calibration
+│   # (store-rebuild infra rebuild_store.py / rebuild_gates.py — see plans/10–12)
 └── processing/
     ├── __init__.py
     ├── ces_triangular.py   # CES triangular-revision CSV processing
@@ -79,6 +101,7 @@ Downloads (`download_ces`, `download_qcew`, `download_qcew_bulk`) moved to
 - **Views** (`views.py`): pure Polars operations on vintage DataFrames. `real_time_view()` returns what was known at a given date. `final_view()` returns latest available revision.
 - **Evaluation** (`evaluation.py`): `vintage_diff()` computes revision magnitudes. `build_noise_multiplier_vector()` constructs empirical noise multipliers by source and revision. Uses `nfp_lookups.revision_schedules` for CES/QCEW revision specs.
 - **CLI** (`__main__.py`): typer app with subcommands: `download`, `download-indicators`, `process`, `current`, `build`. Each step is idempotent.
+- **Total assembly seam** (`assembly.py`, Track B): the private nowcast draws are in **growth/index space**, the wedge draws are native **change-k** — `assemble_total` converts the private leg via `scoreboard.change_draws_k` (using a **first-finite** `(base_index, idx_to_level)` anchor from `nfp_ingest.model_data.levels_provenance`, to avoid the `base_index` NaN class) and resamples it to the **wedge** draw count before the element-wise add. The two MCMC fits are independent (no shared seed); pairing is positional after resample. A residual-coupling knob exists but is **default off** (point-invariant). Consumed by `scripts/run_a5_backtest.py:cmd_total`.
 
 ## Data Layout
 

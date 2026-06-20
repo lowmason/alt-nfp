@@ -14,6 +14,16 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 - **Model data** (`model_data.py`): `build_model_data(as_of=D)` — the single entry point answering "what was knowable on D" (A2). Layer-1 `build_panel(as_of_ref=D)` + layer-2 extraction (best-available CES selection with vintage remap, QCEW noise multipliers incl. post-COVID boundary inflation, provider pub-lag censoring, cyclical pub-lag masking). Knobs in `ModelDataConfig` (defaults frozen from the reference settings). No plotting concerns, no acquisition imports.
 - **Snapshots** (`snapshots.py`): hash-pinned ModelData artifacts (`.npz` arrays + embedded JSON meta) under `NFP_SNAPSHOTS_URI` (S3) or `data/snapshots/`. `content_hash` is over array bytes + canonical meta — never npz file bytes (zip timestamps). `alt-nfp snapshot --as-of D [--grid-end E]` writes them. Schema v2 (A3): provider meta carries `error_model` so `nfp_model.data.from_snapshot` can rebuild likelihood structure; v1 snapshots are read with an `"iid"` fallback.
 - **Release dates** (`release_dates/`): config and vintage date builder
+- **First-print target** (`first_print.py`, A5): `first_print_changes(industry_code=…)`
+  — the within-release headline MoM change BLS announces, an additive read over store
+  levels (private `'05'` for Track A; `'00'` for the Total target). Keyword-only after
+  `store_path`. Touches no A1/A2 pinned path.
+- **Wedge data** (`wedge_data.py`, Track B): `wedge_first_print_changes()` (the
+  `00 − 05` first-print join, same-vintage guard), `build_wedge_model_data(as_of,
+  target_month)` (the wedge ModelData dict + announcement-date lookahead guard via
+  `nfp_lookups.government.get_known_interventions_as_of`), and `read_government_signal`
+  (diagnostic reader). Feeds the standalone `nfp_model.wedge` model; **not** part of
+  the A2 `build_model_data` firewall. Spec: `specs/government_wedge.md`.
 
 ## Tech Stack
 
@@ -46,6 +56,8 @@ src/nfp_ingest/
 ├── compositing.py          # QCEW-weighted national compositing for cell-level providers
 ├── indicators.py           # download_indicators(), read_indicator() — FRED cyclical indicators
 ├── panel.py                # build_panel(), save_panel(), load_panel()
+├── first_print.py          # first_print_changes() — within-release headline target (A5)
+├── wedge_data.py           # wedge_first_print_changes() + build_wedge_model_data() (Track B)
 ├── aggregate.py            # Geographic aggregation (FIPS → division → region)
 ├── tagger.py               # Tag estimates with source/vintage metadata
 ├── releases.py             # Release management, combine_estimates()

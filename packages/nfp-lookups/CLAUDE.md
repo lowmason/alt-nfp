@@ -12,6 +12,11 @@ This is the foundation package with no internal dependencies. It provides:
 - **Benchmark revisions**: Historical actual BLS benchmark revision amounts
 - **Path config**: Canonical data directory layout (`BASE_DIR`, `DATA_DIR`, `STORE_DIR`, etc.)
 - **Provider config**: `ProviderConfig` dataclass, `CYCLICAL_INDICATORS` definitions
+- **Government interventions** (`government.py`, Track B): `GovIntervention` dataclass +
+  the **announcement-dated** `KNOWN_INTERVENTIONS` table, `get_known_interventions_as_of(as_of)`
+  (the lookahead-safe censor — a DATE comparison), `intervention_column()` (change-space
+  `pulse`/`box`/`tc` shape encoders), and `GOVERNMENT_INDICATORS` (FRED `90–93` SA entries,
+  diagnostics-only). Reference data for the government-wedge model. Spec: `specs/government_wedge.md`.
 
 ## Tech Stack
 
@@ -43,7 +48,8 @@ src/nfp_lookups/
 ├── geography.py            # FIPS_TO_DIVISION, FIPS_TO_REGION, STATES, REGION_NAMES, etc.
 ├── revision_schedules.py   # CES_REVISIONS, QCEW_REVISIONS, get_noise_multiplier, vintage date helpers
 ├── benchmark_revisions.py  # BENCHMARK_REVISIONS dict (historical actuals)
-└── provider_config.py      # ProviderConfig dataclass, CYCLICAL_INDICATORS
+├── provider_config.py      # ProviderConfig dataclass, CYCLICAL_INDICATORS
+└── government.py           # GovIntervention, KNOWN_INTERVENTIONS, intervention encoders (Track B)
 ```
 
 ## Code Style
