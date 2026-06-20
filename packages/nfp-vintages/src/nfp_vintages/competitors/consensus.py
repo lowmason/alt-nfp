@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -17,24 +18,40 @@ _REQUIRED = ("ref_month", "consensus_median_change_k", "survey_date",
              "release_date", "source")
 
 
-def consensus_path(path: str | Path | None = None) -> Path:
-    """Resolve path -> arg -> ``NFP_CONSENSUS_PATH`` -> default."""
+def _as_path(p: str | Path | Any) -> Path | Any:
+    """Coerce *p* to a Path or UPath.
+
+    S3 URIs are built via the public :func:`nfp_lookups.paths.upath_for` so that
+    credentials flow in and ``Path()`` does not mangle ``s3://`` → ``s3:/``.
+    """
+    s = str(p)
+    if s.startswith(("s3://", "s3a://")):
+        from nfp_lookups.paths import upath_for  # public credentialed-UPath builder
+
+        return upath_for(s)
+    return Path(p)
+
+
+def consensus_path(path: str | Path | None = None) -> Path | Any:
+    """Resolve path -> arg -> ``NFP_CONSENSUS_PATH`` -> COMPETITORS_DIR/consensus.parquet."""
     if path is not None:
-        return Path(path)
+        return _as_path(path)
     env = os.environ.get("NFP_CONSENSUS_PATH")
     if env:
-        return Path(env)
-    from nfp_lookups.paths import DATA_DIR
+        return _as_path(env)
+    from nfp_lookups.paths import COMPETITORS_DIR
 
-    return DATA_DIR / "competitors" / "consensus.parquet"
+    return COMPETITORS_DIR / "consensus.parquet"
 
 
 def load_consensus(path: str | Path | None = None) -> pl.DataFrame | None:
     """Load + validate the consensus file, or ``None`` if it does not exist."""
+    from nfp_lookups.paths import storage_options_for
+
     p = consensus_path(path)
     if not p.exists():
         return None
-    df = pl.read_parquet(p)
+    df = pl.read_parquet(p, storage_options=storage_options_for(p))
     missing = set(_REQUIRED) - set(df.columns)
     if missing:
         raise ValueError(f"consensus file missing required columns: {sorted(missing)}")

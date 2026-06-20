@@ -56,6 +56,7 @@ from .paths import (
     STORE_DIR,
     data_location,
     providers_location,
+    upath_for,
 )
 from .provider_config import (
     CYCLICAL_INDICATORS_DEFAULT,

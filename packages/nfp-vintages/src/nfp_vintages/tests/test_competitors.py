@@ -104,3 +104,24 @@ def test_consensus_none_when_unconfigured():
 
     c = Consensus(None)
     assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) is None
+
+
+def test_consensus_path_preserves_s3_uri(monkeypatch):
+    monkeypatch.setenv("NFP_CONSENSUS_PATH", "s3://alt-nfp/competitors/consensus.parquet")
+    from importlib import reload
+
+    import nfp_vintages.competitors.consensus as m
+
+    reload(m)
+    assert str(m.consensus_path()).startswith("s3://alt-nfp/competitors/consensus.parquet")
+
+
+def test_consensus_path_local_default(monkeypatch):
+    monkeypatch.delenv("NFP_CONSENSUS_PATH", raising=False)
+    from importlib import reload
+
+    import nfp_vintages.competitors.consensus as m
+
+    reload(m)
+    p = m.consensus_path()
+    assert str(p).endswith("competitors/consensus.parquet")

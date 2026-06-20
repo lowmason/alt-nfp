@@ -157,7 +157,7 @@ VINTAGE_STORE_PATH = _store_location()
 # ---------------------------------------------------------------------------
 
 
-def _upath(uri: str) -> Any:
+def upath_for(uri: str) -> Any:
     """Build a credentialed UPath from env (shared by all *_location helpers)."""
     from upath import UPath  # deferred: s3fs only needed in remote mode
 
@@ -184,7 +184,7 @@ def data_location() -> Any:
     Provider data lives on a SEPARATE store — see :func:`providers_location`.
     """
     uri = os.environ.get("NFP_DATA_URI")
-    return _upath(uri) if uri else DATA_DIR
+    return upath_for(uri) if uri else DATA_DIR
 
 
 def providers_location() -> Any:
@@ -196,7 +196,7 @@ def providers_location() -> Any:
     ``ProviderConfig.file`` (e.g. ``providers/g/g_provider.parquet``) joins to this root.
     """
     uri = os.environ.get("NFP_PROVIDERS_URI")
-    return _upath(uri) if uri else DATA_DIR
+    return upath_for(uri) if uri else DATA_DIR
 
 
 _DATA_ROOT = data_location()
