@@ -724,3 +724,66 @@ class TestFetchQcewWithGeography:
         from nfp_download.bls import BLSHttpClient
         sig = inspect.signature(BLSHttpClient.get_qcew_csv)
         assert 'slice_type' in sig.parameters
+
+
+class TestIndicatorsS3Guard:
+    """Tests for S3-safe indicator read/write (Task 2: storage_options + is_remote guard)."""
+
+    def test_download_indicators_local_round_trip(self, monkeypatch, tmp_path):
+        """Local path: end-to-end download → write → read round-trip works."""
+        from datetime import date as _date
+
+        from nfp_ingest import indicators
+
+        df = pl.DataFrame({"ref_date": [_date(2020, 1, 1)], "value": [1.0]})
+        monkeypatch.setattr(indicators, "fetch_fred_series", lambda *a, **k: df)
+
+        out = indicators.download_indicators(
+            indicators=[{"name": "claims", "fred_id": "X", "freq": "weekly"}],
+            store_dir=tmp_path,
+            api_key="fake",
+        )
+        assert out["claims"] == 1
+        assert (tmp_path / "claims.parquet").exists()
+        assert indicators.read_indicator("claims", store_dir=tmp_path).height == 1
+
+    def test_download_indicators_mkdir_skipped_on_remote(self, monkeypatch, tmp_path):
+        """Remote path: mkdir() is NOT called (is_remote guard active).
+
+        We simulate a remote path by monkey-patching is_remote to return True
+        for tmp_path (which is a real local dir so write_parquet still works),
+        confirming that mkdir is bypassed even when the path is a Path object.
+        """
+        from datetime import date as _date
+
+        import nfp_ingest.indicators as _ind_mod
+        from nfp_ingest import indicators
+
+        df = pl.DataFrame({"ref_date": [_date(2020, 1, 1)], "value": [1.0]})
+        monkeypatch.setattr(indicators, "fetch_fred_series", lambda *a, **k: df)
+
+        mkdir_called = []
+
+        original_mkdir = tmp_path.__class__.mkdir
+
+        def _tracking_mkdir(self, *args, **kwargs):
+            mkdir_called.append(self)
+            return original_mkdir(self, *args, **kwargs)
+
+        # Patch is_remote in the indicators module to report tmp_path as remote.
+        monkeypatch.setattr(_ind_mod, "is_remote", lambda path: True)
+
+        # Ensure the directory exists so write_parquet doesn't fail.
+        tmp_path.mkdir(parents=True, exist_ok=True)
+
+        # Patch mkdir on the Path class only for the duration of this test.
+        monkeypatch.setattr(tmp_path.__class__, "mkdir", _tracking_mkdir)
+
+        indicators.download_indicators(
+            indicators=[{"name": "claims", "fred_id": "X", "freq": "weekly"}],
+            store_dir=tmp_path,
+            api_key="fake",
+        )
+
+        # mkdir must NOT have been called by download_indicators.
+        assert mkdir_called == [], "mkdir() was called on a remote path — guard missing"
