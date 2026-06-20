@@ -56,6 +56,17 @@ to `main`.
   Re-sync from a local store with `uv run python scripts/mirror_store.py`
   (targets `NFP_STORE_URI`; it refuses the canonical `…/store` unless you pass
   `--allow-canonical`).
+- **Container storage contract (Bloomberg) — no code writes under `./data`.** The
+  compute container has a tiny disk footprint, so every persistent artifact goes to S3
+  via an env URI (each unset ⇒ local `data/` fallback for dev/CI). Besides
+  `NFP_STORE_URI`: `NFP_SNAPSHOTS_URI` (ModelData snapshots), `NFP_DATA_URI` (indicators,
+  `competitors/consensus`, the vintage/release-date schedules), and `NFP_PROVIDERS_URI`
+  (the **separate** provider store — not under `NFP_DATA_URI`, not seeded by this repo).
+  All resolve via `nfp_lookups.paths.*_location()` and thread `storage_options_for` + an
+  `is_remote` mkdir guard. Rebuild scratch (raw downloads, HTTP cache, SAE checkpoint)
+  goes to `tempfile` automatically; dev scripts must take their output root as an
+  arg/env (a `/tmp` path or `s3://` URI), never `data/`. See `.env.example` and
+  `specs/plans/15-container_safe_storage.md`.
 - **Boundaries**: no upward imports (e.g. lookups must not import download);
   no cross-package imports of underscore-private names.
 - **`data/` is proprietary and gitignored** — this repo is public. Tests that

@@ -108,22 +108,29 @@ Downloads (`download_ces`, `download_qcew`, `download_qcew_bulk`) moved to
 
 ## Data Layout
 
+> **Container contract (plans/15):** on Bloomberg nothing writes under `./data`. The
+> **store** is S3 (`NFP_STORE_URI`); `release_dates.parquet`/`vintage_dates.parquet` are
+> persistent inputs on S3 (`NFP_DATA_URI`). Everything else below is **rebuild scratch** →
+> `tempfile`, not `data/`: raw `downloads/` (re-fetched each rebuild), the
+> `{ces,qcew,sae}_revisions`/`revisions` intermediates, scraped release HTML, and the SAE
+> checkpoint. The local `data/` tree below is the dev/CI fallback layout only.
+
 ```
 data/
-├── store/                  # Output: Hive-partitioned vintage store
+├── store/                  # Vintage store → NFP_STORE_URI (S3) on Bloomberg
 │   ├── source=ces/
 │   ├── source=qcew/
 │   └── source=sae/
-├── downloads/              # Input: raw fetched files
+├── downloads/              # Rebuild scratch (→ tempfile): raw fetched files
 │   ├── ces/cesvinall/      # CES triangular revision CSVs
 │   ├── qcew/               # QCEW bulk + revisions
-│   └── releases/           # Scraped BLS schedule HTML
+│   └── releases/           # Scraped BLS schedule HTML (tempfile)
 └── intermediate/           # Pipeline byproducts
-    ├── ces_revisions.parquet
-    ├── qcew_revisions.parquet
-    ├── revisions.parquet
-    ├── release_dates.parquet
-    └── vintage_dates.parquet
+    ├── ces_revisions.parquet   # rebuild scratch → tempfile
+    ├── qcew_revisions.parquet  # rebuild scratch → tempfile
+    ├── revisions.parquet       # rebuild scratch → tempfile
+    ├── release_dates.parquet   # persistent input → NFP_DATA_URI (S3)
+    └── vintage_dates.parquet   # persistent input → NFP_DATA_URI (S3)
 ```
 
 ## Test Mapping

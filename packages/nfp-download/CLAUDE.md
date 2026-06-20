@@ -58,7 +58,7 @@ src/nfp_download/
 ## Key Patterns
 
 - **FRED client** (`fred.py`): `fetch_fred_series(series_id)` returns a Polars DataFrame with `(ref_date, value)`. Uses httpx with exponential-backoff retry. Requires `FRED_API_KEY` env var.
-- **BLS HTTP client** (`bls/_http.py`): `BLSHttpClient` handles CSV downloads from BLS. No internal dependencies beyond `_programs.py` for series ID construction.
+- **BLS HTTP client** (`bls/_http.py`): `BLSHttpClient` handles CSV downloads from BLS. No internal dependencies beyond `_programs.py` for series ID construction. `cache_dir` defaults to `None` ⇒ a per-process `tempfile.mkdtemp` (atexit-cleaned), so it never writes under the CWD/`./data` on Bloomberg's container (plans/15 Task 8); pass an explicit `cache_dir=` to persist across runs.
 - **Series-ID grammar**: `build_series_id()` / `parse_series_id()` live in `nfp_lookups.series_ids` (pure reference data); `bls/_programs.py` re-exports them for back-compat.
 - **Release date scraper** (`release_dates/scraper.py`): async scraper for BLS schedule HTML. Transport is curl_cffi `AsyncSession(impersonate='chrome')` via `create_session()` — www.bls.gov (Akamai) fingerprints TLS, so httpx/plain curl get 403 regardless of headers. Callers catch the re-exported `FetchError`. Config values (URLs, start year, output dirs) should be passed as parameters, not imported from other packages.
 - **Sync www.bls.gov transport** (`client.py`): `create_impersonating_session()` is the sync counterpart of the scraper's `create_session()`, used by nfp-vintages for the CES vintage zip and QCEW revisions CSV. `get_with_retry()` accepts either an `httpx.Client` or this session (same `get`/`raise_for_status` surface). Non-www.bls.gov hosts (api.bls.gov, data.bls.gov, FRED) stay on httpx.

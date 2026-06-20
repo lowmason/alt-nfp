@@ -8,9 +8,9 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 - **Vintage store** (`vintage_store.py`): Hive-partitioned parquet read/write with rank-based horizon censoring. `store_path` accepts a local `Path` or an `s3://` `UPath` (default `VINTAGE_STORE_PATH` from `nfp_lookups.paths`, which is MinIO/S3 when `NFP_STORE_URI` is set); Polars I/O passes `storage_options_for(store_path)` and `mkdir` is guarded by `is_remote()`
 - **Panel construction** (`panel.py`): `build_panel()` assembles CES + QCEW + provider data into a unified panel
 - **CES/QCEW ingestion** (`ces_national.py`, `ces_state.py`, `qcew.py`): source-specific transformers
-- **Provider ingestion** (`payroll.py`): auto-detects cell-level vs national providers
+- **Provider ingestion** (`payroll.py`): auto-detects cell-level vs national providers; reads default to `providers_location()`/`NFP_PROVIDERS_URI` (the **separate** provider store) with `storage_options_for` (plans/15)
 - **Compositing** (`compositing.py`): QCEW-weighted national compositing for cell-level providers
-- **Indicator store** (`indicators.py`): download + read cyclical indicator parquets
+- **Indicator store** (`indicators.py`): download + read cyclical indicator parquets under `INDICATORS_DIR` (S3 via `NFP_DATA_URI`); reads/writes thread `storage_options_for` + an `is_remote` mkdir guard (plans/15)
 - **Model data** (`model_data.py`): `build_model_data(as_of=D)` — the single entry point answering "what was knowable on D" (A2). Layer-1 `build_panel(as_of_ref=D)` + layer-2 extraction (best-available CES selection with vintage remap, QCEW noise multipliers incl. post-COVID boundary inflation, provider pub-lag censoring, cyclical pub-lag masking). Knobs in `ModelDataConfig` (defaults frozen from the reference settings). No plotting concerns, no acquisition imports.
 - **Snapshots** (`snapshots.py`): hash-pinned ModelData artifacts (`.npz` arrays + embedded JSON meta) under `NFP_SNAPSHOTS_URI` (S3) or `data/snapshots/`. `content_hash` is over array bytes + canonical meta — never npz file bytes (zip timestamps). `alt-nfp snapshot --as-of D [--grid-end E]` writes them. Schema v2 (A3): provider meta carries `error_model` so `nfp_model.data.from_snapshot` can rebuild likelihood structure; v1 snapshots are read with an `"iid"` fallback.
 - **Release dates** (`release_dates/`): config and vintage date builder
