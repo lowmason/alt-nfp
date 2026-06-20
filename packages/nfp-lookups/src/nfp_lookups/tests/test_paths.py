@@ -107,6 +107,31 @@ class TestStoreLocation:
         assert not paths.is_remote(paths.STORE_DIR)
 
 
+def test_data_location_local_when_unset(monkeypatch):
+    monkeypatch.delenv("NFP_DATA_URI", raising=False)
+    from importlib import reload
+
+    from nfp_lookups import paths
+
+    reload(paths)
+    assert paths.data_location() == paths.DATA_DIR
+    assert paths.INDICATORS_DIR == paths.DATA_DIR / "indicators"
+
+
+def test_data_location_remote_when_set(monkeypatch):
+    monkeypatch.setenv("NFP_DATA_URI", "s3://alt-nfp")
+    monkeypatch.setenv("AWS_ENDPOINT_URL", "http://127.0.0.1:9000")
+    from importlib import reload
+
+    from nfp_lookups import paths
+
+    reload(paths)
+    loc = paths.data_location()
+    assert paths.is_remote(loc)
+    assert str(loc / "indicators").startswith("s3://alt-nfp/indicators")
+    reload(paths)  # restore module state for other tests
+
+
 class TestStorageOptions:
     def test_local_path_returns_none(self):
         assert paths.storage_options_for(Path("/tmp/store")) is None

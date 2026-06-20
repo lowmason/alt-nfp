@@ -52,13 +52,10 @@ DATA_DIR: Path = BASE_DIR / "data"
 STORE_DIR: Path = DATA_DIR / "store"
 DOWNLOADS_DIR: Path = DATA_DIR / "downloads"
 INTERMEDIATE_DIR: Path = DATA_DIR / "intermediate"
-INDICATORS_DIR: Path = DATA_DIR / "indicators"
 OUTPUT_DIR: Path = BASE_DIR / "output"
 
 # Release-dates pipeline artifacts (scraped BLS schedules → parquet)
 RELEASES_DIR: Path = DOWNLOADS_DIR / "releases"
-RELEASE_DATES_PATH: Path = INTERMEDIATE_DIR / "release_dates.parquet"
-VINTAGE_DATES_PATH: Path = INTERMEDIATE_DIR / "vintage_dates.parquet"
 
 
 # ---------------------------------------------------------------------------
@@ -153,3 +150,58 @@ def storage_options_for(path: Any) -> dict[str, str] | None:
 # Vintage store root. Local alias of STORE_DIR, or a UPath when
 # NFP_STORE_URI is set (see module docstring).
 VINTAGE_STORE_PATH = _store_location()
+
+
+# ---------------------------------------------------------------------------
+# Persistent non-store data artifacts (indicators, competitors, derived files)
+# ---------------------------------------------------------------------------
+
+
+def _upath(uri: str) -> Any:
+    """Build a credentialed UPath from env (shared by all *_location helpers)."""
+    from upath import UPath  # deferred: s3fs only needed in remote mode
+
+    client_kwargs = {}
+    endpoint = os.environ.get("AWS_ENDPOINT_URL")
+    if endpoint:
+        client_kwargs["endpoint_url"] = endpoint
+    return UPath(
+        uri,
+        key=os.environ.get("AWS_ACCESS_KEY_ID"),
+        secret=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        client_kwargs=client_kwargs,
+    )
+
+
+def data_location() -> Any:
+    """Root for PERSISTENT non-store data artifacts (indicators, competitors,
+    derived release/vintage schedules).
+
+    ``NFP_DATA_URI`` (e.g. ``s3://alt-nfp``) selects object storage; unset selects
+    the local ``DATA_DIR``. Returns ``Path`` or ``UPath`` — same env/credential
+    contract as :func:`_store_location`. Bulky rebuild byproducts (downloads, the
+    revisions intermediates) are NOT routed here; they use tempfile (plans/15 Tier C).
+    Provider data lives on a SEPARATE store — see :func:`providers_location`.
+    """
+    uri = os.environ.get("NFP_DATA_URI")
+    return _upath(uri) if uri else DATA_DIR
+
+
+def providers_location() -> Any:
+    """Root for provider parquets — a SEPARATE store from the alt-nfp data bucket.
+
+    On Bloomberg the provider data lives on its own compute store (maintainer,
+    2026-06-20), so it gets its own env var ``NFP_PROVIDERS_URI`` and is NOT seeded
+    by this repo. Unset → local ``DATA_DIR`` (current dev behaviour). The relative
+    ``ProviderConfig.file`` (e.g. ``providers/g/g_provider.parquet``) joins to this root.
+    """
+    uri = os.environ.get("NFP_PROVIDERS_URI")
+    return _upath(uri) if uri else DATA_DIR
+
+
+_DATA_ROOT = data_location()
+INDICATORS_DIR = _DATA_ROOT / "indicators"
+COMPETITORS_DIR = _DATA_ROOT / "competitors"
+PROVIDERS_DIR = providers_location()  # the provider store root; cfg.file joins to it
+RELEASE_DATES_PATH = _DATA_ROOT / "intermediate" / "release_dates.parquet"
+VINTAGE_DATES_PATH = _DATA_ROOT / "intermediate" / "vintage_dates.parquet"
