@@ -391,12 +391,23 @@ separate Bloomberg store and are not ours to move (maintainer, 2026-06-20).
 
 # Phase 2 — Tier C: rebuild scratch → tempfile
 
+> **STATUS (2026-06-20):** Tasks **8 + 10 DONE** (commits `6e1b633`, `70acb48`).
+> Tasks **7 + 9 SUPERSEDED → folded into plan 16** (`16-cli_production_workflow.md` Task 9.1,
+> `scripts/bootstrap_store.py`). Reason: Task 7 threads one in-process `TemporaryDirectory`
+> through `__main__.py`'s `download`/`process`/`build` — but those are separate `@app.command()`
+> subcommands that run as separate processes for a real rebuild, so a single tempdir cannot span
+> producer→consumer. Plan 16 Phase 9 **deletes** that legacy lineage and moves the bulk rebuild
+> to a single-process script, which is the only place the run-scoped tempdir actually works.
+> Task 9 (scraped-HTML temp) feeds `process`'s calendar build, which plan 16 also restructures
+> and deletes. The Tier-C tempfile requirement is recorded in plan 16 Task 9.1's container-safety
+> callout so it is not lost. (Maintainer decision, 2026-06-20.)
+
 The rebuild pipeline writes raw downloads + revision intermediates to local `data/` and reads
 them back in a later stage. To make it container-safe **without** persisting them (maintainer
 decision), thread a single run-scoped `tempfile.TemporaryDirectory` through the rebuild stages
 so producer and consumer share it, then let it auto-delete.
 
-### Task 7: run-scoped temp root for the rebuild
+### Task 7: run-scoped temp root for the rebuild — **SUPERSEDED → plan 16 Task 9.1**
 
 **Files:**
 - Modify: `packages/nfp-vintages/src/nfp_vintages/__main__.py` (the `download`/`process`/`build`
@@ -417,7 +428,12 @@ so producer and consumer share it, then let it auto-delete.
 - [ ] **Step 4:** Run the vintages suite `-m "not network"` → PASS.
 - [ ] **Step 5: Commit** — `git commit -m "refactor(rebuild): thread a run-scoped tempdir through download→process→build"`
 
-### Task 8: HTTP response cache → tempfile default
+### Task 8: HTTP response cache → tempfile default — **DONE (commit `6e1b633`)**
+
+> Implemented: `BLSHttpClient.cache_dir` default was `'.cache/bls'` (CWD-relative, not `data/` as
+> drafted below) → now `None` ⇒ per-process `tempfile.mkdtemp(prefix='altnfp-httpcache-')`,
+> `atexit`-cleaned; explicit `cache_dir=` still persists. Live path (`releases.py` `current` /
+> `fetch_ces_national`). `TestCacheDirDefault` added.
 
 **Files:** Modify `packages/nfp-download/src/nfp_download/bls/_http.py` (`cache_dir`, lines ~144, ~360, ~410).
 
@@ -430,7 +446,7 @@ so producer and consumer share it, then let it auto-delete.
 - [ ] **Step 4:** Run download unit tests `-m "not network"` → PASS.
 - [ ] **Step 5: Commit** — `git commit -m "refactor(download): default HTTP cache to tempfile, not data/"`
 
-### Task 9: scraped release HTML → temp (inside Task 7's run root)
+### Task 9: scraped release HTML → temp (inside Task 7's run root) — **SUPERSEDED → plan 16 Task 9.1**
 
 **Files:** Modify `packages/nfp-download/src/nfp_download/release_dates/scraper.py:233-242`.
 
@@ -443,7 +459,13 @@ so producer and consumer share it, then let it auto-delete.
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5: Commit** — `git commit -m "refactor(scraper): write raw release HTML to an injected temp dir"`
 
-### Task 10: SAE checkpoint → tempfile
+### Task 10: SAE checkpoint → tempfile — **DONE (commit `70acb48`)**
+
+> Implemented: SAE is disabled (`combine.py` no longer reads `sae_revisions.parquet`), so both
+> `CHECKPOINT_PATH` and `OUTPUT_PATH` (were under `INTERMEDIATE_DIR`) now resolve under a stable
+> `/tmp/altnfp-sae` subdir; added the missing parent `mkdir` before the checkpoint write. A stable
+> temp path (not per-process `mkdtemp`) keeps within-run checkpoint resume and would survive across
+> same-machine processes if SAE were re-enabled. `test_sae_states.py` added.
 
 **Files:** Modify `packages/nfp-vintages/src/nfp_vintages/processing/sae_states.py` (`CHECKPOINT_PATH`).
 SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
