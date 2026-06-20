@@ -14,6 +14,7 @@ Requires ``FRED_API_KEY`` in the environment.
 from __future__ import annotations
 
 import os
+import tempfile
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -21,10 +22,18 @@ from pathlib import Path
 import httpx
 import polars as pl
 from nfp_lookups.industry import CES_SECTOR_TO_NAICS, SINGLE_SECTOR_SUPERSECTORS
-from nfp_lookups.paths import INTERMEDIATE_DIR, VINTAGE_DATES_PATH, storage_options_for
+from nfp_lookups.paths import VINTAGE_DATES_PATH, storage_options_for
 
-OUTPUT_PATH = INTERMEDIATE_DIR / 'sae_revisions.parquet'
-CHECKPOINT_PATH = INTERMEDIATE_DIR / 'sae_checkpoint.parquet'
+# plans/15 Task 10 (Tier C): SAE is disabled (combine.py no longer reads
+# sae_revisions.parquet), so the checkpoint and the revisions output are pure
+# rebuild scratch.  Bloomberg's container forbids writes under ./data, so default
+# them to a stable subdir of the system tempdir (/tmp).  A *stable* path (not a
+# per-process mkdtemp) preserves within-run checkpoint resume and is shared across
+# same-machine processes should SAE ever be re-enabled.  Pass explicit paths to
+# fetch_batch_sae_revisions(checkpoint_path=...) / write to OUTPUT_PATH to override.
+_SAE_TMP_DIR = Path(tempfile.gettempdir()) / 'altnfp-sae'
+OUTPUT_PATH = _SAE_TMP_DIR / 'sae_revisions.parquet'
+CHECKPOINT_PATH = _SAE_TMP_DIR / 'sae_checkpoint.parquet'
 
 FRED_BASE = 'https://api.stlouisfed.org/fred'
 
@@ -283,6 +292,7 @@ def _save_checkpoint(results: list[pl.DataFrame], path: Path) -> None:
     """Write intermediate results to a Parquet checkpoint file."""
     if not results:
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
     pl.concat(results, how='vertical_relaxed').write_parquet(path)
     print(f'  ** checkpoint saved ({len(results)} series) -> {path}')
 
