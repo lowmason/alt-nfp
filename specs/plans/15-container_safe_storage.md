@@ -367,7 +367,7 @@ pl.read_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_
 
 ---
 
-### Task 6: seed the Tier-A S3 prefixes (one-time data move)
+### Task 6: seed the Tier-A S3 prefixes (one-time data move) — **DONE: `--apply` run 2026-06-20 (6 files → `s3://alt-nfp/{indicators,intermediate}`, md5-verified)**
 
 **Files:**
 - Create: `scripts/seed_data_s3.py` (a small, idempotent uploader; mirrors `mirror_store.py`)
@@ -485,8 +485,12 @@ SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
 > docs + `_t8_promote.py` banner committed (`55a20b5`, `9c74e6e`). **`_05_convergence_fit.py` left
 > AS-IS** (out of scope: local do-not-commit scratch, never imported/shipped; its `BASELINE_DIR`
 > output is a PERSISTENT reference baseline, so the planned tempfile default would delete it — Bloomberg
-> escape hatch is a one-line `s3://` at point of use). **MinIO end-to-end verify (Task 12 Step 2) still
-> BLOCKED** on the Task 6 `--apply` seed (Tier-A artifacts not yet in S3).
+> escape hatch is a one-line `s3://` at point of use). **Task 6 seed + Task 12 MinIO verify DONE**
+> (2026-06-20): 6 Tier-A files seeded to `s3://alt-nfp/{indicators,intermediate}` (md5-verified);
+> `build_model_data(as_of=2024-12-12)` read indicators+schedules+store from S3 (T=95) with zero `./data`
+> writes. The verify caught a real bug — polars can't consume a UPath **object** for `s3://` ("Object does
+> not have a .read() method"); fixed by `str()`-ing the path at 12 Tier-A I/O sites (commit `85fcc7b`,
+> matches the store's `str(...)` pattern). `NFP_PROVIDERS_URI` skipped per maintainer (skip-3).
 
 ### Task 11: fix the two `data/`-hardcoders; document the script contract — **`_t8` DONE (`55a20b5`); `_05` left as-is (see Phase 3 status)**
 
@@ -505,7 +509,7 @@ SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
   path or an `s3://` URI on Bloomberg, never `data/`.
 - [ ] **Step 3: Commit** — `git commit -m "refactor(scripts): de-hardcode data/ in _05_convergence_fit; document /tmp|s3 output contract"`
 
-### Task 12: docs, `.env.example`, and MinIO end-to-end verification — **docs+`.env.example` DONE (`55a20b5`,`9c74e6e`); MinIO verify BLOCKED on Task 6 seed**
+### Task 12: docs, `.env.example`, and MinIO end-to-end verification — **DONE (`55a20b5`,`9c74e6e`; seed + MinIO verify 2026-06-20; UPath→str fix `85fcc7b`)**
 
 **Files:**
 - Modify: root `CLAUDE.md` "Hard rules" (add `NFP_DATA_URI`), `packages/*/CLAUDE.md` data-layout
