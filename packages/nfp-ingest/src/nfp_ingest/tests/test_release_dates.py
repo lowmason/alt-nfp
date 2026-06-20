@@ -339,3 +339,68 @@ class TestVintageDatesCoverage:
         assert min_ref.year == 2003 and min_ref.month == 3, (
             f"QCEW should start at 2003-Q1 (March), got {min_ref}"
         )
+
+
+class TestBuildAndSaveStorageOptions:
+    """Task 5: vintage_dates writer is S3-capable (is_remote guard + storage_options)."""
+
+    @pytest.fixture()
+    def _minimal_release_dates(self, tmp_path: Path) -> Path:
+        """Write a tiny release_dates.parquet for build_and_save to consume."""
+        rows = [
+            ('ces', date(2020, 1, 12), date(2020, 2, 7)),
+            ('ces', date(2020, 2, 12), date(2020, 3, 6)),
+            ('ces', date(2020, 3, 12), date(2020, 4, 3)),
+            ('ces', date(2021, 1, 12), date(2021, 2, 5)),
+        ]
+        df = pl.DataFrame(
+            [{'publication': p, 'ref_date': r, 'vintage_date': v} for p, r, v in rows],
+            schema={'publication': pl.Utf8, 'ref_date': pl.Date, 'vintage_date': pl.Date},
+        )
+        p = tmp_path / 'release_dates.parquet'
+        df.write_parquet(p)
+        return p
+
+    def test_build_and_save_local_round_trip(
+        self, monkeypatch, tmp_path: Path, _minimal_release_dates: Path
+    ):
+        """Local path: build_and_save writes vintage_dates.parquet, readable back."""
+        from nfp_ingest.release_dates import vintage_dates as _vd
+
+        dest = tmp_path / 'intermediate' / 'vintage_dates.parquet'
+        monkeypatch.setattr(_vd, 'VINTAGE_DATES_PATH', dest)
+
+        result = _vd.build_and_save(release_dates_path=_minimal_release_dates)
+
+        assert dest.exists(), 'vintage_dates.parquet was not written'
+        reread = pl.read_parquet(dest)
+        assert reread.height == result.height
+        assert set(reread.columns) == set(result.columns)
+
+    def test_build_and_save_mkdir_skipped_on_remote(
+        self, monkeypatch, tmp_path: Path, _minimal_release_dates: Path
+    ):
+        """Remote path: mkdir() is NOT called when is_remote returns True.
+
+        We redirect VINTAGE_DATES_PATH into a sub-dir of tmp_path so that
+        write_parquet still works (the dir already exists from tmp_path itself),
+        then monkeypatch is_remote → True and assert mkdir was not called.
+        """
+        from nfp_ingest.release_dates import vintage_dates as _vd
+
+        dest = tmp_path / 'vintage_dates.parquet'
+        monkeypatch.setattr(_vd, 'VINTAGE_DATES_PATH', dest)
+        monkeypatch.setattr(_vd, 'is_remote', lambda path: True)
+
+        mkdir_called = []
+        original_mkdir = tmp_path.__class__.mkdir
+
+        def _tracking_mkdir(self, *args, **kwargs):
+            mkdir_called.append(self)
+            return original_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(tmp_path.__class__, 'mkdir', _tracking_mkdir)
+
+        _vd.build_and_save(release_dates_path=_minimal_release_dates)
+
+        assert mkdir_called == [], 'mkdir() was called on a remote path — is_remote guard missing'

@@ -85,6 +85,8 @@ def _build_release_calendar() -> None:
         RELEASE_DATES_PATH,
         RELEASES_DIR,
         VINTAGE_DATES_PATH,
+        is_remote,
+        storage_options_for,
     )
 
     async def _download_all_publications() -> None:
@@ -157,14 +159,16 @@ def _build_release_calendar() -> None:
         df = pl.concat([df, supplemental])
     df = df.sort('publication', 'ref_date')
 
-    RELEASE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(RELEASE_DATES_PATH)
+    if not is_remote(RELEASE_DATES_PATH):
+        RELEASE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(RELEASE_DATES_PATH, storage_options=storage_options_for(RELEASE_DATES_PATH))
     print(f'Wrote {RELEASE_DATES_PATH} ({len(df)} rows)')
 
     print('Building vintage_dates...')
     vdf = build_vintage_dates()
-    VINTAGE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    vdf.write_parquet(VINTAGE_DATES_PATH)
+    if not is_remote(VINTAGE_DATES_PATH):
+        VINTAGE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    vdf.write_parquet(VINTAGE_DATES_PATH, storage_options=storage_options_for(VINTAGE_DATES_PATH))
     print(f'Wrote {VINTAGE_DATES_PATH} ({len(vdf)} rows)')
 
 
