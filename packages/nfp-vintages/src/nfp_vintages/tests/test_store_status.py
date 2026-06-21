@@ -16,6 +16,7 @@ from nfp_vintages.store_status import (
     PartitionCoverage,
     StoreStatus,
     compute_status,
+    format_status,
 )
 
 
@@ -117,3 +118,107 @@ def test_compute_status_partition_coverage(tmp_path):
     assert qcew.row_count == 1
     assert qcew.latest_ref == date(2025, 1, 1)
     assert qcew.last_capture == date(2025, 9, 1)
+
+
+def test_compute_status_flags_uncaptured_ces_month(tmp_path):
+    """Store lags the calendar: published-but-absent CES ref-months are flagged."""
+    # Store stops at Aug-2025; as-of 2026-01-12 → Sep/Oct/Nov rev0 are out by then.
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 7, 1),
+            vintage_date=date(2025, 8, 1),
+            employment=158000.0,
+        ),
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 8, 1),
+            vintage_date=date(2025, 9, 5),
+            employment=158200.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    status = compute_status(tmp_path, as_of=date(2026, 1, 12))
+
+    joined = " ".join(status.uncaptured)
+    # Entries use "ces:<ISO-date>" format (Phase 8 contract).
+    assert "ces:" in joined
+    # At least Sep-2025 should be reported uncaptured (rev0 published ~Oct-2025).
+    assert "2025-09-01" in joined
+
+
+def test_compute_status_uncaptured_uses_colon_format(tmp_path):
+    """uncaptured entries must be 'src:<ref_token>' (Phase 8 parse contract)."""
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 8, 1),
+            vintage_date=date(2025, 9, 5),
+            employment=158200.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+    status = compute_status(tmp_path, as_of=date(2026, 1, 12))
+    for entry in status.uncaptured:
+        src, _, ref = entry.partition(":")
+        assert src in {"ces", "qcew"}, f"bad source in {entry!r}"
+        assert ref, f"empty ref_token in {entry!r}"
+
+
+def test_oct_2025_sentinel_not_flagged_missing(tmp_path):
+    """A -1 sentinel row at Oct-2025 counts as present (raw row presence)."""
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 9, 1),
+            vintage_date=date(2025, 11, 20),
+            employment=159000.0,
+        ),
+        # The shutdown "no print" sentinel: literal -1.0 at the Oct-2025 slot.
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 10, 1),
+            vintage_date=date(2025, 12, 16),
+            employment=-1.0,
+        ),
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 11, 1),
+            vintage_date=date(2025, 12, 16),
+            employment=159100.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    status = compute_status(tmp_path, as_of=date(2026, 1, 12))
+
+    # Oct-2025 has a (sentinel) row → NOT an interior hole.
+    missing = " ".join(status.missing_months)
+    assert "2025-10" not in missing
+
+
+def test_format_status_local_fallback_warning(tmp_path):
+    """A local (non-remote) store renders the .env LOCAL-FALLBACK warning."""
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 9, 1),
+            vintage_date=date(2025, 11, 20),
+            employment=159000.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    text = format_status(compute_status(tmp_path, as_of=date(2025, 12, 12)))
+
+    assert "LOCAL FALLBACK" in text
+    assert "NFP_STORE_URI" in text
+    assert "ces" in text

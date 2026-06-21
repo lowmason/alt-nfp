@@ -15,6 +15,7 @@ from datetime import date
 import polars as pl
 from nfp_ingest.vintage_store import read_vintage_store
 from nfp_lookups.paths import VINTAGE_STORE_PATH, is_canonical_store, is_remote
+from nfp_lookups.revision_schedules import get_ces_vintage_date, get_qcew_vintage_date
 
 # (source, seasonally_adjusted) partitions present in the rebuilt store.
 _PARTITIONS: tuple[tuple[str, bool], ...] = (
@@ -74,6 +75,156 @@ def _partition_coverage(store_path, source: str, sa: bool) -> PartitionCoverage 
     )
 
 
+# Known shutdown months (employment -1 sentinel in the store): these are expected
+# interior "gaps" caused by BLS shutdown delays, not missing captures.
+_KNOWN_SHUTDOWN_MONTHS: frozenset[date] = frozenset({
+    date(2025, 10, 1),  # Oct-2025: BLS shutdown delayed Sep+Oct CES prints
+})
+
+
+def _next_month(d: date) -> date:
+    """First of the month after *d*."""
+    return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+
+
+def _ces_uncaptured(latest_ref: date | None, as_of: date) -> list[str]:
+    """CES ref-months whose rev0 was published <= as_of but are absent from the store.
+
+    Returns entries in the format ``"ces:<YYYY-MM-DD>"`` (Phase 8 contract).
+    The date is the first of the ref-month so Phase 8 can reconstruct it via
+    ``date.fromisoformat(ref_token)``.
+    """
+    if latest_ref is None:
+        return []
+    out: list[str] = []
+    candidate = _next_month(latest_ref)
+    while candidate <= as_of:
+        try:
+            v0 = get_ces_vintage_date(candidate, 0)
+        except ValueError:
+            break
+        if v0 <= as_of:
+            out.append(f"ces:{candidate.isoformat()}")
+        candidate = _next_month(candidate)
+    return out
+
+
+def _qcew_uncaptured(latest_ref: date | None, as_of: date) -> list[str]:
+    """QCEW quarters whose rev0 was published <= as_of but are absent from the store.
+
+    Returns entries in the format ``"qcew:<YYYY>-Q<n>"`` (Phase 8 contract).
+    Phase 8 detects ``"-Q" in ref_token`` then splits on ``"-Q"`` to recover
+    year and quarter number.
+    """
+    if latest_ref is None:
+        return []
+    out: list[str] = []
+    # Advance to the first month of the quarter after latest_ref's quarter.
+    q_start_month = ((latest_ref.month - 1) // 3) * 3 + 1
+    year, month = latest_ref.year, q_start_month + 3
+    if month > 12:
+        year, month = year + 1, month - 12
+    while date(year, month, 1) <= as_of:
+        q_num = (month - 1) // 3 + 1
+        ref_quarter = f"Q{q_num}"
+        try:
+            v0 = get_qcew_vintage_date(ref_quarter, year, 0)
+        except ValueError:
+            break
+        if v0 <= as_of:
+            out.append(f"qcew:{year}-Q{q_num}")
+        month += 3
+        if month > 12:
+            year, month = year + 1, month - 12
+    return out
+
+
+def _missing_headline_months(store_path) -> list[str]:
+    """Interior CES-SA ref-month gaps over the headline series (geo 00, ind 00/05).
+
+    Raw row presence (no ``employment > 0`` filter) so a -1 sentinel row counts
+    as present and known shutdown months are annotated rather than flagged as errors.
+    A month is "present" if either the total (``00``) or private (``05``) headline
+    row exists. Returns ``"YYYY-MM"`` strings; shutdown months are suffixed with
+    ``" [known-shutdown]"`` instead of a bare flag.
+    """
+    lf = read_vintage_store(
+        store_path,
+        source="ces",
+        seasonally_adjusted=True,
+        geographic_type="national",
+        geographic_code="00",
+    )
+    present = (
+        lf.filter(pl.col("industry_code").is_in(["00", "05"]))
+        .select(pl.col("ref_date").dt.truncate("1mo"))
+        .unique()
+        .collect()
+        .get_column("ref_date")
+        .sort()
+        .to_list()
+    )
+    if len(present) < 2:
+        return []
+    have = set(present)
+    out: list[str] = []
+    cursor = present[0]
+    last = present[-1]
+    while cursor < last:
+        cursor = _next_month(cursor)
+        if cursor not in have:
+            label = f"{cursor:%Y-%m}"
+            if cursor in _KNOWN_SHUTDOWN_MONTHS:
+                label += " [known-shutdown]"
+            out.append(label)
+    return out
+
+
+def format_status(status: StoreStatus) -> str:
+    """Render a StoreStatus as a human-readable multi-line report."""
+    lines: list[str] = []
+    flags = []
+    if status.is_remote:
+        flags.append("REMOTE")
+    else:
+        flags.append("LOCAL")
+    if status.is_canonical:
+        flags.append("CANONICAL")
+    lines.append(f"store: {status.store_uri}  [{'/'.join(flags)}]")
+    if not status.is_remote:
+        lines.append(
+            "  WARNING: LOCAL FALLBACK — NFP_STORE_URI unset; reading the "
+            "local data/store, not the canonical S3 store."
+        )
+
+    lines.append("")
+    lines.append("coverage (source, seasonally_adjusted):")
+    for p in status.per_partition:
+        lines.append(
+            f"  {p.source:<5} sa={str(p.seasonally_adjusted):<5} "
+            f"rows={p.row_count:>8,} "
+            f"ref=[{p.earliest_ref}..{p.latest_ref}] "
+            f"last_capture={p.last_capture} vintages={p.distinct_vintages}"
+        )
+
+    if status.uncaptured:
+        lines.append("")
+        lines.append("UNCAPTURED (published per calendar, absent from store):")
+        lines.extend(f"  {u}" for u in status.uncaptured)
+
+    if status.missing_months:
+        lines.append("")
+        lines.append("missing headline months (interior gaps):")
+        lines.extend(f"  {m}" for m in status.missing_months)
+
+    if status.corrected:
+        lines.append("")
+        lines.append("CORRECTED-LEVEL (incoming != stored employment):")
+        lines.extend(f"  {c}" for c in status.corrected)
+
+    return "\n".join(lines)
+
+
 def compute_status(
     store_path=VINTAGE_STORE_PATH,
     as_of: date | None = None,
@@ -92,12 +243,23 @@ def compute_status(
         if cov is not None:
             per_partition.append(cov)
 
+    # --- Task 7.2: alarm computation ---
+    by_key = {(p.source, p.seasonally_adjusted): p for p in per_partition}
+    ces_sa = by_key.get(("ces", True))
+    qcew_nsa = by_key.get(("qcew", False))
+
+    uncaptured: list[str] = []
+    uncaptured.extend(_ces_uncaptured(ces_sa.latest_ref if ces_sa else None, as_of))
+    uncaptured.extend(_qcew_uncaptured(qcew_nsa.latest_ref if qcew_nsa else None, as_of))
+
+    missing_months = _missing_headline_months(store_path)
+
     return StoreStatus(
         store_uri=str(store_path),
         is_remote=is_remote(store_path),
         is_canonical=is_canonical_store(store_path),
         per_partition=per_partition,
-        uncaptured=[],
-        missing_months=[],
+        uncaptured=uncaptured,
+        missing_months=missing_months,
         corrected=[],
     )
