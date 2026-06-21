@@ -77,4 +77,5 @@ nav:
       - The package chain: architecture/package-chain.md
       - Boundaries & paths: architecture/boundaries-and-paths.md
       - Storage contract: architecture/storage-contract.md
+  - CLI Reference: cli-reference.md
   - API Reference: reference/
