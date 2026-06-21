@@ -258,12 +258,14 @@ def build_rebuild(
     See specs/store_rebuild_acquire.md for the acquire design.
     """
     from nfp_ingest.ces_builder import build_ces_panel
+    from nfp_ingest.qcew_acquire import (
+        acquire_qcew_levels,
+        acquire_qcew_size_native,
+    )
     from nfp_ingest.qcew_crosswalk import build_qcew_panel
     from nfp_ingest.size_class import build_size_class_panel
 
     from nfp_vintages.rebuild_store import (
-        _acquire_qcew_levels,  # noqa: PLC2701
-        _acquire_qcew_size_native,  # noqa: PLC2701
         compose_rebuild_panel,
         write_rebuild_store,
     )
@@ -276,14 +278,14 @@ def build_rebuild(
 
     # Fetch QCEW area-endpoint slices (all quarters) → crosswalk.
     print(f"Acquiring QCEW levels (BLS area API slices, {start_year}-{end_year or 'now'})...")
-    raw_qcew = _acquire_qcew_levels(start_year=start_year, end_year=end_year)
+    raw_qcew = acquire_qcew_levels(start_year=start_year, end_year=end_year)
     qcew_levels = build_qcew_panel(raw_qcew)
     print(f"  QCEW levels: {qcew_levels.height:,} rows")
 
     # Fetch QCEW Q1 size-endpoint slices (size_code 1-9) → crosswalk.
-    # _acquire_qcew_size_native already crosswalks to CES codes (it is NOT raw CSV).
+    # acquire_qcew_size_native already crosswalks to CES codes (it is NOT raw CSV).
     print(f"Acquiring QCEW size native rows (BLS size API slices, {start_year}-{end_year or 'now'})...")
-    size_native = _acquire_qcew_size_native(start_year=start_year, end_year=end_year)
+    size_native = acquire_qcew_size_native(start_year=start_year, end_year=end_year)
     size = build_size_class_panel(size_native)
     print(f"  QCEW size: {size.height:,} rows")
 

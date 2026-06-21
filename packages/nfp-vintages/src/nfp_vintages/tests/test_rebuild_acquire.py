@@ -475,7 +475,7 @@ class TestSizeRawToNative:
     def test_disclosure_logging(self, caplog):
         """Disclosure distribution must be logged at INFO level."""
         rows = _make_minimal_size_rows("1", month1_base=1_000)
-        with caplog.at_level(logging.INFO, logger="nfp_vintages.rebuild_store"):
+        with caplog.at_level(logging.INFO, logger="nfp_ingest.qcew_acquire"):
             self._native(rows)
         assert any("Disclosure distribution" in rec.message for rec in caplog.records), (
             "expected 'Disclosure distribution' log entry not found"
@@ -712,7 +712,7 @@ class TestAcquireSizeNetwork:
         assert raw is not None
         raw = raw.with_columns(size_code=pl.lit("1", pl.Utf8))
 
-        with caplog.at_level(logging.INFO, logger="nfp_vintages.rebuild_store"):
+        with caplog.at_level(logging.INFO, logger="nfp_ingest.qcew_acquire"):
             _size_raw_to_native(raw)
 
         assert any("Disclosure distribution" in r.message for r in caplog.records)
