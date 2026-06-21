@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` to execute this plan task-by-task. Steps use checkbox (`- [ ]`) syntax. **Builds target the SCRATCH prefix only** (`NFP_STORE_URI=s3://alt-nfp/store-rebuild`) — never the canonical store — exactly as `plans/10`.
 
-**Design record:** [`specs/store_rebuild_model_data_dropin.md`](../specs/store_rebuild_model_data_dropin.md). Unblocks `plans/10` T7 (goldens) + T8 (promotion).
+**Design record:** [`specs/completed/store_rebuild_model_data_dropin.md`](../specs/completed/store_rebuild_model_data_dropin.md). Unblocks `plans/10` T7 (goldens) + T8 (promotion).
 
 **Goal:** Add the two published series the NSA-only rebuild omitted — the **SA CES** triangles and the **QCEW `00` total** — so `build_model_data(as_of=D)` at the current `'00'` target is non-degenerate against the rebuilt store, **without changing the model**.
 
@@ -180,7 +180,7 @@ Steps 1/3/4 below are the operational confirmation on real S3 data.
 
 ## Deferred (explicitly NOT this plan)
 
-The "B" architecture (modeling the private NSA hierarchy + composing the SA `00` from private + government), the government ownership axis (`own_code` 1/2/3; codes `90`–`93`), from-scratch seasonal adjustment, and the A1/A2 golden re-baseline itself (`plans/10` T7) + promotion (`plans/10` T8). See `specs/store_rebuild.md` §11.
+The "B" architecture (modeling the private NSA hierarchy + composing the SA `00` from private + government), the government ownership axis (`own_code` 1/2/3; codes `90`–`93`), from-scratch seasonal adjustment, and the A1/A2 golden re-baseline itself (`plans/10` T7) + promotion (`plans/10` T8). See `specs/completed/store_rebuild.md` §11.
 
 ## Open risks
 

@@ -323,7 +323,7 @@ regime (first print = target).
 > consensus is a Total object, meaningless against a private nowcast). **Track B** = **Total NFP =
 > private nowcast + government forecast** vs the **Total-NFP consensus** + Total first print — the only
 > valid consensus contest. Track B's government forecast — once the undesigned critical path — is now
-> **built**: the `00 − 05` **wedge** (`specs/government_wedge.md`, `plans/14-government_wedge.md`;
+> **built**: the `00 − 05` **wedge** (`specs/completed/government_wedge.md`, `plans/14-government_wedge.md`;
 > committed + unit-tested), with Total assembly + consensus scoring running via
 > `run_a5_backtest.py:cmd_total`. Per **build-here / validate-on-port**, the **accuracy verdict vs
 > consensus** (both tracks) is taken on the Bloomberg full regime; locally we confirm the machinery

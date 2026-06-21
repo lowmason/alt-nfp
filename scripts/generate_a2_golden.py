@@ -14,7 +14,7 @@ with default settings) and serializes the comparable content:
 - ``a2_manifest.json`` — dates, scalars, vintage maps, provider/cyclical
   inventory, provenance
 
-Read-only with respect to the old repo. See ``plans/4-a2_seams_snapshots.md``.
+Read-only with respect to the old repo. See ``specs/plans/completed/4-a2_seams_snapshots.md``.
 """
 
 import hashlib

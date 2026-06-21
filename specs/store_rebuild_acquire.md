@@ -1,6 +1,6 @@
 # T0 acquisition spike — findings (2026-06-15)
 
-Read-only spike for [`plans/10`](../plans/10-store_rebuild.md) T0. Method:
+Read-only spike for [`specs/plans/completed/10`](../specs/plans/completed/10-store_rebuild.md) T0. Method:
 inspected the cached CES triangular files (`data/downloads/ces/cesvinall`, fresh
 2026-06-15), probed the live QCEW open-data API slices, and cross-checked against
 the canonical store. Resolves T0's three listed unknowns and surfaces one new

@@ -295,7 +295,7 @@ edge is fake.
 
 > **Spec-review correction:** the panel framed this table as "mirroring
 > `benchmark_revisions`," but that is a flat `dict` with **no as-of axis**, which would make
-> the lookahead guard vacuous. The normative spec (`specs/government_wedge.md` §4.3) instead
+> the lookahead guard vacuous. The normative spec (`specs/completed/government_wedge.md` §4.3) instead
 > gives `KNOWN_INTERVENTIONS` an **`announcement_date` axis** + a
 > `get_known_interventions_as_of(as_of)` helper, so the guard is a real *date* comparison.
 

@@ -2,7 +2,7 @@
 
 Evaluation-side only; imports no nfp-model code. OLS is hand-rolled on numpy
 (no statsmodels in the workspace). See specs/model_improvements.md section 4 and
-plans/13-tier01-scoreboard-and-diagnostics.md.
+specs/plans/completed/13-tier01-scoreboard-and-diagnostics.md.
 """
 from __future__ import annotations
 

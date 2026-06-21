@@ -1,6 +1,6 @@
 """Government wedge reference data: known interventions + change-space shapes.
 
-Used by the government-wedge forecast (specs/government_wedge.md). The table
+Used by the government-wedge forecast (specs/completed/government_wedge.md). The table
 carries an ``announcement_date`` axis so backtests can censor to what was
 knowable at each release-eve (the lookahead guard is a date comparison).
 """

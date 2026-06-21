@@ -14,7 +14,7 @@ writes ``parity_report.md``. Exit code 1 on any failure.
 
 The reference staging dir may also be the S3 fixture prefix once uploaded
 (pass an ``s3://…`` URI; requires the store env). See
-``plans/5-a3_model_parity.md``.
+``specs/plans/5-a3_model_parity.md``.
 """
 
 import json

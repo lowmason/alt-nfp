@@ -2,7 +2,7 @@
 
 Covers the ``(industry_type, ownership)`` taxonomy map, the legacy→rebuilt
 ``remap_industry_type`` helper, the code-``55`` two-level representation, and
-the new ``ownership`` schema column. See ``plans/10-store_rebuild.md`` T1.
+the new ``ownership`` schema column. See ``specs/plans/completed/10-store_rebuild.md`` T1.
 """
 
 from __future__ import annotations

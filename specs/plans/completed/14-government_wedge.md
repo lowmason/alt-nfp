@@ -21,7 +21,7 @@
 - **Store `.env` gotcha:** ad-hoc reads must `load_dotenv('.env')` or they hit the empty local store. Store tests self-skip when the store is unavailable (mark `@pytest.mark.real_store` / network as the package does).
 - Lint: ruff line length 100. Run tests with `uv run pytest -m "not network" --no-cov`.
 
-Spec: `specs/government_wedge.md`. Rationale: `docs/government_design.md`.
+Spec: `specs/completed/government_wedge.md`. Rationale: `docs/government_design.md`.
 
 ---
 
@@ -114,7 +114,7 @@ Expected: FAIL — `ModuleNotFoundError: nfp_lookups.government`.
 # packages/nfp-lookups/src/nfp_lookups/government.py
 """Government wedge reference data: known interventions + change-space shapes.
 
-Used by the government-wedge forecast (specs/government_wedge.md). The table
+Used by the government-wedge forecast (specs/completed/government_wedge.md). The table
 carries an ``announcement_date`` axis so backtests can censor to what was
 knowable at each release-eve (the lookahead guard is a date comparison).
 """
@@ -293,7 +293,7 @@ Expected: FAIL — `ModuleNotFoundError: nfp_ingest.wedge_data`.
 
 ```python
 # packages/nfp-ingest/src/nfp_ingest/wedge_data.py
-"""Government-wedge model inputs (specs/government_wedge.md).
+"""Government-wedge model inputs (specs/completed/government_wedge.md).
 
 The wedge target g = 00 - 05 first-print change comes from the store; the
 intervention basis comes from nfp_lookups.government, censored by as_of.
@@ -551,7 +551,7 @@ Expected: FAIL — `ModuleNotFoundError: nfp_model.wedge`.
 
 ```python
 # packages/nfp-model/src/nfp_model/wedge.py
-"""Standalone Bayesian government-wedge model (specs/government_wedge.md).
+"""Standalone Bayesian government-wedge model (specs/completed/government_wedge.md).
 
 Imports ONLY jax/numpyro/numpy (no nfp_* package). Models the wedge MoM CHANGE
 directly in change-space (units: thousands of jobs):
@@ -960,7 +960,7 @@ Expected: FAIL — `ModuleNotFoundError`.
 
 ```python
 # packages/nfp-vintages/src/nfp_vintages/wedge_diagnostics.py
-"""Diagnostics for the government wedge (specs/government_wedge.md §3.2/§7).
+"""Diagnostics for the government wedge (specs/completed/government_wedge.md §3.2/§7).
 
 These NEVER enter the model likelihood; they validate the wedge decomposition
 and calibrate intervention priors from public government data.
@@ -1101,9 +1101,9 @@ git commit -m "feat(eval): Total backtest — wedge fit + assemble + score vs co
 ## Task 10: Spec housekeeping + suite green
 
 **Files:**
-- Modify: `specs/government_wedge.md` (none expected; verify), `scripts/_wedge_diag.py` / `scripts/_store_layout.py` (remove throwaways)
+- Modify: `specs/completed/government_wedge.md` (none expected; verify), `scripts/_wedge_diag.py` / `scripts/_store_layout.py` (remove throwaways)
 
-- [x] **Step 1:** Remove throwaway diagnostics: `git rm -f scripts/_wedge_diag.py scripts/_store_layout.py scripts/_validate_alfred.py` (confirm none are imported: `grep -rn "_wedge_diag\|_store_layout\|_validate_alfred" packages scripts`). — **Done with sanctioned deviation** (commit `c6edb42`): `_store_layout.py` dropped, but `_wedge_diag.py` was deliberately **kept** as the spec's working-read reference (`specs/government_wedge.md` §2/§10). `_validate_alfred.py` is an untracked scratch from a *different* session (never committed). None are imported.
+- [x] **Step 1:** Remove throwaway diagnostics: `git rm -f scripts/_wedge_diag.py scripts/_store_layout.py scripts/_validate_alfred.py` (confirm none are imported: `grep -rn "_wedge_diag\|_store_layout\|_validate_alfred" packages scripts`). — **Done with sanctioned deviation** (commit `c6edb42`): `_store_layout.py` dropped, but `_wedge_diag.py` was deliberately **kept** as the spec's working-read reference (`specs/completed/government_wedge.md` §2/§10). `_validate_alfred.py` is an untracked scratch from a *different* session (never committed). None are imported.
 - [x] **Step 2:** Run the fast suite: `uv run pytest -m "not network and not slow" --no-cov` — Expected: PASS (new wedge unit tests included; store/slow tests skip).
 - [x] **Step 3:** Lint: `uv run ruff check .` — Expected: clean.
 - [x] **Step 4:** Commit: `git commit -am "chore: remove throwaway wedge diagnostics; suite green"`.

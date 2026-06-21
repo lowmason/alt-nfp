@@ -5,7 +5,7 @@ reference) via ``scripts/generate_golden_masters.py`` and live in
 ``s3://alt-nfp/golden/a1/`` (proprietary provider-derived values — only the
 manifest is committed). The data layer here must reproduce every censored
 panel value-identically; one horizon is pinned as an expected failure.
-See ``plans/3-golden_masters.md``.
+See ``specs/plans/completed/3-golden_masters.md``.
 """
 
 import json

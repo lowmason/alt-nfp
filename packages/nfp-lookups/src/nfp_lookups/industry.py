@@ -241,7 +241,7 @@ def get_domain_supersectors(domain_code: str) -> list[str]:
 #
 # The rebuilt vintage store splits the two axes the legacy single
 # ``industry_code`` column conflated: ``industry_type`` (level within the
-# industry partition) and ``ownership``. See ``specs/store_rebuild.md`` §3.
+# industry partition) and ``ownership``. See ``specs/completed/store_rebuild.md`` §3.
 #
 # ``industry_type`` retires the legacy ``'national'`` value (which collided with
 # ``geographic_type='national'``); the ``'00'`` total-nonfarm series is now the
@@ -331,7 +331,7 @@ def remap_industry_type(
 
     Bridges the pre-rebuild store (no ``ownership`` axis; ``'national'`` for the
     ``00`` total) to the rebuilt taxonomy so the ≤2023 history-consistency gate
-    (``specs/store_rebuild.md`` §10) keys on the same axes:
+    (``specs/completed/store_rebuild.md`` §10) keys on the same axes:
 
     - ``('national', '00')`` → ``('total', 'total')``
     - ``('domain', '05')``   → ``('total', 'private')``

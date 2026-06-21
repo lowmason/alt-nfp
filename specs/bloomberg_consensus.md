@@ -12,7 +12,7 @@ lifted into a Bloomberg-terminal workspace. It defines (a) the **contract** the
 adapter expects — the part this repo owns and pins — and (b) a **Bloomberg-side
 retrieval recipe** to produce a file in that contract. Companions:
 `specs/a5_real_competitors.md` (the harness this consensus scores in) and
-`specs/government_wedge.md` (the government forecast that makes the Total contest
+`specs/completed/government_wedge.md` (the government forecast that makes the Total contest
 valid — consensus is a Total object, meaningless against the private nowcast alone).
 
 The split matters: **the contract is normative; the retrieval recipe is a

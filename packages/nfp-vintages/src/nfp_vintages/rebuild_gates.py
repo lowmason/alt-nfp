@@ -1,7 +1,7 @@
 """The four §10 store-rebuild acceptance gates.
 
-Replaces the retired frozen-reference parity gate (``specs/store_rebuild.md``
-§10, ``plans/10-store_rebuild.md`` T6).  Each gate is a **pure gap-collector**:
+Replaces the retired frozen-reference parity gate (``specs/completed/store_rebuild.md``
+§10, ``specs/plans/completed/10-store_rebuild.md`` T6).  Each gate is a **pure gap-collector**:
 it takes Polars frame(s) and returns a ``list[str]`` of human-readable gap
 descriptions.  An empty list means the gate PASSES; a non-empty list means it
 FAILS, and each entry names the specific problem.  This mirrors the

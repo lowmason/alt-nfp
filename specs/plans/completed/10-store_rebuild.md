@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` to execute this plan task-by-task. Steps use checkbox (`- [ ]`) syntax. **Execution targets a SCRATCH prefix only** (`s3://alt-nfp/store-rebuild`) — never the canonical store — until the §10 acceptance gates pass and the maintainer approves promotion (T8).
 
-**Design record:** [`specs/store_rebuild.md`](../specs/store_rebuild.md) (the 12-section spec; consistency- and coherence-verified). Companions: `ces_qcew_industry.md`, `size_classes.md`, `ces_growth_convention.md`, `bloomberg_consensus.md`, `store_audit_findings.md`.
+**Design record:** [`specs/completed/store_rebuild.md`](../specs/completed/store_rebuild.md) (the 12-section spec; consistency- and coherence-verified). Companions: `ces_qcew_industry.md`, `size_classes.md`, `ces_growth_convention.md`, `bloomberg_consensus.md`, `store_audit_findings.md`.
 
 **Goal:** Rebuild the national vintage store cleanly from public BLS triangular + bulk files: a **NSA**, **vintage-aware** store carrying the **private industry hierarchy** (`ownership='private'`) plus the **`00` total-nonfarm scoring anchor** (`ownership='total'`, stored-not-modeled), with the new `ownership` axis, the `size_class` cross-product, and the provenance-keyed `(rev, bmr)` convention. Build to scratch, validate against acceptance gates, then promote.
 

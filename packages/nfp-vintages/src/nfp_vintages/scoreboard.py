@@ -2,7 +2,7 @@
 """Tier 0 scoreboard helpers — regime decomposition, calibration, venue tag.
 
 Evaluation-side only; imports no nfp-model code. See specs/model_improvements.md
-section 3 and plans/13-tier01-scoreboard-and-diagnostics.md.
+section 3 and specs/plans/completed/13-tier01-scoreboard-and-diagnostics.md.
 """
 from __future__ import annotations
 

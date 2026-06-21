@@ -6,7 +6,7 @@
 > currently PAUSED pending maintainer go-ahead (docs committed 2026-06-13).
 
 **Goal:** Remediate the confirmed, parity-neutral findings from the independent
-audit ([`specs/audit_independent.md`](../specs/audit_independent.md)), surface the
+audit ([`specs/completed/audit_independent.md`](../specs/completed/audit_independent.md)), surface the
 one substantive value bug for a semantics ruling, and record the parity-faithful
 remainder as an explicit backlog.
 
@@ -339,7 +339,7 @@ from parity; revisit in the post-parity novelty phase. Grouped:
 IND-LK-1, IND-LK-2, IND-DL-6, IND-IST-5 (confirms T2), IND-MD-2 (unreachable),
 IND-MD-4. The memory-based audits' Critical/High items (vintages B-1, lookups L-1,
 the parsers, nowcast arithmetic) all verified clean/parity-faithful — see
-`specs/audit_independent.md` "What the memory-based audits got wrong."
+`specs/completed/audit_independent.md` "What the memory-based audits got wrong."
 
 ---
 

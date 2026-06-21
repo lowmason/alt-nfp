@@ -15,7 +15,7 @@ claims/jolts) and serializes the parity-comparable posterior content:
   gating inventory, provenance.
 
 Restartable: dates whose npz already exists are skipped. Read-only with
-respect to the old repo. See ``plans/5-a3_model_parity.md``.
+respect to the old repo. See ``specs/plans/5-a3_model_parity.md``.
 """
 
 import hashlib

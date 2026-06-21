@@ -3,7 +3,7 @@
 Status: **reference, synthesized 2026-06-19**. Consolidates two independent literature
 reviews (formerly `model_research_1.md`, `model_research_2.md`) into one record. This is
 the **evidence base** behind `specs/model_improvements.md` (the design) and the
-validate-first pivot in `plans/0-port_and_staged_plan.md`; it is descriptive, not a design
+validate-first pivot in `specs/plans/0-port_and_staged_plan.md`; it is descriptive, not a design
 or implementation doc. The single question it answers: *for a nowcast scored against the
 BLS first-print headline change in seasonally adjusted total nonfarm payrolls, what is the
 realistic accuracy ceiling, who is the fair competitor, and how should the training

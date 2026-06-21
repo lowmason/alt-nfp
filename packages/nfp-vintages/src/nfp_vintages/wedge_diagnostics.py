@@ -1,4 +1,4 @@
-"""Diagnostics for the government wedge (specs/government_wedge.md §3.2/§7).
+"""Diagnostics for the government wedge (specs/completed/government_wedge.md §3.2/§7).
 
 These NEVER enter the model likelihood; they validate the wedge decomposition
 and calibrate intervention priors from public government data.

@@ -1,11 +1,11 @@
 # A5 — Real competitors in the harness (design)
 
 Status: **design, revised 2026-06-19** (retargeted to **private** NFP). Implements
-the A5 gate in `plans/0-port_and_staged_plan.md` ("Real competitors in the
+the A5 gate in `specs/plans/0-port_and_staged_plan.md` ("Real competitors in the
 harness") and resolves the evaluation-convention question left open by
 `specs/ces_growth_convention.md` and the A4 dual-track finding
-(`plans/6-a4_vmap_backtests.md`) — by choosing **Option A (the first
-print)** as the first-print target over revised-CES targeting (plans/0 SQ1,
+(`specs/plans/completed/6-a4_vmap_backtests.md`) — by choosing **Option A (the first
+print)** as the first-print target over revised-CES targeting (specs/plans/0 SQ1,
 answered 2026-06-13). The private retarget (2026-06-19) adds a second scored
 truth on a distinct axis — the **private QCEW-settled** administrative value,
 made the **primary** comparison (§2c) — which SQ1 did not speak to. The
@@ -13,7 +13,7 @@ made the **primary** comparison (§2c) — which SQ1 did not speak to. The
 `specs/model_improvements.md`. Companion spec for the Bloomberg consensus source —
 a **Track B** (Total-NFP) artifact, now **built** and consumed by the Total
 scoreboard (see below) — is `specs/bloomberg_consensus.md`; the government forecast
-that completes Track B is `specs/government_wedge.md` / `plans/14`.
+that completes Track B is `specs/completed/government_wedge.md` / `specs/plans/completed/14`.
 
 **Private retarget (2026-06-19).** A5 scores the **private** nowcast
 (`industry_code='05'`), not total nonfarm (`'00'`). The model's signal is
@@ -23,7 +23,7 @@ first print and the **private** QCEW-settled truth. The run-path's `'00'` defaul
 is a latent mismatch corrected in `model_improvements.md`; `'00'` total data
 exists for **Track B** ("private nowcast + government forecast = total"), whose
 government forecast is now **built** (the `00 − 05` wedge —
-`specs/government_wedge.md` / `plans/14`). On the private track the **only**
+`specs/completed/government_wedge.md` / `specs/plans/completed/14`). On the private track the **only**
 competitors are the **naive floors**: ADP is removed entirely (competitor *and*
 regressor), and **consensus is removed** — it is a Total object with no meaning
 against the private nowcast alone, so it lives on **Track B** (the built Total
@@ -43,7 +43,7 @@ scoreboard: private nowcast + government wedge vs the Total-NFP consensus).
 2. **Targets: two PRIVATE truths** (`industry_code='05'`). The **private
    QCEW-settled** value is the **primary** comparison (§2c) — the model is
    QCEW-anchored, so the administrative private number is the closest truth it can
-   be held to. The **private first print** is the second scored truth (plans/0
+   be held to. The **private first print** is the second scored truth (specs/plans/0
    SQ1, **answered 2026-06-13** — Option A, now read on `'05'`): the within-release
    private headline change BLS announces, an additive extractor over store levels.
    Both are scored at each regime.
@@ -99,7 +99,7 @@ A5 scores against the **private** (`industry_code='05'`) actuals. Two truths are
 scored: the **private QCEW-settled** value — the **primary** comparison, the
 administrative number the QCEW-anchored model is closest to (§2c) — and the
 **private first print**, the within-release headline change BLS announces (§2a).
-plans/0 strategic question 1 is **answered (2026-06-13): Option A, the first
+specs/plans/0 strategic question 1 is **answered (2026-06-13): Option A, the first
 print** (now read on `'05'`). Benchmark-informed ("revised-truth") targeting is a
 separate, later model's concern and is out of A5 scope.
 
@@ -140,7 +140,7 @@ scored on it. **NB:** this `final_view` revised truth (latest *published* CES) i
 distinct from the §2c **QCEW-settled** truth (the administrative anchor); the
 QCEW-settled value is a *scored* primary target, the `final_view` diff is only an
 optional reference. Full revised-truth evaluation belongs to the future
-benchmark-targeting model (plans/0 SQ1, resolved).
+benchmark-targeting model (specs/plans/0 SQ1, resolved).
 
 **Home (only if the reference column is wanted):** `nfp_vintages.evaluation`
 gains a small `revised_truth_change_k(panel)` helper on the private `final_view`.
@@ -247,7 +247,7 @@ the same unit the model nowcast and the private targets use.
 product that competes with **consensus** is **Total NFP = private nowcast +
 government forecast**, scored against the **Total-NFP consensus** + the Total first
 print. The **government forecast is now built** — the `00 − 05` **wedge**
-(`specs/government_wedge.md` / `plans/14`: `nfp_model/wedge.py`, `assemble_total`,
+(`specs/completed/government_wedge.md` / `specs/plans/completed/14`: `nfp_model/wedge.py`, `assemble_total`,
 `load_consensus`, `score_total`, the `cmd_total` backtest — committed + unit-tested).
 A5's harness was extended to run it (`cmd_total` reuses the private grids' persisted
 `nowcast_pred_draws`, fits the wedge as-of-censored, assembles Total, and scores it).
@@ -277,17 +277,17 @@ A4 outputs.
 
 **Gate satisfied when** the report scores the **private** model against the
 **naive floors** at each regime, against both private truths (QCEW-settled
-primary + first print). This is a **reduced bar** relative to the literal plans/0
+primary + first print). This is a **reduced bar** relative to the literal specs/plans/0
 gate ("model vs ADP vs consensus vs naive"): ADP is removed entirely and consensus
 moves to **Track B** (now built — the government wedge supplies its government
-forecast; `plans/14`), so on the private track the **private QCEW-settled
+forecast; `specs/plans/completed/14`), so on the private track the **private QCEW-settled
 administrative truth replaces the competitor contest** as the real benchmark. The
 consensus side of the ADP/consensus contest is met by **Track B**, whose government
-forecast is now **built** (the wedge; `plans/14`) — the accuracy verdict vs consensus
+forecast is now **built** (the wedge; `specs/plans/completed/14`) — the accuracy verdict vs consensus
 is taken on the port. This amends the gate; the amendment is **recorded (2026-06-19)**
-in plans/0's gate log (the A5 §A5 "gate amendment" note; mirror `model_improvements.md` §8).
+in specs/plans/0's gate log (the A5 §A5 "gate amendment" note; mirror `model_improvements.md` §8).
 
-**Forward compatibility (B1).** The output consumer is decided (plans/0 SQ2,
+**Forward compatibility (B1).** The output consumer is decided (specs/plans/0 SQ2,
 2026-06-13): an accurate first-print nowcast for Bloomberg publication, plus
 a supersector "why" narrative — so **B1 (the supersector narrative layer)
 leads Phase B**. A5 itself stays national, but the scoreboard and competitor
@@ -313,7 +313,7 @@ consensus adapter `nfp_vintages/competitors/consensus.py` (`load_consensus`,
 `nfp_model/wedge.py` + `nfp_ingest/wedge_data.py` + `nfp_lookups/government.py`; the
 Total assembly `nfp_vintages/assembly.py` (`assemble_total`, `score_total`); wedge
 diagnostics `nfp_vintages/wedge_diagnostics.py`; and `run_a5_backtest.py:cmd_total`
-(`specs/government_wedge.md` / `plans/14`). The vintage-censored bridge regression
+(`specs/completed/government_wedge.md` / `specs/plans/completed/14`). The vintage-censored bridge regression
 lives in `model_improvements.md` §4 as the Tier-1 Aruoba diagnostic.
 
 Tests: `nfp_ingest/tests/test_first_print.py` (extractor vs published **private**
@@ -341,7 +341,7 @@ Retire risk first, then build outward from the cheapest pieces:
 6. **Naive-floor adapters** (`naive.py`) — the only private-track competitors.
 7. **Scoreboard** (`run_a5_backtest.py`) wiring model + naive floors × regimes
    scored against both private truths; emit `a5_report.md`.
-8. Gate annotation in plans/0 (record the reduced bar + Track-B deferral); spec
+8. Gate annotation in specs/plans/0 (record the reduced bar + Track-B deferral); spec
    → archive on completion; memory updated.
 
 ## 8. Open items and risks
@@ -361,7 +361,7 @@ Retire risk first, then build outward from the cheapest pieces:
   `change_k`) and is now consumed by `cmd_total` via `load_consensus`. No longer a
   stale private-track competitor.
 - **Track B — RESOLVED 2026-06-19 (built).** The consensus contest's **government
-  forecast** is built (the `00 − 05` wedge — `specs/government_wedge.md` / `plans/14`;
+  forecast** is built (the `00 − 05` wedge — `specs/completed/government_wedge.md` / `specs/plans/completed/14`;
   `model_improvements.md` §2/§9/§11). Total assembly + consensus scoring run locally
   (`cmd_total`). What remains is the **accuracy verdict vs consensus** (port) and two
   input gates: the **2025 RIF intervention magnitudes** (maintainer) and the
@@ -373,7 +373,7 @@ Retire risk first, then build outward from the cheapest pieces:
   (triple benchmark wedge at February as-ofs; permanent November rev-2
   outliers) into the Phase-B model-evidence agenda — not an A5 task.
 
-## Appendix: gate restatement (plans/0)
+## Appendix: gate restatement (specs/plans/0)
 
 > **A5 — Real competitors in the harness.** Add ADP prints (FRED; mind the
 > Aug-2022 methodology break) and consensus survey median (Bloomberg/Econoday
@@ -394,11 +394,11 @@ Retire risk first, then build outward from the cheapest pieces:
 - **Track B (built locally 2026-06-19; accuracy on the port):** the ADP/consensus
   contest, recast as **Total NFP = private nowcast + government forecast** vs the
   **Total-NFP consensus** + Total first print. Its critical path — the **government
-  forecast** — is now built (the `00 − 05` wedge; `specs/government_wedge.md` /
-  `plans/14`), with Total assembly + consensus scoring running via `cmd_total`. This
+  forecast** — is now built (the `00 − 05` wedge; `specs/completed/government_wedge.md` /
+  `specs/plans/completed/14`), with Total assembly + consensus scoring running via `cmd_total`. This
   is the only valid consensus comparison; the accuracy verdict vs consensus is taken
   on the Bloomberg port (`model_improvements.md` §9/§11).
 
-This amends the literal plans/0 gate ("model vs ADP vs consensus vs naive"); the
-amendment is **recorded (2026-06-19)** in plans/0's gate log (the A5-section "gate
+This amends the literal specs/plans/0 gate ("model vs ADP vs consensus vs naive"); the
+amendment is **recorded (2026-06-19)** in specs/plans/0's gate log (the A5-section "gate
 amendment" note) and mirrors `model_improvements.md` §8.

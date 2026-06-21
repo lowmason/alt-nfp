@@ -1,4 +1,4 @@
-"""Government-wedge model inputs (specs/government_wedge.md).
+"""Government-wedge model inputs (specs/completed/government_wedge.md).
 
 The wedge target g = 00 - 05 first-print change comes from the store; the
 intervention basis comes from nfp_lookups.government, censored by as_of.
