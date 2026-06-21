@@ -255,3 +255,92 @@ def test_status_command_renders_report(tmp_path):
     assert "coverage" in result.output
     assert "ces" in result.output
     assert "qcew" in result.output
+
+
+def test_missing_months_flags_real_interior_gap(tmp_path):
+    """A real interior headline gap (no row, not a shutdown) is reported bare.
+
+    Positive coverage for _missing_headline_months — without this the body could
+    be stubbed to ``return []`` and every other test still passes.
+    """
+    # CES-SA headline present Jan + Mar 2024; Feb absent → a true interior hole.
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2024, 1, 1),
+            vintage_date=date(2024, 2, 5),
+            employment=158000.0,
+        ),
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2024, 3, 1),
+            vintage_date=date(2024, 4, 5),
+            employment=158400.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    status = compute_status(tmp_path, as_of=date(2024, 6, 12))
+
+    # Feb-2024 is a bare interior gap (not a known-shutdown month).
+    assert "2024-02" in status.missing_months
+    assert "[known-shutdown]" not in " ".join(status.missing_months)
+
+
+def test_missing_months_annotates_known_shutdown(tmp_path):
+    """A wholly-absent known-shutdown month is annotated, not bare-flagged."""
+    # Sep + Nov 2025 present, Oct-2025 (a known shutdown month) wholly absent.
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 9, 1),
+            vintage_date=date(2025, 11, 20),
+            employment=159000.0,
+        ),
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 11, 1),
+            vintage_date=date(2025, 12, 16),
+            employment=159100.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    status = compute_status(tmp_path, as_of=date(2026, 1, 12))
+
+    assert "2025-10 [known-shutdown]" in status.missing_months
+
+
+def test_qcew_uncaptured_token_format(tmp_path):
+    """QCEW uncaptured entries are 'qcew:<YYYY>-Q<n>' (Phase 8 split('-Q') contract).
+
+    The CES format test's store has only a CES row, so the QCEW leg never runs
+    there; this exercises the Phase-8 'do NOT change' QCEW token round-trip.
+    """
+    # Store holds only QCEW Q1-2024; by mid-2025 later quarters are knowable.
+    rows = [
+        _row(
+            source="qcew",
+            sa=False,
+            ref_date=date(2024, 1, 1),
+            vintage_date=date(2024, 9, 1),
+            employment=140000.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    status = compute_status(tmp_path, as_of=date(2025, 7, 1))
+
+    qcew_entries = [u for u in status.uncaptured if u.startswith("qcew:")]
+    assert qcew_entries, "expected at least one qcew: uncaptured entry"
+    for entry in qcew_entries:
+        ref_token = entry.split(":", 1)[1]
+        # Phase 8 detects QCEW via '-Q' then splits on it.
+        assert "-Q" in ref_token
+        year_str, q_str = ref_token.split("-Q")
+        assert year_str.isdigit()
+        assert q_str.isdigit() and 1 <= int(q_str) <= 4
