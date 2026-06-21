@@ -153,3 +153,52 @@ class TestUpdateSelfHealingCompaction:
 
         _run_update(date(2026, 6, 12), store_path=store)
         assert len(list(part.glob("*.parquet"))) == 1
+
+
+class TestUpdateOnlyQcew:
+    def test_only_qcew_drives_real_noop_and_skips_ces(self, monkeypatch):
+        """--only qcew runs the REAL capture_qcew_quarter no-op; CES leg gated off.
+
+        No --store flag exists on `update`, so the capture must NOT reach the
+        store. Patching get_qcew_vintage_date far-future makes
+        _knowable_qcew_quarter return None ⇒ capture_qcew_quarter returns
+        skipped=1 before any acquire/append/read (store-safe under pytest, where
+        VINTAGE_STORE_PATH is canonical MinIO).
+        """
+        import nfp_ingest.capture as _cap
+        import nfp_vintages.calendar as _cal
+
+        # Offline calendar (defensive; --no-refresh-calendar also skips it).
+        monkeypatch.setattr(_cal, "advance_release_calendar", lambda: None)
+
+        # Far-future schedule ⇒ no knowable quarter ⇒ real no-op, no store touch.
+        monkeypatch.setattr(
+            _cap,
+            "get_qcew_vintage_date",
+            lambda ref_quarter, ref_year, revision: date(2099, 1, 1),
+        )
+
+        # acquire MUST NOT be reached on the no-op path.
+        def _boom(*a, **k):
+            raise AssertionError("acquire_qcew_levels reached on a no-op")
+
+        monkeypatch.setattr(_cap, "acquire_qcew_levels", _boom)
+
+        # CES leg must be gated OFF by --only qcew; flag if it runs.
+        def _ces_boom(*a, **k):
+            raise AssertionError("capture_ces_print ran under --only qcew")
+
+        monkeypatch.setattr(_cap, "capture_ces_print", _ces_boom)
+
+        result = runner.invoke(
+            app,
+            ["update", "--as-of", "2024-06-12", "--only", "qcew", "--no-refresh-calendar"],
+        )
+
+        # HARD assertion: the real no-op path ran to completion under --only qcew.
+        assert result.exit_code == 0, result.output
+        # SOFT assertion: 5.2's _run_update emits a QCEW outcome line reporting
+        # the skip ("  QCEW: appended 0, skipped 1"). 5.2 owns the wording — if it
+        # ever changes, reconcile THESE strings to 5.2's echo, never __main__.py.
+        assert "QCEW" in result.output
+        assert "skipped 1" in result.output
