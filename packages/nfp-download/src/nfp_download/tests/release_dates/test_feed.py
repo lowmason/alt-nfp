@@ -10,8 +10,15 @@ pubDate format is pinned to RFC-822.
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from nfp_download.release_dates.feed import FeedItem, parse_feed
+import pytest
+from nfp_download.release_dates.feed import (
+    EMPSIT_FEED_URL,
+    FeedItem,
+    fetch_feed,
+    parse_feed,
+)
 
 EMPSIT_RSS = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -91,3 +98,55 @@ class TestParseFeed:
   </item>
 </channel></rss>"""
         assert parse_feed(no_title) == []
+
+
+# ── network smoke test ──────────────────────────────────────────────────────
+
+@pytest.mark.network
+class TestFetchFeedNetwork:
+    def test_fetch_empsit_returns_feed_items(self):
+        items = fetch_feed(EMPSIT_FEED_URL)
+        assert isinstance(items, list)
+        assert items, "empsit feed should publish at least one item"
+        assert all(isinstance(it, FeedItem) for it in items)
+        # BLS lists newest first.
+        assert items[0].pub_date >= items[-1].pub_date
+
+
+# ── monkeypatched unit test (no network) ────────────────────────────────────
+
+_MINIMAL_RSS = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Employment Situation Summary</title>
+      <pubDate>Fri, 06 Jun 2025 08:30:00 -0400</pubDate>
+      <guid>https://www.bls.gov/news.release/archives/empsit_06062025.htm</guid>
+    </item>
+  </channel>
+</rss>
+"""
+
+
+class TestFetchFeedUnit:
+    def test_fetch_feed_calls_create_session(self):
+        """fetch_feed drives an async session; monkeypatch create_session."""
+        fake_resp = MagicMock()
+        fake_resp.text = _MINIMAL_RSS
+        fake_resp.raise_for_status = MagicMock()
+
+        fake_session = AsyncMock()
+        fake_session.get = AsyncMock(return_value=fake_resp)
+        fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+        fake_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "nfp_download.release_dates.feed.create_session",
+            return_value=fake_session,
+        ):
+            items = fetch_feed(EMPSIT_FEED_URL)
+
+        assert len(items) == 1
+        assert items[0].pub_date == date(2025, 6, 6)
+        fake_session.get.assert_awaited_once_with(EMPSIT_FEED_URL)
