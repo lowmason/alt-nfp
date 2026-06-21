@@ -23,6 +23,8 @@ def advance_release_calendar() -> None:
     newly-published pages are missed.
     """
     import asyncio
+    import tempfile
+    from pathlib import Path
 
     import polars as pl
     from nfp_download.release_dates.config import PUBLICATIONS
@@ -41,11 +43,18 @@ def advance_release_calendar() -> None:
     )
     from nfp_lookups.paths import (
         RELEASE_DATES_PATH,
-        RELEASES_DIR,
         VINTAGE_DATES_PATH,
         is_remote,
         storage_options_for,
     )
+
+    # Container contract (plans/15): scraped release HTML is ephemeral scratch —
+    # route it to a run-scoped tempdir, never ./data/downloads/releases. `update`
+    # advances the calendar on EVERY run, so a hardcoded RELEASES_DIR write would
+    # violate the Bloomberg no-./data-writes contract. The scrape and the
+    # read-back below share this one tempdir (the parse happens in the same run).
+    scratch = tempfile.TemporaryDirectory(prefix='altnfp-releases-')
+    releases_root = Path(scratch.name)
 
     async def _download_all_publications() -> None:
         async with create_session() as session:
@@ -55,11 +64,11 @@ def advance_release_calendar() -> None:
                     html = await fetch_index(session, pub.index_url)
                 except FetchError as e:
                     # Safety net: if BLS's bot detection changes again, the
-                    # calendar can still be built from release pages already
-                    # on disk; only newly published pages are missed.
+                    # calendar can still be built from supplemental rows; only
+                    # newly published pages are missed.
                     print(
                         f'  WARNING: index fetch failed for {pub.name} ({e}); '
-                        f'using cached release pages only'
+                        f'using supplemental rows only'
                     )
                     continue
                 try:
@@ -67,35 +76,38 @@ def advance_release_calendar() -> None:
                         html, pub.name, pub.series, pub.frequency,
                     )
                 except ParseError as e:
-                    # Page structure may have drifted; fall back to cached
-                    # release pages already on disk so the rest of the calendar
-                    # build can proceed. Only newly-published pages are missed.
+                    # Page structure may have drifted; fall back to supplemental
+                    # rows so the rest of the calendar build can proceed. Only
+                    # newly-published pages are missed.
                     print(
                         f'  WARNING: index parse failed for {pub.name} ({e}); '
-                        f'using cached release pages only'
+                        f'using supplemental rows only'
                     )
                     continue
                 print(f'  Found {len(entries)} releases for {pub.name}')
                 try:
-                    paths = await download_all(entries, pub.name)
+                    paths = await download_all(entries, pub.name, out_root=releases_root)
                 except FetchError as e:
                     print(
                         f'  WARNING: release download failed for {pub.name} '
-                        f'({e}); using cached release pages only'
+                        f'({e}); using supplemental rows only'
                     )
                     continue
                 print(f'  Downloaded {len(paths)} new files for {pub.name}')
 
-    asyncio.run(_download_all_publications())
+    try:
+        asyncio.run(_download_all_publications())
 
-    print('Building release_dates...')
-    rows = []
-    for pub in PUBLICATIONS:
-        pub_dir = RELEASES_DIR / pub.name
-        if not pub_dir.exists():
-            continue
-        for row in collect_release_dates(pub.name, pub_dir):
-            rows.append(row)
+        print('Building release_dates...')
+        rows = []
+        for pub in PUBLICATIONS:
+            pub_dir = releases_root / pub.name
+            if not pub_dir.exists():
+                continue
+            for row in collect_release_dates(pub.name, pub_dir):
+                rows.append(row)
+    finally:
+        scratch.cleanup()
 
     df = pl.DataFrame(
         rows,
