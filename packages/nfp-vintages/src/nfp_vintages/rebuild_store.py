@@ -21,23 +21,16 @@ import logging
 from typing import Any
 
 import polars as pl
-from nfp_lookups.paths import (
-    VINTAGE_STORE_PATH,
-    is_canonical_store,
-    is_remote,
-    storage_options_for,
-)
-from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
 # Acquire layer relocated to nfp_ingest.qcew_acquire (CLI production workflow spec
 # §5.2/§14): nfp-ingest sits below nfp-vintages, so capture.py can now import these
 # without an illegal upward import. Re-exported here (private aliases) so the existing
 # test_rebuild_acquire.py / test_rebuild_gates.py imports keep resolving.
 from nfp_ingest.qcew_acquire import (  # noqa: F401  (re-export for back-compat)
-    _fetch_qcew_csv,
-    _prep_area_raw,
     _QCEW_LEVELS_REQUIRED,
     _REBUILD_START_YEAR,
+    _fetch_qcew_csv,
+    _prep_area_raw,
     _size_raw_to_native,
 )
 from nfp_ingest.qcew_acquire import (
@@ -46,6 +39,13 @@ from nfp_ingest.qcew_acquire import (
 from nfp_ingest.qcew_acquire import (
     acquire_qcew_size_native as _acquire_qcew_size_native,  # noqa: F401
 )
+from nfp_lookups.paths import (
+    VINTAGE_STORE_PATH,
+    is_canonical_store,
+    is_remote,
+    storage_options_for,
+)
+from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
 logger = logging.getLogger(__name__)
 
