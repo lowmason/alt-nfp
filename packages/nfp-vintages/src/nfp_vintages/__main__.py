@@ -410,8 +410,11 @@ def watch(
         if not items:
             print(f"  {src}: feed empty — skipping")
             continue
-        # BLS lists newest first; the top item is the latest release.
-        latest = items[0]
+        # Pick the newest item by pub_date — robust to feed ordering. BLS lists
+        # newest-first, but don't depend on it: a non-newest items[0] would drive
+        # an older as_of and falsely no-op a genuinely-new release (a missed
+        # capture is gone — §9).
+        latest = max(items, key=lambda it: it.pub_date)
         pub = latest.pub_date  # already a date object from parse_feed
 
         # The store decides whether this release's ref-period is captured.
