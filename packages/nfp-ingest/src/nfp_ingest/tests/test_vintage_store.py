@@ -1137,3 +1137,130 @@ def test_append_two_disjoint_multivintage_batches_conserves_rows(tmp_path):
     part = tmp_path / "source=ces" / "seasonally_adjusted=true"
     got = pl.read_parquet(str(part / "*.parquet"))
     assert got.height == 4  # FAILS on old code (B clobbers A → 2)
+
+
+# ---------------------------------------------------------------------------
+# append ukey under-keying fix (Decision A — spec §6.1)
+# ---------------------------------------------------------------------------
+
+
+def _store_row(
+    *,
+    source: str,
+    sa: bool,
+    ownership: str,
+    industry_code: str,
+    size_class_type=None,
+    size_class_code=None,
+    employment: float,
+    industry_type: str = "supersector",
+    geographic_type: str = "national",
+    geographic_code: str = "00",
+    ref_date: date = date(2023, 1, 1),
+    vintage_date: date = date(2023, 7, 1),
+    revision: int = 0,
+    benchmark_revision: int = 0,
+) -> dict:
+    """A single VINTAGE_STORE_SCHEMA row built inline (ownership/size settable)."""
+    return {
+        "geographic_type": geographic_type,
+        "geographic_code": geographic_code,
+        "ownership": ownership,
+        "industry_type": industry_type,
+        "industry_code": industry_code,
+        "ref_date": ref_date,
+        "vintage_date": vintage_date,
+        "revision": revision,
+        "benchmark_revision": benchmark_revision,
+        "employment": employment,
+        "size_class_type": size_class_type,
+        "size_class_code": size_class_code,
+        "source": source,
+        "seasonally_adjusted": sa,
+    }
+
+
+class TestAppendUkeySizeClassAndOwnership:
+    """Spec §6.1: append must key on ownership + size_class_{type,code}."""
+
+    def test_append_keeps_distinct_size_class_codes(self, tmp_path):
+        """Rows differing ONLY by size_class_code must NOT collapse on append.
+
+        Two-step append so the anti-join (which only runs vs an EXISTING
+        partition) is exercised: bucket '1' is stored first, then buckets
+        '2'/'3' (same 7-col legacy key, new size_class_code) are appended.
+        Under the legacy 7-col ukey the second append returns 0 and the
+        store keeps only size code '1'.
+        """
+        common = {
+            "source": "qcew",
+            "sa": False,
+            "ownership": "private",
+            "industry_code": "10",
+            "size_class_type": "size",
+        }
+        first = pl.DataFrame(
+            [_store_row(**common, size_class_code="1", employment=100.0)],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+        rest = pl.DataFrame(
+            [
+                _store_row(**common, size_class_code="2", employment=200.0),
+                _store_row(**common, size_class_code="3", employment=300.0),
+            ],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+
+        assert append_to_vintage_store(first, tmp_path) == 1
+        # New size buckets are genuinely new rows → both must append.
+        assert append_to_vintage_store(rest, tmp_path) == 2
+
+        pdir = tmp_path / "source=qcew" / "seasonally_adjusted=false"
+        stored = pl.read_parquet(str(pdir / "*.parquet"))
+        assert sorted(stored["size_class_code"].to_list()) == ["1", "2", "3"]
+
+    def test_append_keeps_distinct_ownership(self, tmp_path):
+        """Rows differing ONLY by ownership must NOT collapse on append.
+
+        QCEW carries total (ownership='total') and private (ownership='private')
+        for the SAME industry_code '00' — same 7-col legacy key, distinct
+        ownership. Under the legacy ukey the second append returns 0.
+        """
+        common = {"source": "qcew", "sa": False, "industry_code": "00", "industry_type": "total"}
+        total = pl.DataFrame(
+            [_store_row(**common, ownership="total", employment=150_000.0)],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+        private = pl.DataFrame(
+            [_store_row(**common, ownership="private", employment=128_000.0)],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+
+        assert append_to_vintage_store(total, tmp_path) == 1
+        assert append_to_vintage_store(private, tmp_path) == 1
+
+        pdir = tmp_path / "source=qcew" / "seasonally_adjusted=false"
+        stored = pl.read_parquet(str(pdir / "*.parquet"))
+        assert sorted(stored["ownership"].to_list()) == ["private", "total"]
+
+    def test_append_idempotent_on_null_size_columns(self, tmp_path):
+        """Regression: a CES row (ownership set, size_class_*=null) re-appended
+        must still dedup to 0. Adding nullable columns to the ukey breaks the
+        anti-join unless nulls_equal=True (null != null by default in polars).
+        """
+        row = pl.DataFrame(
+            [
+                _store_row(
+                    source="ces",
+                    sa=True,
+                    ownership="private",
+                    industry_code="05",
+                    employment=150_000.0,
+                )
+            ],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+
+        assert append_to_vintage_store(row, tmp_path) == 1
+        # Identical re-append must skip (null size_class_* compared as equal).
+        assert append_to_vintage_store(row, tmp_path) == 0

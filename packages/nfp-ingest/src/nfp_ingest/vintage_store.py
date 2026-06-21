@@ -714,6 +714,9 @@ def append_to_vintage_store(
         "geographic_code",
         "revision",
         "benchmark_revision",
+        "ownership",
+        "size_class_type",
+        "size_class_code",
     ]
 
     total_appended = 0
@@ -733,6 +736,7 @@ def append_to_vintage_store(
                 existing.select(ukey).unique(),
                 on=ukey,
                 how="anti",
+                nulls_equal=True,
             )
 
         if len(partition_df) == 0:
