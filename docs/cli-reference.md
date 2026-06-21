@@ -235,7 +235,7 @@ NFP_STORE_URI=s3://alt-nfp/store-rebuild \
 | `--scratch URI` | yes | Scratch store URI/path for the rebuild output. **Must not be the canonical store.** |
 | `--canonical URI` | yes | Canonical store URI/path to promote into after the rebuild. |
 | `--start-year YEAR` | no | First QCEW reference year (default: `2017`). |
-| `--end-year YEAR` | no | Last QCEW reference year, inclusive (default: current year). |
+| `--end-year YEAR` | no | Last QCEW reference year (inclusive). Default: current year (resolved by the data-acquire layer). |
 | `--no-promote` | no | Build the scratch store but skip the promote step. |
 
 **Rebuild pipeline** (in order):
@@ -243,7 +243,8 @@ NFP_STORE_URI=s3://alt-nfp/store-rebuild \
 1. Download CES triangular CSVs to a run-scoped temp directory (`cesvinall/`).
 2. Advance the release calendar (`vintage_dates.parquet`) for overlap parity.
 3. Build the CES panel (NSA + SA store-schema rows).
-4. Acquire QCEW levels and size-class data from the CEW API; build panels.
+4a. Acquire QCEW levels from the CEW API; build the levels panel.
+4b. Acquire QCEW size-class data (Q1-only); build the size-class panel. Skipped when the acquire returns 0 rows.
 5. Compose the combined panel.
 6. Write to the scratch store (`write_rebuild_store`, `allow_canonical=False`).
 7. Promote scratch → canonical (copy-then-delete per partition).
