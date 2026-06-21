@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -181,40 +182,42 @@ def build_rebuild(
     print("Done.")
 
 
+def _run_snapshot(as_of: date, grid_end: date | None = None) -> None:
+    """Write hash-pinned ModelData snapshot(s); plain helper (no Typer types)."""
+    from nfp_ingest.snapshots import snapshot_model_data
+
+    if as_of.day != 12:
+        raise ValueError("--as-of must fall on the 12th (day-12 convention)")
+
+    if grid_end is None:
+        dates = [as_of]
+    else:
+        dates = []
+        y, m = as_of.year, as_of.month
+        while date(y, m, 12) <= grid_end:
+            dates.append(date(y, m, 12))
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+
+    for d in dates:
+        path, digest = snapshot_model_data(d)
+        print(f"  {d}: {path} (hash {digest[:12]})")
+
+
 @app.command()
 def snapshot(
-    as_of: str = typer.Option(
-        ..., "--as-of", help="Knowledge cutoff, YYYY-MM-DD (day-12 convention)."
-    ),
+    as_of: str = typer.Option(..., "--as-of", help="Knowledge cutoff, YYYY-MM-DD (day-12)."),
     grid_end: str | None = typer.Option(
-        None,
-        "--grid-end",
-        help="If set, snapshot every month's 12th from --as-of through this date.",
+        None, "--grid-end", help="If set, snapshot every month's 12th from --as-of through here."
     ),
 ) -> None:
     """Write hash-pinned ModelData snapshot(s) for the given as-of date(s)."""
     from datetime import date as _date
 
-    from nfp_ingest.snapshots import snapshot_model_data
-
-    start = _date.fromisoformat(as_of)
-    if grid_end is None and start.day != 12:
-        raise typer.BadParameter(
-            "--as-of must fall on the 12th (day-12 convention)", param_hint="--as-of"
-        )
-    if grid_end is None:
-        dates = [start]
-    else:
-        end = _date.fromisoformat(grid_end)
-        dates = []
-        y, m = start.year, start.month
-        while _date(y, m, 12) <= end:
-            dates.append(_date(y, m, 12))
-            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-
-    for d in dates:
-        path, digest = snapshot_model_data(d)
-        print(f'  {d}: {path} (hash {digest[:12]})')
+    end = _date.fromisoformat(grid_end) if grid_end is not None else None
+    try:
+        _run_snapshot(_date.fromisoformat(as_of), end)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--as-of") from exc
 
 
 if __name__ == '__main__':
