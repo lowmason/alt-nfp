@@ -118,3 +118,31 @@ class TestFirstPrintUnchanged:
             wedge_after, on="ref_date", suffix="_after", how="inner"
         )
         assert (wcommon["wedge_change_k"] == wcommon["wedge_change_k_after"]).all()
+
+
+class TestCalendarNotAdvancedLoudFailure:
+    def test_update_errors_when_calendar_missing_target(self, tmp_path, monkeypatch):
+        from nfp_vintages.__main__ import app
+        from typer.testing import CliRunner
+
+        # advance_release_calendar is a no-op (stale/missing calendar); capture_ces_print
+        # raises because the tag join is empty for T (the Phase 4 loud-failure contract).
+        monkeypatch.setattr(
+            "nfp_vintages.calendar.advance_release_calendar", lambda: None
+        )
+
+        def _raise(as_of, *, store_path=None):
+            raise RuntimeError(
+                f"no vintage calendar rows for {as_of}; advance the calendar first"
+            )
+
+        monkeypatch.setattr("nfp_ingest.capture.capture_ces_print", _raise)
+
+        result = CliRunner().invoke(
+            app,
+            ["update", "--as-of", "2026-06-12", "--only", "ces",
+             "--no-refresh-calendar"],
+        )
+        # _run_update lets the capture exception propagate → Typer non-zero exit.
+        assert result.exit_code != 0
+        assert "calendar" in (result.output + str(result.exception)).lower()
