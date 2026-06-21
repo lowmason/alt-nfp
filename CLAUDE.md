@@ -86,8 +86,7 @@ to `main`.
   `build_store`/`mirror_store` against accidental clobber.
 - **Specs workflow**: implemented specs move from `specs/` to `specs/completed/`;
   implemented plans move from `specs/plans/` to `specs/plans/completed/`. Superseded
-  pre-port material (old todos, reference articles) lives in `specs/completed/todos/`
-  and `references/`.
+  pre-port material (old todos) lives in `specs/completed/todos/`.
 - The old repo at `~/Projects/alt_nfp` is the frozen **port reference** — read it
   to see what the JAX rewrite was ported from, never modify it. But it is a buggy
   WIP, **not an oracle**: a reference value is not automatically correct. When code
