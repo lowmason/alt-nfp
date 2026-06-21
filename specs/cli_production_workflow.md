@@ -284,8 +284,9 @@ A cheap, read-only health + knowability report. Built on `read_vintage_store`
 `transform_to_panel` (the expensive growth/censoring path) and **not** `views.py` (panel-grain,
 post-transform). Reports:
 
-- **Header:** resolved store URI + `REMOTE/LOCAL/CANONICAL` flags; loudly warn
-  "LOCAL FALLBACK — NFP_STORE_URI unset" (the `.env` gotcha).
+- **Header:** resolved store URI + `REMOTE/LOCAL/CANONICAL` flags; on a local store
+  loudly warn "LOCAL FALLBACK" (cause-agnostic — either the `.env` gotcha of an unset
+  `NFP_STORE_URI` or an explicit local `--store`) with the `NFP_STORE_URI` remote hint.
 - **Per `(source, seasonally_adjusted)`:** latest/earliest `ref_date`, row count, last capture
   (`max(vintage_date)`), distinct vintage count.
 - **Forward "UNCAPTURED" alarm:** per source, the latest ref_month BLS should have published as

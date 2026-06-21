@@ -102,6 +102,9 @@ def _ces_uncaptured(latest_ref: date | None, as_of: date) -> list[str]:
         try:
             v0 = get_ces_vintage_date(candidate, 0)
         except ValueError:
+            # Defensive: rev0 is always in the CES schedule, so this never fires
+            # for the current call. It guards the forward walk against an as_of
+            # that outruns the known revision calendar — stop rather than crash.
             break
         if v0 <= as_of:
             out.append(f"ces:{candidate.isoformat()}")
@@ -130,6 +133,9 @@ def _qcew_uncaptured(latest_ref: date | None, as_of: date) -> list[str]:
         try:
             v0 = get_qcew_vintage_date(ref_quarter, year, 0)
         except ValueError:
+            # Defensive (mirrors _ces_uncaptured): Q1–Q4 rev0 is always scheduled,
+            # so this never fires for the current call. It guards the forward walk
+            # against an as_of beyond the known calendar — stop rather than crash.
             break
         if v0 <= as_of:
             out.append(f"qcew:{year}-Q{q_num}")
@@ -192,9 +198,12 @@ def format_status(status: StoreStatus) -> str:
         flags.append("CANONICAL")
     lines.append(f"store: {status.store_uri}  [{'/'.join(flags)}]")
     if not status.is_remote:
+        # Cause-agnostic: a local store_uri arises either from NFP_STORE_URI being
+        # unset (the .env gotcha) OR from an explicit local `--store` — the path is
+        # printed above, so warn about the consequence without asserting the cause.
         lines.append(
-            "  WARNING: LOCAL FALLBACK — NFP_STORE_URI unset; reading the "
-            "local data/store, not the canonical S3 store."
+            "  WARNING: LOCAL FALLBACK — reading a local store, not the canonical "
+            "S3 store. (Set NFP_STORE_URI or pass --store s3://… for the remote store.)"
         )
 
     lines.append("")
@@ -261,5 +270,10 @@ def compute_status(
         per_partition=per_partition,
         uncaptured=uncaptured,
         missing_months=missing_months,
+        # Intentionally inert here: corrected-level drift is detected at capture
+        # time (capture.py → _run_update prints CORRECTED-LEVEL lines), not
+        # reconstructable from the store after the fact, so the read-only status
+        # report carries the field (rendered by format_status when populated by a
+        # future persisted-correction-log source) but never fills it itself.
         corrected=[],
     )

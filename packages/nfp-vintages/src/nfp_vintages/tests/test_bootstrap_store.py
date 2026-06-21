@@ -127,3 +127,33 @@ def test_bootstrap_refuses_canonical_uri_as_scratch(monkeypatch, tmp_path):
                 "--end-year", "2024",
             ]
         )
+
+
+def test_promote_rejects_mixed_backends(tmp_path):
+    """scratch and canonical must share a backend — a remote scratch + local
+    canonical (or vice versa) would misroute the cutover, so it aborts loudly.
+
+    Routes remote-scratch/local-canonical (which without the guard falls through
+    to _promote_local, no network) and asserts the distinctive 'share a backend'
+    message — proving the guard fired, not the generic empty-scratch exit.
+    """
+    boot = _load_bootstrap()
+    with pytest.raises(SystemExit) as exc:
+        boot._promote_scratch_to_canonical(
+            "s3://alt-nfp/store-rebuild", str(tmp_path / "store")
+        )
+    assert "share a backend" in str(exc.value)
+
+
+def test_promote_local_refuses_empty_scratch_file(tmp_path):
+    """A zero-byte parquet in scratch aborts the promote before any orphan delete
+    (a truncated/empty copy is the canonical-store-corruption class this guards)."""
+    boot = _load_bootstrap()
+    scratch = tmp_path / "store-rebuild"
+    canonical = tmp_path / "store"
+    part = scratch / "source=ces" / "seasonally_adjusted=true"
+    part.mkdir(parents=True)
+    (part / "v0.parquet").write_bytes(b"")  # zero-byte scratch file
+    with pytest.raises(SystemExit) as exc:
+        boot._promote_local(scratch, canonical)
+    assert "empty" in str(exc.value)

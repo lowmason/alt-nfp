@@ -123,9 +123,12 @@ def _promote_local(scratch: Path, canonical: Path) -> None:
     canonical.mkdir(parents=True, exist_ok=True)
     # 1) copy rebuild files in (under their rebuilt names).
     for rel in rel_keys:
+        payload = (scratch / rel).read_bytes()
+        if not payload:  # a zero-byte parquet would silently corrupt canonical.
+            sys.exit(f"FATAL: scratch file {scratch / rel} is empty — refusing promote.")
         dst = canonical / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes((scratch / rel).read_bytes())
+        dst.write_bytes(payload)
     # 2) delete old-named orphans (anything canonical-side not in the new set).
     new_set = set(rel_keys)
     for p in sorted(canonical.glob("**/*.parquet")):
@@ -140,15 +143,18 @@ def _promote_local(scratch: Path, canonical: Path) -> None:
 
 def _promote_remote(scratch_uri: str, canonical_uri: str) -> None:
     fs = _s3fs()
-    src = scratch_uri.removeprefix("s3://").rstrip("/")
-    dst = canonical_uri.removeprefix("s3://").rstrip("/")
+    src = scratch_uri.removeprefix("s3://").removeprefix("s3a://").rstrip("/")
+    dst = canonical_uri.removeprefix("s3://").removeprefix("s3a://").rstrip("/")
     src_keys = _s3_keys(fs, src)
     if not src_keys:
         sys.exit(f"FATAL: scratch store {scratch_uri} is empty — refusing promote.")
     new_dst = {k.replace(src, dst, 1): k for k in src_keys}  # dst -> src
     # 1) copy rebuild files in (new names).
     for dst_key, src_key in new_dst.items():
-        fs.pipe_file(dst_key, fs.cat_file(src_key))
+        payload = fs.cat_file(src_key)
+        if not payload:  # a zero-byte parquet would silently corrupt canonical.
+            sys.exit(f"FATAL: scratch file s3://{src_key} is empty — refusing promote.")
+        fs.pipe_file(dst_key, payload)
     # 2) delete old-named orphans.
     for k in _s3_keys(fs, dst):
         if k not in new_dst:
@@ -162,6 +168,13 @@ def _promote_remote(scratch_uri: str, canonical_uri: str) -> None:
 
 def _promote_scratch_to_canonical(scratch_uri: str, canonical_uri: str) -> None:
     """Copy-then-delete cutover from *scratch* to *canonical* (no overwrite-mirror)."""
+    if _is_remote(scratch_uri) != _is_remote(canonical_uri):
+        # A remote-scratch/local-canonical mix (or vice versa) would misroute the
+        # cutover (local glob of an s3:// path, or an s3 list of a local path).
+        sys.exit(
+            f"FATAL: scratch ({scratch_uri}) and canonical ({canonical_uri}) must "
+            "share a backend — both s3:// or both local."
+        )
     if _is_remote(canonical_uri):
         _promote_remote(scratch_uri, canonical_uri)
     else:
