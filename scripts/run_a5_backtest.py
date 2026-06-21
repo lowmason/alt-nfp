@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from dotenv import load_dotenv
@@ -67,12 +68,27 @@ def _claims_momentum_k() -> dict[date, float]:
             for r in monthly.iter_rows(named=True)}
 
 
-def _read_json(p: Path) -> dict:
+from nfp_lookups.paths import is_remote, output_root, storage_options_for  # noqa: E402
+
+
+def _read_json(p: Path | Any) -> dict:
     return json.loads(p.read_text())
 
 
-def _write_json(p: Path, obj: dict) -> None:
+def _write_json(p: Path | Any, obj: dict) -> None:
     p.write_text(json.dumps(obj, indent=2, sort_keys=True, default=str) + "\n")
+
+
+def _np_savez(path: Path | Any, **arrays) -> None:
+    """Write arrays to an npz via path.open() — works for both local and s3:// UPath."""
+    with path.open("wb") as fh:
+        np.savez(fh, **arrays)
+
+
+def _np_load(path: Path | Any) -> dict:
+    """Load an npz eagerly (returns a plain dict) via path.open() — s3:// safe."""
+    with path.open("rb") as fh, np.load(fh, allow_pickle=False) as z:
+        return {k: z[k] for k in z.files}
 
 
 def cmd_snapshot(root: Path) -> None:
@@ -92,7 +108,8 @@ def cmd_snapshot(root: Path) -> None:
     from nfp_lookups.paths import VINTAGE_STORE_PATH
     from nfp_vintages.a5 import near_release_asof
 
-    root.mkdir(parents=True, exist_ok=True)
+    if not is_remote(root):
+        root.mkdir(parents=True, exist_ok=True)
     manifest_path = root / "grid_manifest.json"
     manifest: dict = _read_json(manifest_path) if manifest_path.exists() else {"regimes": {}}
 
@@ -243,7 +260,7 @@ def cmd_batched(root: Path) -> None:
         entries: dict = {}
         for i, (key, _t) in enumerate(targets):
             arrays, meta = batch.date_arrays(i)
-            np.savez(root / f"{rname}_batched_{key}.npz", **arrays)
+            _np_savez(root / f"{rname}_batched_{key}.npz", **arrays)
             entries[key] = meta
         _write_json(root / f"{rname}_batched_manifest.json",
                     {"entries": entries, "batch_wall_seconds": round(batch.wall_seconds, 1)})
@@ -313,19 +330,19 @@ def cmd_score(root: Path) -> int:
             calib: dict[str, tuple] = {}
             npz_path = root / f"{rname}_batched_{key}.npz"
             if npz_path.exists() and actual is not None:
-                with np.load(npz_path) as z:
-                    if "nowcast_pred_draws" in z:
-                        prev_index = float(t["prev_index"])
-                        cd = change_draws_k(
-                            z["nowcast_pred_draws"],
-                            prev_index=prev_index, idx_to_level=idx_to_level,
+                z = _np_load(npz_path)
+                if "nowcast_pred_draws" in z:
+                    prev_index = float(t["prev_index"])
+                    cd = change_draws_k(
+                        z["nowcast_pred_draws"],
+                        prev_index=prev_index, idx_to_level=idx_to_level,
+                    )
+                    for _name, _draws in (("model", cd), ("model_5a", cd - delta_k)):
+                        calib[_name] = (
+                            interval_coverage(_draws, actual, 0.80),
+                            interval_coverage(_draws, actual, 0.90),
+                            crps_sample(_draws, actual),
                         )
-                        for _name, _draws in (("model", cd), ("model_5a", cd - delta_k)):
-                            calib[_name] = (
-                                interval_coverage(_draws, actual, 0.80),
-                                interval_coverage(_draws, actual, 0.90),
-                                crps_sample(_draws, actual),
-                            )
             providers_present = bool(t.get("n_providers", 0))
             # month_type keys are month-start (day=1) — ref is the day-12 model
             # date, so normalize before lookup (same day-12-vs-day-1 alignment the
@@ -369,7 +386,7 @@ def cmd_score(root: Path) -> int:
         & ~pl.col("ref_month").dt.year().is_in([2020, 2021])
         & ~pl.col("shutdown_flag")
     )
-    df.write_parquet(root / "a5_results.parquet")
+    df.write_parquet(str(root / "a5_results.parquet"), storage_options=storage_options_for(root))
 
     venues = sorted({v for v in df["venue"].unique() if v is not None})
     lines = ["# A5 backtest report", "",
@@ -455,8 +472,9 @@ def cmd_score(root: Path) -> int:
                     f"| {mm['mae']:,.0f}k | {mm['rmse']:,.0f}k |") if mm["n"] else \
                    f"| {rname} | model | 0 | — | — | — |"
             qlines.append(cell)
-        with (root / "a5_report.md").open("a") as fh:
-            fh.write("\n".join(qlines) + "\n")
+        report_path = root / "a5_report.md"
+        existing = report_path.read_text() if report_path.exists() else ""
+        report_path.write_text(existing + "\n".join(qlines) + "\n")
 
     return 0
 
@@ -471,7 +489,6 @@ def cmd_total(root: Path) -> None:
     """
     from datetime import date
 
-    import numpy as np
     from nfp_ingest.wedge_data import build_wedge_model_data
     from nfp_model.wedge import fit_wedge, wedge_pred_draws
     from nfp_vintages.assembly import assemble_total, score_total
@@ -496,7 +513,7 @@ def cmd_total(root: Path) -> None:
             # private leg: persisted nowcast_pred_draws from the batched private fit.
             # Guard the key (mirrors cmd_score): a private fit may lack the
             # predictive draws — skip the target rather than KeyError the whole run.
-            batched = np.load(root / f"{rname}_batched_{key}.npz")
+            batched = _np_load(root / f"{rname}_batched_{key}.npz")
             if "nowcast_pred_draws" not in batched:
                 print(f"[{rname}] {key}: no nowcast_pred_draws — skipping", flush=True)
                 continue
@@ -527,7 +544,7 @@ def cmd_total(root: Path) -> None:
 
 def main() -> None:
     mode, root_arg = sys.argv[1], sys.argv[2]
-    root = Path(root_arg).resolve()
+    root = output_root(root_arg)
     {"snapshot": cmd_snapshot, "batched": cmd_batched, "total": cmd_total}.get(
         mode, lambda r: None
     )(root)

@@ -492,7 +492,7 @@ SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
 > not have a .read() method"); fixed by `str()`-ing the path at 12 Tier-A I/O sites (commit `85fcc7b`,
 > matches the store's `str(...)` pattern). `NFP_PROVIDERS_URI` skipped per maintainer (skip-3).
 
-### Task 11: fix the two `data/`-hardcoders; document the script contract — **`_t8` DONE (`55a20b5`); `_05` left as-is (see Phase 3 status)**
+### Task 11: fix the two `data/`-hardcoders; document the script contract — **`_t8` DONE (`55a20b5`); `_05` left as-is (see Phase 3 status); `run_a4/a5_backtest` NOW DONE (see below)**
 
 **Files:**
 - Modify: `scripts/_05_convergence_fit.py:61` (`BASELINE_DIR`)
@@ -503,10 +503,25 @@ SAE is currently disabled (per CLAUDE.md), so this is low-risk hygiene.
 - [ ] **Step 1:** `_05_convergence_fit.py`: take the baseline output root from `sys.argv`/env
   (default `tempfile.mkdtemp` or an `s3://` URI) instead of the hardcoded
   `"data/05_convergence_baseline"`; if an `s3://` target, write the `.npz`/json via UPath.
-- [ ] **Step 2:** The argv-driven scripts (`run_a4/a5_backtest`, `run_a3_parity`,
-  `run_tier1_diagnostics`, `generate_*_golden`, `regen/stage_golden`) need **no code change** —
-  document in each module docstring (and `CLAUDE.md`) that the output root must be a `/tmp`
-  path or an `s3://` URI on Bloomberg, never `data/`.
+- [x] **Step 2:** ~~The argv-driven scripts (`run_a4/a5_backtest`, ...) need **no code change**~~
+  — **CORRECTION (2026-06-21):** `run_a5_backtest.py` and `run_a4_backtest.py` DID need code
+  changes to accept `s3://` output roots. The earlier "no code change" assumption was wrong —
+  those scripts called `np.savez(path)` / `np.load(path)` (which ignore fsspec and break on a
+  UPath), used `df.write_parquet(UPath)` (Polars bug: "Object does not have a .read() method"),
+  called `root.mkdir()` unconditionally (s3 has no dirs), and used append-mode file writes (s3
+  does not support append). The following changes were made (commit tagged in CLAUDE.md):
+  - `nfp_lookups.paths`: added `output_root(arg)` — resolves local str → `pathlib.Path`,
+    `s3://` → credentialed `UPath`; exported from `nfp_lookups/__init__.py`.
+  - Both scripts: `main()` now calls `output_root(root_arg)` instead of `Path(root_arg).resolve()`.
+  - Both scripts: `np.savez` → `_np_savez(path, **arrays)` (writes via `path.open("wb")`).
+  - Both scripts: `np.load(path)` → `_np_load(path)` (reads via `path.open("rb")`, returns plain
+    dict — avoids the lazy NpzFile + handle-closes-at-block-exit issue).
+  - Both scripts: `df.write_parquet(UPath)` → `df.write_parquet(str(path), storage_options=...)`.
+  - Both scripts: `root.mkdir(...)` → guarded `if not is_remote(root): root.mkdir(...)`.
+  - `run_a5_backtest.py`: `with (root / "a5_report.md").open("a")` (append-mode, s3-incompatible)
+    → read-modify-write: `read_text()` existing content + concatenate + `write_text()` once.
+  - Test: `packages/nfp-vintages/src/nfp_vintages/tests/test_backtest_s3_root.py` — no-network
+    coverage for `output_root()` type contract and `_np_savez`/`_np_load` through `FakeRemoteFile`.
 - [ ] **Step 3: Commit** — `git commit -m "refactor(scripts): de-hardcode data/ in _05_convergence_fit; document /tmp|s3 output contract"`
 
 ### Task 12: docs, `.env.example`, and MinIO end-to-end verification — **DONE (`55a20b5`,`9c74e6e`; seed + MinIO verify 2026-06-20; UPath→str fix `85fcc7b`)**
