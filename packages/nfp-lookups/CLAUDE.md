@@ -12,6 +12,11 @@ This is the foundation package with no internal dependencies. It provides:
 - **Benchmark revisions**: Historical actual BLS benchmark revision amounts
 - **Path config**: Canonical data directory layout (`BASE_DIR`, `DATA_DIR`, `STORE_DIR`, etc.)
 - **Provider config**: `ProviderConfig` dataclass, `CYCLICAL_INDICATORS` definitions
+- **Government interventions** (`government.py`, Track B): `GovIntervention` dataclass +
+  the **announcement-dated** `KNOWN_INTERVENTIONS` table, `get_known_interventions_as_of(as_of)`
+  (the lookahead-safe censor — a DATE comparison), `intervention_column()` (change-space
+  `pulse`/`box`/`tc` shape encoders), and `GOVERNMENT_INDICATORS` (FRED `90–93` SA entries,
+  diagnostics-only). Reference data for the government-wedge model. Spec: `specs/completed/government_wedge.md`.
 
 ## Tech Stack
 
@@ -23,7 +28,7 @@ This is the foundation package with no internal dependencies. It provides:
 
 ```bash
 # Run lookups tests
-pytest tests/
+pytest src/nfp_lookups/tests/
 
 # Lint
 ruff check src/nfp_lookups/
@@ -43,7 +48,8 @@ src/nfp_lookups/
 ├── geography.py            # FIPS_TO_DIVISION, FIPS_TO_REGION, STATES, REGION_NAMES, etc.
 ├── revision_schedules.py   # CES_REVISIONS, QCEW_REVISIONS, get_noise_multiplier, vintage date helpers
 ├── benchmark_revisions.py  # BENCHMARK_REVISIONS dict (historical actuals)
-└── provider_config.py      # ProviderConfig dataclass, CYCLICAL_INDICATORS
+├── provider_config.py      # ProviderConfig dataclass, CYCLICAL_INDICATORS
+└── government.py           # GovIntervention, KNOWN_INTERVENTIONS, intervention encoders (Track B)
 ```
 
 ## Code Style
@@ -61,11 +67,12 @@ src/nfp_lookups/
 - **Schemas are Polars-native**: defined as `dict[str, pl.DataType]` for use with `pl.DataFrame.cast()` and validation.
 - **Paths** (`paths.py`): every path constant derives from `BASE_DIR`. Discovery precedence: `NFP_BASE_DIR` env var (set before first import) → walk up to the first dir containing `packages/` + `pyproject.toml` → fixed-depth fallback for editable installs. Includes pipeline artifact paths (`RELEASE_DATES_PATH`, `VINTAGE_DATES_PATH`, `RELEASES_DIR`, `VINTAGE_STORE_PATH`) — other packages must import paths from here, never define their own.
 - **Store location** (`paths.py`): `VINTAGE_STORE_PATH` is the switch point — a `upath.UPath` (S3 via s3fs) when `NFP_STORE_URI` is set (with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_ENDPOINT_URL`, region default `us-east-1`), else the local `STORE_DIR`. `storage_options_for(path)` builds the Polars/object_store options for a remote path (`aws_allow_http` derived from an `http://` endpoint); `is_remote(path)` guards directory-only operations like `mkdir`. Env is read at import time.
+- **Persistent non-store roots** (`paths.py`, plans/15): `data_location()`/`NFP_DATA_URI` roots the indicators, competitors, and vintage/release-date schedules (so `INDICATORS_DIR`/`COMPETITORS_DIR`/`RELEASE_DATES_PATH`/`VINTAGE_DATES_PATH` are S3-capable); `providers_location()`/`NFP_PROVIDERS_URI` roots `PROVIDERS_DIR` (a **separate** store, not under `NFP_DATA_URI`). `upath_for(uri)` is the shared credentialed-`UPath` builder behind every `*_location()` helper. Each unset ⇒ local `DATA_DIR`. Rebuild scratch (`DOWNLOADS_DIR`/`INTERMEDIATE_DIR`) stays local and is `tempfile`'d at the call site — never routed to S3.
 - **Series-ID grammar** (`series_ids.py`): `build_series_id()` / `parse_series_id()` for CE/SM/EN. Pure reference data; `nfp_download.bls` re-exports it. This package imports nothing from other `nfp_*` packages — keep it that way.
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
+Tests live in `src/nfp_lookups/tests/` within this package:
 - `test_lookups.py` — industry hierarchy & revision schedule tests
 - `test_series_ids.py` — BLS series-ID grammar (registry, build/parse) tests
 - `test_paths.py` — base-dir discovery (env override, marker walk, fallback), store location (`NFP_STORE_URI` → UPath, `storage_options_for`), derived layout

@@ -22,7 +22,7 @@ Generic download layer — no data transformation, just fetching. Provides:
 
 ```bash
 # Run download tests
-pytest tests/
+pytest src/nfp_download/tests/
 
 # Lint
 ruff check src/nfp_download/
@@ -46,6 +46,7 @@ src/nfp_download/
 └── release_dates/
     ├── __init__.py
     ├── scraper.py           # Async scraper for BLS publication schedule HTML pages
+    ├── feed.py              # parse_feed()/fetch_feed() — BLS empsit/cewqtr RSS (curl_cffi impersonation, for watch)
     └── parser.py            # Parse scraped HTML into release date records
 ```
 
@@ -58,7 +59,7 @@ src/nfp_download/
 ## Key Patterns
 
 - **FRED client** (`fred.py`): `fetch_fred_series(series_id)` returns a Polars DataFrame with `(ref_date, value)`. Uses httpx with exponential-backoff retry. Requires `FRED_API_KEY` env var.
-- **BLS HTTP client** (`bls/_http.py`): `BLSHttpClient` handles CSV downloads from BLS. No internal dependencies beyond `_programs.py` for series ID construction.
+- **BLS HTTP client** (`bls/_http.py`): `BLSHttpClient` handles CSV downloads from BLS. No internal dependencies beyond `_programs.py` for series ID construction. `cache_dir` defaults to `None` ⇒ a per-process `tempfile.mkdtemp` (atexit-cleaned), so it never writes under the CWD/`./data` on Bloomberg's container (plans/15 Task 8); pass an explicit `cache_dir=` to persist across runs.
 - **Series-ID grammar**: `build_series_id()` / `parse_series_id()` live in `nfp_lookups.series_ids` (pure reference data); `bls/_programs.py` re-exports them for back-compat.
 - **Release date scraper** (`release_dates/scraper.py`): async scraper for BLS schedule HTML. Transport is curl_cffi `AsyncSession(impersonate='chrome')` via `create_session()` — www.bls.gov (Akamai) fingerprints TLS, so httpx/plain curl get 403 regardless of headers. Callers catch the re-exported `FetchError`. Config values (URLs, start year, output dirs) should be passed as parameters, not imported from other packages.
 - **Sync www.bls.gov transport** (`client.py`): `create_impersonating_session()` is the sync counterpart of the scraper's `create_session()`, used by nfp-vintages for the CES vintage zip and QCEW revisions CSV. `get_with_retry()` accepts either an `httpx.Client` or this session (same `get`/`raise_for_status` surface). Non-www.bls.gov hosts (api.bls.gov, data.bls.gov, FRED) stay on httpx.
@@ -68,11 +69,11 @@ src/nfp_download/
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
-- `tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
-- `tests/bls/test_http.py` — BLS HTTP client tests
-- `tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
-- `tests/bls/test_bulk_network.py` — live www.bls.gov bulk-download transport tests (network-marked)
-- `tests/release_dates/test_scraper_network.py` — live BLS scraper transport tests (network-marked)
-- `tests/test_fred.py` — FRED client tests
-- `tests/test_client.py` — HTTP client retry logic tests
+Tests live in `src/nfp_download/tests/` within this package:
+- `src/nfp_download/tests/bls/test_downloads.py` — BLS download integration tests (network-marked)
+- `src/nfp_download/tests/bls/test_http.py` — BLS HTTP client tests
+- `src/nfp_download/tests/bls/test_programs.py` — re-export smoke test (grammar tests live in nfp-lookups)
+- `src/nfp_download/tests/bls/test_bulk_network.py` — live www.bls.gov bulk-download transport tests (network-marked)
+- `src/nfp_download/tests/release_dates/test_scraper_network.py` — live BLS scraper transport tests (network-marked)
+- `src/nfp_download/tests/test_fred.py` — FRED client tests
+- `src/nfp_download/tests/test_client.py` — HTTP client retry logic tests

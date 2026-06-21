@@ -12,10 +12,13 @@ adapted for alt-nfp with added QCEW CSV support.
 
 from __future__ import annotations
 
+import atexit
 import csv
 import io
 import logging
 import os
+import shutil
+import tempfile
 import time
 from datetime import date
 from typing import Any
@@ -123,8 +126,13 @@ class BLSHttpClient:
     api_key : str or None
         BLS API registration key. Enables v2 API with higher rate limits
         and 20-year windows. Register at https://data.bls.gov/registrationEngine/
-    cache_dir : str
-        Local directory for cached downloads. Defaults to ``'.cache/bls'``.
+    cache_dir : str or None
+        Local directory for cached downloads. ``None`` (the default) selects a
+        per-process temp dir under the system tempdir, auto-removed at
+        interpreter exit — container-safe on Bloomberg, which forbids writes
+        outside ``/tmp``/S3 (plans/15 Tier C; the cache is rebuild scratch, so
+        per-process is fine — re-download is accepted). Pass an explicit path to
+        persist the cache across runs (e.g. for local dev iteration).
     cache_ttl : int
         Cache time-to-live in seconds. Defaults to 86400 (24 hours).
     '''
@@ -137,10 +145,15 @@ class BLSHttpClient:
     def __init__(
         self,
         api_key: str | None = None,
-        cache_dir: str = '.cache/bls',
+        cache_dir: str | None = None,
         cache_ttl: int = 86_400,
     ) -> None:
         self.api_key = api_key
+        if cache_dir is None:
+            # Container-safe default: no CWD/./data writes on Bloomberg.  Use a
+            # per-process temp dir, cleaned up at interpreter exit.
+            cache_dir = tempfile.mkdtemp(prefix='altnfp-httpcache-')
+            atexit.register(shutil.rmtree, cache_dir, ignore_errors=True)
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl
         self.session = httpx.Client(headers={'User-Agent': _build_user_agent()}, timeout=60.0)

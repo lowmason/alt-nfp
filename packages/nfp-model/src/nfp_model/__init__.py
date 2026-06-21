@@ -16,12 +16,14 @@ from .data import from_snapshot, model_inputs
 from .model import DETERMINISTIC_SITES, nfp_model
 from .nowcast import ces_sa_predictive, nowcast_summary
 from .sampling import FitResult, fit_model
+from .wedge import WEDGE_DETERMINISTIC_SITES, fit_wedge, wedge_model, wedge_pred_draws
 
 _numpyro.enable_x64()
 
 __all__ = [
     "DETERMINISTIC_SITES",
     "PRESETS",
+    "WEDGE_DETERMINISTIC_SITES",
     "BatchedInputs",
     "BatchFitResult",
     "FitResult",
@@ -30,9 +32,12 @@ __all__ = [
     "ces_sa_predictive",
     "fit_model",
     "fit_model_batch",
+    "fit_wedge",
     "from_snapshot",
     "model_inputs",
     "nfp_model",
     "nowcast_summary",
     "pad_model_inputs",
+    "wedge_model",
+    "wedge_pred_draws",
 ]

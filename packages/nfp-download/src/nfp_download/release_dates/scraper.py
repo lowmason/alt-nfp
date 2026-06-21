@@ -247,6 +247,8 @@ async def download_all(
     entries: list[ReleaseEntry],
     publication_name: str,
     concurrency: int = 3,
+    *,
+    out_root: Path | None = None,
 ) -> list[Path]:
     """Download all release HTMLs for a publication; skip existing files.
 
@@ -259,13 +261,19 @@ async def download_all(
     concurrency : int
         Maximum concurrent downloads (kept low — BLS usage policy asks
         bots not to interfere with interactive traffic).
+    out_root : Path or None
+        Root directory under which ``<out_root>/<publication_name>/`` HTML is
+        written. ``None`` ⇒ the default local ``RELEASES_DIR``. Callers that
+        must not write under ``./data`` (the Bloomberg container contract,
+        plans/15 — e.g. ``advance_release_calendar`` on the ``update`` hot path)
+        pass a ``tempfile`` scratch root.
 
     Returns
     -------
     list[Path]
         Paths to downloaded or already-existing release HTML files.
     """
-    out_dir = RELEASES_DIR / publication_name
+    out_dir = (out_root or RELEASES_DIR) / publication_name
     semaphore = asyncio.Semaphore(concurrency)
 
     async with create_session() as session:

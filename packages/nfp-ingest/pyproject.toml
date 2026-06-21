@@ -21,3 +21,4 @@ nfp-download = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfp_ingest"]
+exclude = ["src/nfp_ingest/tests"]

@@ -8,7 +8,7 @@ Builds the censored CES+QCEW panels (one per as-of date) and one fixture per
 configured payroll provider using the **old** repo's code and local store,
 then writes parquets + ``a1_manifest.json`` into the staging dir given as
 argv[1]. Read-only with respect to the old repo. See
-``plans/3-golden_masters.md``.
+``specs/plans/completed/3-golden_masters.md``.
 """
 
 import hashlib

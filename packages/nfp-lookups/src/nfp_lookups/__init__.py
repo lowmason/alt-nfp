@@ -46,12 +46,17 @@ from .industry import (
 )
 from .paths import (
     BASE_DIR,
+    COMPETITORS_DIR,
     DATA_DIR,
     DOWNLOADS_DIR,
     INDICATORS_DIR,
     INTERMEDIATE_DIR,
     OUTPUT_DIR,
+    PROVIDERS_DIR,
     STORE_DIR,
+    data_location,
+    providers_location,
+    upath_for,
 )
 from .provider_config import (
     CYCLICAL_INDICATORS_DEFAULT,

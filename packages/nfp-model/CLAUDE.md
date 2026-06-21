@@ -7,7 +7,17 @@ ModelData arrays in, posterior out.
 
 Faithful translation of the frozen PyMC reference
 (`~/Projects/alt_nfp/packages/nfp-model-hmc`), gated by A3 posterior parity
-(`plans/5-a3_model_parity.md`). Provides:
+(`specs/plans/5-a3_model_parity.md`).
+
+**Parity here is port-fidelity — the JAX model reproduces the reference's
+posterior — not correctness: the reference is a WIP, and model correctness is
+validated against external ground truth (see `specs/plans/0`). A3 parity is banked,
+but a correctness-driven change to a pinned default is legitimate behind a new
+baseline.** (The Track-B government-wedge model `wedge.py` is the exception to the
+A3 frame: it is a *separate* model, not a translation of the reference, and is
+A3-parity-free — see Provides below.)
+
+Provides:
 - **Model** (`model.py`): `nfp_model(data, priors)` — non-centered AR(1)
   latent with era means, Fourier-GRW seasonal, structural birth/death with
   gated cyclical covariates (claims/jolts), QCEW Student-t anchor with
@@ -33,12 +43,25 @@ Faithful translation of the frozen PyMC reference
   `fit_model_batch(...)` fits the whole grid in one `jit(vmap(MCMC.run))`
   program (vectorized inner chains) and reduces each date *in graph* to
   the A3 fixture schema (`BatchFitResult.date_arrays(i)`).
+- **Government wedge** (`wedge.py`, Track B — a **separate, standalone** model):
+  a NumPyro change-space STS for the government wedge
+  `published_00 − published_05` — constant drift + shrunk monthly-seasonal block
+  + an announcement-priored intervention layer + masked iid-Normal likelihood.
+  Exposes `wedge_model`, `fit_wedge`, `wedge_pred_draws`,
+  `WEDGE_DETERMINISTIC_SITES` (all re-exported from `__init__`). Honors the import
+  boundary (jax/numpyro/numpy only) and **reimplements the mask idiom inline** —
+  it does **not** import `model._maybe_mask`. It does **not** touch
+  `model.py`/`nowcast.py` and needs **no A3 parity baseline** (a new model, not a
+  parity-gated change). Its predictive draws are convolved with the private
+  nowcast into a Total-NFP posterior by `nfp_vintages.assembly.assemble_total`
+  (harness side; `nfp-model` stays assembly-free). Spec:
+  `specs/completed/government_wedge.md`; plan: `specs/plans/completed/14`.
 
 ## Hard boundary
 
 **`nfp_model` imports only jax, numpyro, numpy** — no `nfp_*` packages, no
 polars, no store access, no plotting. Enforced by
-`tests/test_model_unit.py::TestBoundary`. Provider configs are duck-typed
+`src/nfp_model/tests/test_model_unit.py::TestBoundary`. Provider configs are duck-typed
 (dataclass or dict). Importing the package enables **JAX float64 globally**
 (`numpyro.enable_x64()`): the parity contract is double precision.
 
@@ -53,9 +76,9 @@ polars, no store access, no plotting. Enforced by
 ```bash
 pytest packages/nfp-model -m "not slow"      # fast structure/intake tests
 pytest packages/nfp-model -m slow            # MCMC smoke incl. vmapped batch (~4 min)
-NFP_A3_PARITY=1 pytest packages/nfp-model/tests/test_parity_golden.py  # minutes
+NFP_A3_PARITY=1 pytest packages/nfp-model/src/nfp_model/tests/test_parity_golden.py  # minutes
 
-# Full A3 parity (14 fits; restartable; see plans/5)
+# Full A3 parity (14 fits; restartable; see specs/plans/5)
 uv run python scripts/run_a3_parity.py fit data/golden_a3_staging data/a3
 uv run python scripts/run_a3_parity.py compare data/golden_a3_staging data/a3
 
@@ -80,9 +103,12 @@ uv run python scripts/run_a4_backtest.py compare  data/backtests   # report + ex
   ar1), uniform-structure assertions, mask bookkeeping
 - `test_batch_smoke.py` — vmapped batch vs serial fits (`slow`): scalar/
   path/nowcast agreement under the A3 criteria, batch seed reproducibility
+- `test_wedge_model.py` — wedge model sites/shapes/log-density + change-space
+  intervention-shape encodings on synthetic data (no store, no MCMC)
+- `test_wedge_fit.py` — wedge `fit_wedge`/`wedge_pred_draws` smoke (`slow`)
 - `test_parity_golden.py` — single-fixture parity spot check vs
   `s3://alt-nfp/golden/a3` (opt-in: `NFP_A3_PARITY=1` + store env;
-  manifest committed in `tests/golden/`)
+  manifest committed in `src/nfp_model/tests/golden/`)
 - `synthetic_data.py` — shared synthetic ModelData builders (not a test)
 
 ## Key Patterns

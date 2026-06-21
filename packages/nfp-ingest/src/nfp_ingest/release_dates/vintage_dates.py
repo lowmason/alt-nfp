@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import polars as pl
-from nfp_lookups.paths import RELEASE_DATES_PATH, VINTAGE_DATES_PATH
+from nfp_lookups.paths import RELEASE_DATES_PATH, VINTAGE_DATES_PATH, is_remote, storage_options_for
 
 CES_MONTHLY_REVISIONS = [0, 1, 2]
 # SAE_MONTHLY_REVISIONS = [0, 1]
@@ -346,7 +346,7 @@ def build_vintage_dates(release_dates_path: Path | None = None) -> pl.DataFrame:
         revision, benchmark_revision).
     """
     path = release_dates_path or RELEASE_DATES_PATH
-    df = pl.read_parquet(path)
+    df = pl.read_parquet(str(path), storage_options=storage_options_for(path))
 
     # Merge supplemental + pre-scrape release dates for gaps
     all_supplemental = (
@@ -416,6 +416,9 @@ def build_and_save(release_dates_path: Path | None = None) -> pl.DataFrame:
         The built vintage_dates DataFrame.
     """
     df = build_vintage_dates(release_dates_path)
-    VINTAGE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(VINTAGE_DATES_PATH)
+    if not is_remote(VINTAGE_DATES_PATH):
+        VINTAGE_DATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(
+        str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+    )
     return df

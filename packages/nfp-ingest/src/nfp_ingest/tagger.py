@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 
 import polars as pl
-from nfp_lookups.paths import VINTAGE_DATES_PATH
+from nfp_lookups.paths import VINTAGE_DATES_PATH, storage_options_for
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def tag_estimates(
             f'Vintage dates file not found: {path}. '
             'Run the release_dates pipeline first to create it.'
         )
-    vintage_df = pl.read_parquet(path)
+    vintage_df = pl.read_parquet(path, storage_options=storage_options_for(path))
     lookup = latest_vintage_lookup(vintage_df, publication)
 
     # Drop existing vintage columns to avoid duplicates

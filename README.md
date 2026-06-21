@@ -5,10 +5,12 @@ data vintages: CES survey prints, QCEW administrative anchors, private payroll
 provider microdata, and cyclical indicators, combined with strict as-of
 censoring so every backtest sees only what was knowable on the day.
 
-This is the v2 repo: the data layer is ported from a working reference
-implementation, and the model layer is being rewritten in JAX (dynamax /
-NumPyro) behind parity gates. See [docs/](docs/) and [specs/](specs/) for the
-design record.
+This is the v2 repo: the data layer is ported from a prior reference
+implementation, and the model layer is rewritten in JAX/NumPyro. The port was
+gated against the old repo for fidelity, but that repo is a work-in-progress,
+not validated truth — correctness is validated against external ground truth
+(published BLS / ALFRED real-time vintages). See [docs/](docs/) and
+[specs/](specs/) for the design record.
 
 ## Layout
 

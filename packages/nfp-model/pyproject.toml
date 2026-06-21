@@ -16,3 +16,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfp_model"]
+exclude = ["src/nfp_model/tests"]

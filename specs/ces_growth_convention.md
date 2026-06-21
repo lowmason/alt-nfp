@@ -1,8 +1,8 @@
 # CES growth conventions in the vintage store — analysis for A5
 
 Status: **analysis only, no code changes**. Feeds the A5 evaluation-convention
-decision flagged in `plans/6-a4_vmap_backtests.md` ("Finding: evaluation
-actuals are convention-laden") and plans/0 strategic question 1 (first print
+decision flagged in `specs/plans/completed/6-a4_vmap_backtests.md` ("Finding: evaluation
+actuals are convention-laden") and specs/plans/0 strategic question 1 (first print
 vs benchmark-informed truth). All numbers below were verified read-only
 against the canonical store (`s3://alt-nfp/store`) on 2026-06-12; national
 CES SA, `industry_code='00'`.
@@ -250,7 +250,7 @@ change to selection — by default.
   the *target*. The clean revised-truth definition is the diff of a single
   latest-published level series (`nfp_vintages.views.final_view`
   semantics), which is internally basis-consistent by construction —
-  at the cost of a target that moves when benchmarks land (plans/0 SQ1's
+  at the cost of a target that moves when benchmarks land (specs/plans/0 SQ1's
   documented trade-off). This would replace the current † exclusions with
   a well-defined target instead of a censored metric.
 

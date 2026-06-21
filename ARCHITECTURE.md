@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Bayesian state-space **nowcasting of US nonfarm payrolls (NFP)** from real-time data vintages. It fuses CES survey prints, QCEW administrative anchors, private payroll-provider microdata, and cyclical indicators (jobless claims, JOLTS openings) under strict **as-of censoring**, so every backtest sees only what was knowable on a given day. This is the **v2 repo**: the data layer is ported verbatim from a frozen reference implementation (`~/Projects/alt_nfp`), and the model layer is rewritten in JAX behind statistical **parity gates**. Phases A0–A4 have passed; A5 (real competitors: ADP, consensus) is the next milestone.
+Bayesian state-space **nowcasting of US nonfarm payrolls (NFP)** from real-time data vintages. It fuses CES survey prints, QCEW administrative anchors, private payroll-provider microdata, and cyclical indicators (jobless claims, JOLTS openings) under strict **as-of censoring**, so every backtest sees only what was knowable on a given day. This is the **v2 repo**: the data layer is ported from a frozen reference (`~/Projects/alt_nfp`), and the model layer is rewritten in JAX, gated against that reference for **port-fidelity**. The reference is a work-in-progress, not validated truth — **parity is a fidelity floor, not a correctness certificate**; correctness is validated against external ground truth (published BLS / ALFRED real-time vintages), see `specs/plans/0`. Phases A0–A4 passed; A5 (real competitors: consensus + naive floors; ADP dropped) is in progress.
 
 ## Languages & frameworks
 
 - **Python 3.12** throughout (`requires-python >=3.12`).
 - **Data layer:** Polars (DataFrames/lazy I/O), NumPy, `universal-pathlib` + `s3fs` (local/S3 transparency), `curl-cffi` + `httpx[http2]` + BeautifulSoup/lxml (BLS/FRED fetching & scraping), Typer (CLI).
-- **Model layer:** JAX + NumPyro (NUTS; `vmap` batching). Importing `nfp_model` globally enables float64 (the parity contract is defined in double precision). Plan references dynamax/Kalman marginalization as a deferred option.
+- **Model layer:** JAX + NumPyro (NUTS; `vmap` batching). Importing `nfp_model` globally enables float64 (parity is defined in double precision). (An early plan floated dynamax/Kalman marginalization; it was never pursued and isn't in the path — the AR(1) latent is a hand-rolled `jax.lax.scan`.)
 - **Tooling:** `uv` (workspace + lockfile), pytest (+cov), ruff, black, mypy (soft), mkdocs-material (docs group).
 
 ## Repository = a `uv` workspace of 5 packages
@@ -41,10 +41,10 @@ nfp-lookups  →  nfp-download  →  nfp-ingest  →  nfp-vintages
 
 - **Install:** `uv sync` (workspace + `dev` group).
 - **Test:** `uv run pytest` — `testpaths = packages`; markers `network` (excluded in CI) and `slow` (MCMC smoke). Coverage across all five `src/` trees by default; suites use `--no-cov` for speed. Store-dependent tests **self-skip** when the vintage store is unavailable.
-- **Lint/format:** `uv run ruff check .` (line 100; `E,W,F,I,B,C4,UP`; excludes `archive`,`docs`), black (100), mypy (soft — research code leans on Polars expression dynamism).
+- **Lint/format:** `uv run ruff check .` (line 100; `E,W,F,I,B,C4,UP`; excludes `docs`), black (100), mypy (soft — research code leans on Polars expression dynamism).
 - **CI** (`.github/workflows/ci.yml`, push/PR to `main`): `uv sync` → `ruff check .` → `pytest -m "not network" --no-cov` on `ubuntu-latest`.
 - **"Deploy":** none in the production sense — this is a research/inference repo. Operational surface is the `alt-nfp` CLI (pipeline maintenance) and the `nfp_model` library (fits/backtests). GPU is the intended A4 speed lever; the same batched code runs unmodified there.
-- **Config & data:** `.env` (gitignored) loaded by the root `conftest.py` and the CLI; `NFP_STORE_URI` (e.g. `s3://alt-nfp/store`) + `AWS_*` select MinIO/S3, unset ⇒ local `data/store/` fallback (CI mode). **All filesystem layout comes from `nfp_lookups.paths`** (override root with `NFP_BASE_DIR`). The canonical store is **append-only** and holds live-captured release-day rows that exist in no raw input — never rebuilt in place.
+- **Config & data:** `.env` (gitignored) loaded by the root `conftest.py` and the CLI; `NFP_STORE_URI` (e.g. `s3://alt-nfp/store`) + `AWS_*` select MinIO/S3, unset ⇒ local `data/store/` fallback (CI mode). **All filesystem layout comes from `nfp_lookups.paths`** (override root with `NFP_BASE_DIR`). The canonical store holds the **rebuilt** schema (reconstructable public CES/QCEW, 2017+; promoted from `…/store-rebuild` on 2026-06-18) — it is **replaceable**, not append-only/irreplaceable. Still: never `alt-nfp build` straight to `…/store` — rebuild to a scratch prefix and promote deliberately (see root `CLAUDE.md`).
 
 ## How the system fits together (data & control flow)
 
@@ -95,8 +95,8 @@ The design enforces **three physically separated concerns**, with a serialized a
 - **The knowability/inference boundary is an artifact, not an import.** `nfp-model` consuming finished arrays (its only deps are jax/numpyro/numpy; intake goes through `nfp_model.data`) is what lets the model be developed offline against fixtures and run identically on CPU/GPU.
 - **Two-layer as-of censoring is mandatory** (settled empirically): combined `vintage_date≤D` + `ref_date<D` filtering, then rank-based revision selection (`_select_ces_at_horizon`, `_select_qcew_at_horizon`). Vintage-date-only or ref-date-only filtering each fail in known ways.
 - **The store holds levels; growth is derived at read time** per `(source, geo, industry, revision, benchmark_revision)` cohort — a convention with evaluation consequences documented in `specs/ces_growth_convention.md` (the open A5 scoring question).
-- **Parity, not novelty, defines "done" in Phase A.** Every gate is a statistical match against the frozen reference (`~/Projects/alt_nfp`), enforced by golden-master fixtures (`s3://alt-nfp/golden/a{1,2,3}/`) and `nfp_model.parity`. The reference repo stays frozen as fixture generator and fallback.
-- **Design record is in-repo:** `plans/` (roadmap + gate logs `0`–`6`), `specs/` (active design), `archive/` (implemented/superseded), and a per-package `CLAUDE.md` map.
+- **Parity is the Phase-A *port-fidelity* floor — not correctness.** Each A-gate is a statistical match against the frozen reference (`~/Projects/alt_nfp`), enforced by golden-master fixtures (`s3://alt-nfp/golden/a{1,2,3}/`) and `nfp_model.parity`. It proved the JAX rewrite reproduced the reference; it does **not** certify the reference is right (it's a buggy WIP). Correctness is validated against external ground truth (published BLS / ALFRED), see `specs/plans/0`. The reference stays frozen as the port target + fixture generator — not as an assumed fallback.
+- **Design record is in-repo:** `specs/plans/` (roadmap + gate logs), `specs/` (active design), `specs/completed/` (implemented/superseded specs + pre-port todos), and a per-package `CLAUDE.md` map. External reference material is no longer kept as static `references/` files: BLS program methodology (QCEW/CES/JOLTS series grammar, flat-file schemas, SA/benchmark/vintage behavior, cross-program reconciliation) is queryable via the **`bls-data-context`** skill, and the Bayesian modeling guardrails via the **`bayesian-workflow`** skill.
 
 ## Two load-bearing choices
 

@@ -33,3 +33,6 @@ htmlcov/
 
 # Local scratch notebooks
 scratch.ipynb
+
+# Local Claude Code settings (personal; .claude/settings.json is shared)
+.claude/settings.local.json

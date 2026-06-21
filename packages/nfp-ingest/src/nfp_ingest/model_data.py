@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from nfp_lookups.paths import INDICATORS_DIR
+from nfp_lookups.paths import INDICATORS_DIR, storage_options_for
 from nfp_lookups.provider_config import (
     CYCLICAL_INDICATORS_DEFAULT,
     PROVIDERS_DEFAULT,
@@ -561,7 +561,9 @@ def _load_cyclical_indicators(
             continue
 
         try:
-            raw = pl.read_parquet(fpath).sort('ref_date')
+            raw = pl.read_parquet(
+                str(fpath), storage_options=storage_options_for(fpath)
+            ).sort('ref_date')
         except (OSError, pl.exceptions.ComputeError) as e:
             logger.warning("Failed to read indicator %s from %s: %s", key, fpath, e)
             result[key] = None
@@ -688,3 +690,29 @@ def _build_levels_from_growth(
     d["ces_nsa_level"] = _emp_level_series("ces_nsa")
 
     return pl.DataFrame(d)
+
+
+def levels_provenance(levels: pl.DataFrame) -> tuple[float, float]:
+    """Anchor scalars for reconstructing a nowcast index path from model growth.
+
+    Returns ``(base_index, idx_to_level)`` for the backtest harnesses, where
+    ``index_path = base_index * exp(cumsum(growth))`` and a month-over-month index
+    delta converts to employment thousands via ``* idx_to_level``.
+
+    ``base_index`` is the first *finite* ``ces_sa_index``. ``cum_level`` anchors the
+    index at the first month with finite growth, so a panel whose CES series starts
+    at the panel's first month (e.g. the rebuilt 2017+ store) has no growth
+    predecessor there and ``ces_sa_index[0]`` is NaN — anchoring on ``[0]`` would
+    NaN the entire reconstructed path. ``idx_to_level`` is the employment level at
+    the index≈100 row divided by 100, found NaN-robustly (a plain ``argmin`` over
+    ``|index - 100|`` would otherwise land on a leading NaN). A degenerate all-NaN
+    index falls back to ``base_index = 100.0`` (the ``cum_level`` base).
+    """
+    idx = levels["ces_sa_index"].to_numpy().astype(float)
+    lvl = levels["ces_sa_level"].to_numpy().astype(float)
+    finite = np.isfinite(idx)
+    if not finite.any():
+        return 100.0, float("nan")
+    base_index = float(idx[finite][0])
+    base_row = int(np.nanargmin(np.abs(idx - 100.0)))
+    return base_index, float(lvl[base_row]) / 100.0

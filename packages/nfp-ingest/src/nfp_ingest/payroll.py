@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from nfp_lookups.paths import DATA_DIR, VINTAGE_STORE_PATH
+from nfp_lookups.paths import VINTAGE_STORE_PATH, providers_location, storage_options_for
 from nfp_lookups.provider_config import MIN_PSEUDO_ESTABS_PER_CELL, ProviderConfig
 from nfp_lookups.schemas import PANEL_SCHEMA, empty_panel
 
@@ -42,7 +42,7 @@ def _join_birth_file(series_df: pl.DataFrame, birth_path: Path) -> pl.DataFrame:
         logger.warning("Birth-rate file not found: %s", birth_path)
         return series_df
     try:
-        bdf = pl.read_parquet(str(birth_path))
+        bdf = pl.read_parquet(str(birth_path), storage_options=storage_options_for(birth_path))
     except Exception as exc:
         logger.warning("Failed to read birth-rate file %s: %s", birth_path, exc)
         return series_df
@@ -58,7 +58,7 @@ def read_provider_table(fpath: Path) -> pl.DataFrame | None:
     if not fpath.exists():
         return None
     try:
-        raw = pl.read_parquet(str(fpath))
+        raw = pl.read_parquet(str(fpath), storage_options=storage_options_for(fpath))
     except Exception as e:
         logger.warning("Failed to read provider file %s: %s", fpath, e)
         return None
@@ -89,7 +89,7 @@ def load_provider_series(
 
     Returns ``None`` if the file is missing or the filtered result is empty.
     """
-    _data_dir = data_dir if data_dir is not None else DATA_DIR
+    _data_dir = data_dir if data_dir is not None else providers_location()
     _store_dir = store_dir if store_dir is not None else VINTAGE_STORE_PATH
     _min_estabs = min_pseudo_estabs if min_pseudo_estabs is not None else MIN_PSEUDO_ESTABS_PER_CELL
 
@@ -173,7 +173,7 @@ def ingest_provider(
     pl.DataFrame
         Observation panel rows conforming to PANEL_SCHEMA.
     """
-    _data_dir = data_dir if data_dir is not None else DATA_DIR
+    _data_dir = data_dir if data_dir is not None else providers_location()
     _store_dir = store_dir if store_dir is not None else VINTAGE_STORE_PATH
     _min_estabs = min_pseudo_estabs if min_pseudo_estabs is not None else MIN_PSEUDO_ESTABS_PER_CELL
 

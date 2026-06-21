@@ -8,12 +8,22 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 - **Vintage store** (`vintage_store.py`): Hive-partitioned parquet read/write with rank-based horizon censoring. `store_path` accepts a local `Path` or an `s3://` `UPath` (default `VINTAGE_STORE_PATH` from `nfp_lookups.paths`, which is MinIO/S3 when `NFP_STORE_URI` is set); Polars I/O passes `storage_options_for(store_path)` and `mkdir` is guarded by `is_remote()`
 - **Panel construction** (`panel.py`): `build_panel()` assembles CES + QCEW + provider data into a unified panel
 - **CES/QCEW ingestion** (`ces_national.py`, `ces_state.py`, `qcew.py`): source-specific transformers
-- **Provider ingestion** (`payroll.py`): auto-detects cell-level vs national providers
+- **Provider ingestion** (`payroll.py`): auto-detects cell-level vs national providers; reads default to `providers_location()`/`NFP_PROVIDERS_URI` (the **separate** provider store) with `storage_options_for` (plans/15)
 - **Compositing** (`compositing.py`): QCEW-weighted national compositing for cell-level providers
-- **Indicator store** (`indicators.py`): download + read cyclical indicator parquets
+- **Indicator store** (`indicators.py`): download + read cyclical indicator parquets under `INDICATORS_DIR` (S3 via `NFP_DATA_URI`); reads/writes thread `storage_options_for` + an `is_remote` mkdir guard (plans/15)
 - **Model data** (`model_data.py`): `build_model_data(as_of=D)` — the single entry point answering "what was knowable on D" (A2). Layer-1 `build_panel(as_of_ref=D)` + layer-2 extraction (best-available CES selection with vintage remap, QCEW noise multipliers incl. post-COVID boundary inflation, provider pub-lag censoring, cyclical pub-lag masking). Knobs in `ModelDataConfig` (defaults frozen from the reference settings). No plotting concerns, no acquisition imports.
 - **Snapshots** (`snapshots.py`): hash-pinned ModelData artifacts (`.npz` arrays + embedded JSON meta) under `NFP_SNAPSHOTS_URI` (S3) or `data/snapshots/`. `content_hash` is over array bytes + canonical meta — never npz file bytes (zip timestamps). `alt-nfp snapshot --as-of D [--grid-end E]` writes them. Schema v2 (A3): provider meta carries `error_model` so `nfp_model.data.from_snapshot` can rebuild likelihood structure; v1 snapshots are read with an `"iid"` fallback.
 - **Release dates** (`release_dates/`): config and vintage date builder
+- **First-print target** (`first_print.py`, A5): `first_print_changes(industry_code=…)`
+  — the within-release headline MoM change BLS announces, an additive read over store
+  levels (private `'05'` for Track A; `'00'` for the Total target). Keyword-only after
+  `store_path`. Touches no A1/A2 pinned path.
+- **Wedge data** (`wedge_data.py`, Track B): `wedge_first_print_changes()` (the
+  `00 − 05` first-print join, same-vintage guard), `build_wedge_model_data(as_of,
+  target_month)` (the wedge ModelData dict + announcement-date lookahead guard via
+  `nfp_lookups.government.get_known_interventions_as_of`), and `read_government_signal`
+  (diagnostic reader). Feeds the standalone `nfp_model.wedge` model; **not** part of
+  the A2 `build_model_data` firewall. Spec: `specs/completed/government_wedge.md`.
 
 ## Tech Stack
 
@@ -26,7 +36,7 @@ Transforms raw downloaded data into analysis-ready panels. Provides:
 
 ```bash
 # Run ingest tests
-pytest tests/
+pytest src/nfp_ingest/tests/
 
 # Lint
 ruff check src/nfp_ingest/
@@ -39,6 +49,8 @@ src/nfp_ingest/
 ├── __init__.py
 ├── base.py                 # validate_panel(), empty_panel() — uses schemas from nfp_lookups
 ├── vintage_store.py        # read/write vintage store, transform_to_panel(), rank-based censoring
+├── qcew_acquire.py         # acquire_qcew_levels()/acquire_qcew_size_native() — CEW API slices (was private in nfp-vintages)
+├── capture.py              # capture_ces_print()/capture_qcew_quarter() — month-T current-print → store (update)
 ├── ces_national.py         # CES national-level ingestion
 ├── ces_state.py            # CES state-level ingestion
 ├── qcew.py                 # QCEW ingestion (4 input streams, industry hierarchy)
@@ -46,6 +58,8 @@ src/nfp_ingest/
 ├── compositing.py          # QCEW-weighted national compositing for cell-level providers
 ├── indicators.py           # download_indicators(), read_indicator() — FRED cyclical indicators
 ├── panel.py                # build_panel(), save_panel(), load_panel()
+├── first_print.py          # first_print_changes() — within-release headline target (A5)
+├── wedge_data.py           # wedge_first_print_changes() + build_wedge_model_data() (Track B)
 ├── aggregate.py            # Geographic aggregation (FIPS → division → region)
 ├── tagger.py               # Tag estimates with source/vintage metadata
 ├── releases.py             # Release management, combine_estimates()
@@ -71,15 +85,15 @@ src/nfp_ingest/
 
 ## Test Mapping
 
-Tests live in `tests/` within this package:
+Tests live in `src/nfp_ingest/tests/` within this package:
 - `test_ingest.py` — panel validation & schema tests
 - `test_new_ingest.py` — new ingest module tests
 - `test_release_dates.py` — release date parsing/scraping tests
 - `test_vintage_store.py` — vintage store + rank-based censoring + validation guards
 - `test_compositing.py` — QCEW-weighted compositing tests
 - `test_store_coverage.py` — store data-integrity + CES censored diagonal invariant
-- `test_golden_masters.py` — A1 golden masters: censored panels vs frozen-reference fixtures in `s3://…/golden/a1/` (manifest in `tests/golden/`); self-skips without store env
+- `test_golden_masters.py` — A1 golden masters: censored panels vs frozen-reference fixtures in `s3://…/golden/a1/` (manifest in `src/nfp_ingest/tests/golden/`); self-skips without store env
 - `test_model_data_golden.py` — A2 golden masters: `build_model_data` arrays/frames vs frozen-reference `panel_to_model_data` outputs in `s3://…/golden/a2/`; self-skips without store env + local providers/indicators
 - `test_snapshots.py` — snapshot content hash (deterministic, order-insensitive, corruption-detecting), round-trip, and build-twice hash stability
 - `test_cyclical_indicators.py` — NOT yet ported: depends on `nfp_models.panel_adapter`; comes over when knowability logic moves into the data layer (Phase A2)
-- `test_fred.py` — lives in `packages/nfp-download/tests/` (imports only `nfp_download.fred`)
+- `test_fred.py` — lives in `packages/nfp-download/src/nfp_download/tests/` (imports only `nfp_download.fred`)

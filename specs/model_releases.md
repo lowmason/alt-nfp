@@ -7,7 +7,7 @@
 > unified model — there is no built intermediate without birth/death, QCEW, or seasonality.
 > **Releases 3–5** (cell-level estimation, nested hierarchy, QCEW forecasting + time-varying bias)
 > are **not implemented**; they are described as planned work in **Part II** and correspond to the
-> port plan's Phase B (`plans/0-port_and_staged_plan.md`).
+> port plan's Phase B (`specs/plans/0-port_and_staged_plan.md`).
 >
 > One deliberate exception to "match the code": the **provider priors are written as hierarchical**
 > (the multi-provider pooling design), even though the current code realizes the single-provider
@@ -286,7 +286,7 @@ latter being the provider signal-quality and bias diagnostics.
 # PART II — PLANNED EXTENSIONS (not implemented)
 
 > The following releases are **design sketches, not built code.** They map to the port plan's Phase B
-> (`plans/0-port_and_staged_plan.md`): B1 supersector narrative, B2 forecasted QCEW + time-varying
+> (`specs/plans/0-port_and_staged_plan.md`): B1 supersector narrative, B2 forecasted QCEW + time-varying
 > provider bias, B3 MinT reconciliation + production hardening. Do not treat the equations below as a
 > description of `nfp-model`. Several Phase-B strategic questions (target = first print vs.
 > benchmark-informed truth; consumer of the output; whether the banked model beats consensus/ADP)

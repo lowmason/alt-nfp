@@ -28,3 +28,4 @@ nfp-ingest = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfp_vintages"]
+exclude = ["src/nfp_vintages/tests"]
