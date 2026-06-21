@@ -11,15 +11,22 @@ bootstrap path).
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import polars as pl
 from nfp_lookups.industry import ownership_for
+from nfp_lookups.paths import VINTAGE_STORE_PATH
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
-from nfp_ingest.vintage_store import read_vintage_store
+from nfp_ingest.releases import _fetch_ces_releases
+from nfp_ingest.vintage_store import (
+    append_to_vintage_store,
+    compact_partition,
+    read_vintage_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,3 +205,93 @@ def _detect_corrected_levels(
         )
         for r in diverged.iter_rows(named=True)
     ]
+
+
+def capture_ces_print(
+    as_of: date,
+    *,
+    store_path: Path = VINTAGE_STORE_PATH,
+) -> CaptureResult:
+    """Capture the current CES print knowable as of ``as_of`` and append it.
+
+    Spec §5.1: fetch the JSON-API current print (tagged + IND-IMD-1-dropped by
+    :func:`nfp_ingest.releases._fetch_ces_releases`), remap to
+    ``VINTAGE_STORE_SCHEMA``, censor ``vintage_date <= as_of``, flag corrected
+    levels (§5.1.4), then ``append_to_vintage_store`` → ``compact_partition`` on
+    each touched ``(ces, sa)`` partition.
+
+    ``BLS_API_KEY`` is a **hard prerequisite** (§5.1.1, §13): without it the
+    upstream fetch returns an empty frame, which would be a silent empty capture.
+
+    Parameters
+    ----------
+    as_of : date
+        Knowability cutoff. No row with ``vintage_date > as_of`` is appended.
+    store_path : Path
+        Root of the Hive-partitioned vintage store.
+
+    Returns
+    -------
+    CaptureResult
+        Rows appended, corrected-level records, and rows skipped (already stored).
+    """
+    if not os.environ.get("BLS_API_KEY"):
+        raise RuntimeError(
+            "BLS_API_KEY is required for CES capture (update --as-of). "
+            "The BLS JSON API current-print fetch needs a key; without it the "
+            "fetch returns an empty frame (silent data loss). Set BLS_API_KEY."
+        )
+
+    fetched = _fetch_ces_releases()
+    if fetched.is_empty():
+        logger.warning("CES fetch returned no rows for as_of=%s", as_of)
+        return CaptureResult(appended=0, corrected=[], skipped=0)
+
+    remapped = _remap_ces_to_store_schema(fetched)
+    censored = remapped.filter(pl.col("vintage_date") <= as_of)
+    if censored.is_empty():
+        logger.warning("CES capture: no rows with vintage_date <= %s", as_of)
+        return CaptureResult(appended=0, corrected=[], skipped=0)
+
+    corrected: list[CorrectedLevel] = []
+    touched: list[bool] = []
+    for sa in censored["seasonally_adjusted"].unique().to_list():
+        part = censored.filter(pl.col("seasonally_adjusted") == sa)
+        cl = _detect_corrected_levels(
+            part, store_path, source="ces", seasonally_adjusted=sa
+        )
+        for c in cl:
+            logger.warning(
+                "CORRECTED-LEVEL ces sa=%s ref=%s code=%s rev=%s bmr=%s "
+                "stored=%s incoming=%s",
+                sa, c.ref_date, c.industry_code, c.revision,
+                c.benchmark_revision, c.stored_employment, c.incoming_employment,
+            )
+        corrected.extend(cl)
+        touched.append(sa)
+
+    appended = append_to_vintage_store(censored, store_path)
+    for sa in touched:
+        compact_partition(store_path, source="ces", seasonally_adjusted=sa)
+
+    return CaptureResult(
+        appended=appended,
+        corrected=corrected,
+        skipped=censored.height - appended,
+    )
+
+
+def capture_qcew_quarter(
+    as_of: date,
+    *,
+    store_path: Path = VINTAGE_STORE_PATH,
+) -> CaptureResult:
+    """Stub — QCEW quarterly capture is implemented in Phase 6 (spec §6.3).
+
+    Defined now (cross-phase adjustment §14/4) so the Phase 5 ``update`` body and
+    its tests can reference and monkeypatch this symbol before Phase 6 replaces
+    the stub with the real single-quarter capture.
+    """
+    raise NotImplementedError(
+        "capture_qcew_quarter is implemented in Phase 6 (spec §6.3)"
+    )

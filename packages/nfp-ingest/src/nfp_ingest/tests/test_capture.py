@@ -3,7 +3,14 @@
 from datetime import date
 
 import polars as pl
-from nfp_ingest.capture import _detect_corrected_levels, _remap_ces_to_store_schema
+import pytest
+from nfp_ingest import capture as _cap
+from nfp_ingest.capture import (
+    CaptureResult,
+    _detect_corrected_levels,
+    _remap_ces_to_store_schema,
+    capture_ces_print,
+)
 from nfp_ingest.releases import COMBINED_SCHEMA
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
@@ -161,3 +168,102 @@ def test_detect_corrected_empty_store_returns_empty(tmp_path):
     )
 
     assert corrected == []
+
+
+def test_capture_ces_raises_without_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("BLS_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="BLS_API_KEY"):
+        capture_ces_print(date(2026, 2, 6), store_path=tmp_path)
+
+
+def test_capture_ces_appends_and_censors(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLS_API_KEY", "dummy-key")
+
+    # Two CES prints: one knowable as of 2026-02-06, one stamped later (must be
+    # censored out by vintage_date <= as_of).
+    fetched = _combined_frame([
+        _combined_row(
+            industry_type="domain", industry_code="05",
+            ref_date=date(2026, 1, 1), vintage_date=date(2026, 2, 6),
+            employment=131_000.0,
+        ),
+        _combined_row(
+            industry_type="domain", industry_code="05",
+            ref_date=date(2026, 2, 1), vintage_date=date(2026, 3, 6),
+            employment=131_200.0,
+        ),
+    ])
+    monkeypatch.setattr(_cap, "_fetch_ces_releases", lambda: fetched)
+
+    result = capture_ces_print(date(2026, 2, 6), store_path=tmp_path)
+
+    assert isinstance(result, CaptureResult)
+    assert result.appended == 1
+    assert result.corrected == []
+
+    stored = pl.read_parquet(
+        tmp_path / "source=ces" / "seasonally_adjusted=true" / "*.parquet"
+    )
+    assert stored.height == 1
+    assert stored["ref_date"].to_list() == [date(2026, 1, 1)]
+    assert stored["ownership"].to_list() == ["private"]
+
+
+def test_capture_ces_idempotent_second_run_appends_zero(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLS_API_KEY", "dummy-key")
+    fetched = _combined_frame([
+        _combined_row(
+            industry_type="domain", industry_code="05",
+            ref_date=date(2026, 1, 1), vintage_date=date(2026, 2, 6),
+            employment=131_000.0,
+        ),
+    ])
+    monkeypatch.setattr(_cap, "_fetch_ces_releases", lambda: fetched)
+
+    first = capture_ces_print(date(2026, 2, 6), store_path=tmp_path)
+    second = capture_ces_print(date(2026, 2, 6), store_path=tmp_path)
+
+    assert first.appended == 1
+    assert second.appended == 0
+    assert second.skipped == 1
+
+
+def test_capture_ces_flags_corrected_level(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLS_API_KEY", "dummy-key")
+
+    base = _combined_row(
+        industry_type="domain", industry_code="05",
+        ref_date=date(2026, 1, 1), vintage_date=date(2026, 2, 6),
+        employment=131_000.0,
+    )
+    monkeypatch.setattr(_cap, "_fetch_ces_releases", lambda: _combined_frame([base]))
+    capture_ces_print(date(2026, 2, 6), store_path=tmp_path)
+
+    # Re-capture the same ukey with a corrected level (a later vintage_date so it
+    # is still censored in, but the same (ref,rev,bmr) ukey already present).
+    corrected = dict(base)
+    corrected["employment"] = 131_500.0
+    corrected["vintage_date"] = date(2026, 2, 6)
+    monkeypatch.setattr(
+        _cap, "_fetch_ces_releases", lambda: _combined_frame([corrected])
+    )
+    result = capture_ces_print(date(2026, 2, 6), store_path=tmp_path)
+
+    assert result.appended == 0
+    assert len(result.corrected) == 1
+    assert result.corrected[0].stored_employment == 131_000.0
+    assert result.corrected[0].incoming_employment == 131_500.0
+
+
+@pytest.mark.network
+def test_capture_ces_live_fetch(tmp_path):
+    import os
+
+    if not os.environ.get("BLS_API_KEY"):
+        pytest.skip("BLS_API_KEY not set")
+
+    result = capture_ces_print(date.today(), store_path=tmp_path)
+
+    assert isinstance(result, CaptureResult)
+    assert result.appended >= 0
