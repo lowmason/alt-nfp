@@ -59,7 +59,7 @@ class FourierPriors:
 
 @dataclass(frozen=True)
 class BirthDeathPriors:
-    """Structural birth/death offset: intercept phi_0, shock SD, and cyclical-covariate loadings phi_3."""
+    """Structural birth/death block priors: intercept phi_0, shock SD sigma, and cyclical-covariate loading SD phi_3 (phi_1/phi_2 priors are sampled elsewhere)."""
 
     phi0_mu: float = 0.001
     phi0_sd: float = 0.002

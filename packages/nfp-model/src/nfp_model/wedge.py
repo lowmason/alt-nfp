@@ -27,7 +27,7 @@ def wedge_model(data: dict) -> None:
     """Change-space STS for the government wedge: drift + sum-to-zero monthly season + interventions.
 
     The wedge month-over-month change is ``mu_t = drift + season[month_t] +
-    X_intervention @ coef`` with a masked iid-Normal likelihood. *data* is a
+    X_intervention @ coef`` with a masked iid-Normal likelihood. data is a
     dict of arrays (``T``, ``month_of_year``, ``X_intervention``, intervention
     priors, ``y``, ``mask``).
     """

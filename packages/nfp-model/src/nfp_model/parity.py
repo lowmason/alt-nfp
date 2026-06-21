@@ -54,7 +54,7 @@ class ParityRow:
 
 @dataclass
 class ParityReport:
-    """Per-fixture parity result: the fixture stem and its collected per-site rows."""
+    """Per-fixture parity result: the fixture stem, its collected per-site rows, and computed ``passed``/``n_failed`` aggregates."""
 
     stem: str
     rows: list[ParityRow] = field(default_factory=list)
