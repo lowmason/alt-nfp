@@ -264,6 +264,24 @@ def _run_update(
         total = sum(results.values()) if results else 0
         print(f"  Indicators: {total} rows across {len(results or {})} series")
 
+    # --- self-healing compaction (§6.2) -------------------------------------
+    # A crash between append_to_vintage_store and compact_partition leaves a
+    # partition with >1 fragment. Compact any such partition on the next run —
+    # cheap and idempotent (compact is a no-op on a single-file partition).
+    # FOLLOW-ON: remote (s3://) self-heal — enumerate partitions via UPath +
+    # storage_options_for(store_path); compact_partition already deletes remote
+    # fragments. Guarded out here so the local test stays hermetic.
+    from nfp_ingest.vintage_store import compact_partition
+    from nfp_lookups.paths import is_remote
+
+    if not is_remote(store_path):
+        for source_dir in sorted(store_path.glob("source=*")):
+            source = source_dir.name.split("=", 1)[1]
+            for sa_dir in sorted(source_dir.glob("seasonally_adjusted=*")):
+                if len(list(sa_dir.glob("*.parquet"))) > 1:
+                    sa = sa_dir.name.split("=", 1)[1] == "true"
+                    compact_partition(store_path, source, sa)
+
 
 @app.command()
 def update(

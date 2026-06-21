@@ -6,7 +6,11 @@ deferred-import command bodies monkeypatched so no network/store/key is touched.
 
 from __future__ import annotations
 
+from datetime import date
+
+from nfp_ingest.vintage_store import append_to_vintage_store
 from nfp_vintages.__main__ import app
+from nfp_vintages.tests._fixtures import make_ces_rows
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -113,3 +117,39 @@ class TestUpdateOrchestration:
     def test_invalid_only_rejected(self):
         result = runner.invoke(app, ["update", "--as-of", "2026-06-12", "--only", "bogus"])
         assert result.exit_code != 0
+
+
+class TestUpdateSelfHealingCompaction:
+    def test_update_compacts_pre_existing_fragments(self, tmp_path, monkeypatch):
+        store = tmp_path / "store"
+        # Two disjoint appends → two fragment files in the same (ces, true) partition.
+        append_to_vintage_store(
+            make_ces_rows(ref_month="2026-01-12", vintage="2026-02-06"), store
+        )
+        append_to_vintage_store(
+            make_ces_rows(ref_month="2026-02-12", vintage="2026-03-06"), store
+        )
+        part = store / "source=ces" / "seasonally_adjusted=true"
+        assert len(list(part.glob("*.parquet"))) == 2
+
+        # Stub everything except the heal pass; capture appends nothing.
+        monkeypatch.setattr(
+            "nfp_vintages.calendar.advance_release_calendar", lambda: None
+        )
+
+        class _Res:
+            appended, corrected, skipped = 0, [], 1
+
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_ces_print", lambda a, *, store_path=None: _Res()
+        )
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_qcew_quarter",
+            lambda a, *, store_path=None: _Res(),
+        )
+        monkeypatch.setattr("nfp_ingest.indicators.download_indicators", lambda: {})
+
+        from nfp_vintages.__main__ import _run_update
+
+        _run_update(date(2026, 6, 12), store_path=store)
+        assert len(list(part.glob("*.parquet"))) == 1
