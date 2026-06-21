@@ -71,6 +71,8 @@ nav:
       - Vintage data model & as-of censoring: concepts/vintages-and-censoring.md
       - Additive Nowcast Framework:
           - Overview: concepts/additive/overview.md
+          - The Private State-Space Model: concepts/additive/private-state-space.md
+          - The Government Wedge: concepts/additive/government-wedge.md
   - Architecture & Internals:
       - The package chain: architecture/package-chain.md
       - Boundaries & paths: architecture/boundaries-and-paths.md
