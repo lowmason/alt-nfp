@@ -1,0 +1,83 @@
+"""Synthetic VINTAGE_STORE_SCHEMA rows for the update guardrail tests.
+
+These are hand-built store rows (no store I/O, no network) used to exercise the
+dangerous edges of append/compact and the first-print consumers. The capture path
+itself never produces a -1.0 sentinel; ``make_shutdown_sentinel_row`` fabricates
+one to test that the overlap diagnostic excludes it (§7).
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+import polars as pl
+from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
+
+
+def make_ces_rows(
+    *,
+    ref_month: str,
+    vintage: str,
+    employment: float = 150_000.0,
+    industry_code: str = "05",
+    revision: int = 0,
+    benchmark_revision: int = 0,
+    seasonally_adjusted: bool = True,
+) -> pl.DataFrame:
+    """One CES headline row in the rebuilt-store schema.
+
+    Defaults target the modeled private aggregate (``industry_code='05'`` ⇒
+    ``ownership='private'``). Pass ``industry_code='00'`` for the total leg
+    (⇒ ``ownership='total'``).
+    """
+    ownership = "private" if industry_code == "05" else "total"
+    row = {
+        "geographic_type": "national",
+        "geographic_code": "00",
+        "ownership": ownership,
+        "industry_type": "total",
+        "industry_code": industry_code,
+        "ref_date": date.fromisoformat(ref_month),
+        "vintage_date": date.fromisoformat(vintage),
+        "revision": revision,
+        "benchmark_revision": benchmark_revision,
+        "employment": employment,
+        "size_class_type": None,
+        "size_class_code": None,
+        "source": "ces",
+        "seasonally_adjusted": seasonally_adjusted,
+    }
+    cols = list(VINTAGE_STORE_SCHEMA.keys())
+    return pl.DataFrame([{c: row[c] for c in cols}], schema=VINTAGE_STORE_SCHEMA)
+
+
+def make_benchmark_double_row(*, ref_month: str) -> pl.DataFrame:
+    """One ref_date co-published as BOTH (rev1,bmr0) and (rev2,bmr1) on a benchmark.
+
+    The February benchmark restamps a month under the new benchmark revision while
+    the pre-benchmark track still exists. Both ukeys are distinct (differ in
+    benchmark_revision and revision), so append/compact must keep both rows.
+    """
+    a = make_ces_rows(
+        ref_month=ref_month, vintage="2026-02-06",
+        revision=1, benchmark_revision=0, employment=149_500.0,
+    )
+    b = make_ces_rows(
+        ref_month=ref_month, vintage="2026-02-06",
+        revision=2, benchmark_revision=1, employment=149_900.0,
+    )
+    return pl.concat([a, b])
+
+
+def make_shutdown_sentinel_row(*, ref_month: str) -> pl.DataFrame:
+    """The literal ``employment = -1.0`` 'no print' sentinel for a shutdown-skipped slot.
+
+    This is the *value* the rebuilt store writes for a skipped release slot (e.g.
+    Oct-2025 rev0); ``first_print_changes`` drops it via ``employment > 0``
+    (``first_print.py:84``). Distinct from the *date* quirk
+    ``CES_OCT_2025_RELEASED_WITH_NOV_REF``.
+    """
+    return make_ces_rows(
+        ref_month=ref_month, vintage="2025-11-12",
+        revision=0, benchmark_revision=0, employment=-1.0,
+    )
