@@ -263,7 +263,7 @@ vs pooled posterior SD and MCSE), plus matched nowcast distributions across a 12
 > kurtosis/ESS-aware after a reference-side low-ESS excursion. The model layer imports nothing
 > from the data packages (test-enforced). **Stages 0–4 are banked *as a port*** (faithful to
 > the reference — correctness is the validate-first track). Details:
-> `plans/5-a3_model_parity.md`.
+> `plans/completed/5-a3_model_parity.md`.
 
 ### A4 — Speed: the GPU payoff
 
@@ -282,7 +282,7 @@ it's making the **evaluation harness** cheap enough to run on every change.
 > (vmapped NUTS lock-steps every lane to the deepest tree per iteration: free on GPU, overhead
 > on CPU). We bank the correctness gate + a GPU-ready harness. The grid build also surfaced
 > that evaluation *actuals* are convention-laden (first-print vs best-available diverge >150k
-> on 5/24 months) — **the scoring convention is an A5 question** (`specs/ces_growth_convention.md`).
+> on 5/24 months) — **the scoring convention is an A5 question** (`specs/completed/ces_growth_convention.md`).
 > A4 view: `plans/6-a4_vmap_backtests.md`.
 
 ### A5 — Real competitors, and the first reality gate
@@ -294,7 +294,7 @@ first print) — i.e., the start of the validate-first track for the *model*.**
 **Gate:** every backtest report scores model vs. consensus vs. naive, at each information
 regime (first print = target).
 
-> **Refinement (2026-06-13, `specs/a5_real_competitors.md`):** **ADP is dropped** — post-Aug-2022
+> **Refinement (2026-06-13, `specs/completed/a5_real_competitors.md`):** **ADP is dropped** — post-Aug-2022
 > it publicly disclaims forecasting the BLS print, so it is not a fair first-print competitor.
 > The competition is **consensus** (Bloomberg, T−1, staged) + naive floors (+ an optional smart
 > bridge baseline). Information regimes: **T−7 and T−1** (BLS-release(M) − 7 / − 1 days), where
@@ -316,7 +316,7 @@ regime (first print = target).
 > clean-window run is what decides it.
 >
 > **Gate amendment (2026-06-19) — the gate splits into two tracks** (recording the
-> `specs/a5_real_competitors.md` §5 / `specs/model_improvements.md` §8 amendment here, as those specs
+> `specs/completed/a5_real_competitors.md` §5 / `specs/model_improvements.md` §8 amendment here, as those specs
 > direct). The model nowcasts **private** NFP (`'05'`), not total (`'00'`), so the literal "model vs
 > consensus vs naive" gate splits: **Track A** = the **private** nowcast vs **naive floors only**,
 > scored on the **private** first print + the **private QCEW-settled** truth (ADP removed entirely;
@@ -351,7 +351,7 @@ measures.)**
 
 1. **Target: CES first print, or benchmark-informed truth?**
    > **Answered (2026-06-13): the first print.** A5 scores against the within-release headline
-   > BLS announces (`specs/ces_growth_convention.md` Option A). Benchmark/revised-truth targeting
+   > BLS announces (`specs/completed/ces_growth_convention.md` Option A). Benchmark/revised-truth targeting
    > is a separate later model. Revised truth may be shown as an *unscored* reference.
 2. **Who consumes the output?**
    > **Answered (2026-06-13): the research-narrative consumer.** Output is (1) the most accurate

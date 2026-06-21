@@ -1,5 +1,16 @@
 # Audit Remediation Implementation Plan
 
+> **Status: ✅ SUBSTANTIALLY IMPLEMENTED — moved to `plans/completed/` 2026-06-21.**
+> Phases 1–2 landed in code (the `- [ ]` checkboxes below were never ticked, but the
+> commits exist): `H-2a` credential-free CI fixtures (`780b5a4`), `H-3` dead-BD-array
+> drop + snapshot `SCHEMA_VERSION→3` (`428b84c`), `H-4a` all-zero-indicator warning
+> (`baef57c`), `H-4b` calendar under-cardinality fail-loud (`3521800`), `T5`/`L-13`
+> retry docstring (`7d439c0`), `T10–T14`. **Only the Phase-3 model-input items remain** —
+> the `H-4a` NaN sentinel and the `H-2b` full-model parity-in-CI smoke (recorded under
+> `T15`, `2a05c7c`) — **explicitly deferred to the next golden-master / MCMC run**, a
+> port-time activity (same build-here / validate-on-port posture as A5). Not "stale":
+> implemented with a port-deferred verification tail.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Convert the hazards documented in `specs/audit_alt_nfp.md` and

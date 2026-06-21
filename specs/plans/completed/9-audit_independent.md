@@ -2,8 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development
 > to execute this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
-> **Task A0 (the IMD-1 ruling) is RESOLVED below.** Plan execution itself is
-> currently PAUSED pending maintainer go-ahead (docs committed 2026-06-13).
+> **Task A0 (the IMD-1 ruling) is RESOLVED below.** (The original "PAUSED pending
+> maintainer go-ahead" banner was the pre-execution state; the substantive fix landed anyway.)
+> **Status: ✅ SUBSTANTIVE FIXES IMPLEMENTED — moved to `plans/completed/` 2026-06-21.**
+> The ~45 raw findings collapsed to **2 substantive fixes + 7 small cleanups + an explicit
+> backlog** (cross-ref table below). Both substantive fixes landed: `IND-IMD-1` — the
+> post-benchmark CES level fanning onto the rev1/bmr0 first print — **fixed** in `38c9ccf`;
+> `IND-XC-1` parity-gate CI-skip note in `d44170c`. The ingest hardening (`H-3`/`H-4a`/I-2/I-4)
+> landed via plan 8 (`T10–T14`). What remains is the recorded **Backlog** at the end of this
+> doc (parity-faithful findings) plus the MCMC-deferred `H-4a` NaN sentinel / `H-2b` smoke.
+> Not "stale": the substantive remediation is in the codebase; the remainder is a deliberate
+> backlog + port-deferred verification.
 
 **Goal:** Remediate the confirmed, parity-neutral findings from the independent
 audit ([`specs/completed/audit_independent.md`](../specs/completed/audit_independent.md)), surface the
@@ -87,7 +96,7 @@ second-print value is **not present in the BLS flat file** (which only carries t
 post-benchmark level). So the fix cannot supply the right number — it can only
 **stop emitting the wrong one** and let the triangular-revisions pipeline own the
 rev1/bmr0 level. That is a semantics decision keyed to
-`specs/ces_growth_convention.md` §4(c)-i / §5, and under the parity policy it is a
+`specs/completed/ces_growth_convention.md` §4(c)-i / §5, and under the parity policy it is a
 class-(c) "correct-but-divergent" change that must be ruled on.
 
 **Proposed semantics (for sign-off):** when a `ref_date` has a `bmr≥1` reprint row
