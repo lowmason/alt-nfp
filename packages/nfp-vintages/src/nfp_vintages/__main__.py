@@ -334,5 +334,103 @@ def update(
     )
 
 
+def _watch_snapshot_anchor(ref_token: str) -> date:
+    """Day-12 anchor for an uncaptured ref token — never the raw pubDate.
+
+    ``ref_token`` is the string after the source prefix in ``StoreStatus.uncaptured``
+    (e.g. ``"2025-05-01"`` for CES or ``"2025-Q2"`` for QCEW). Returns the 12th of
+    the ref-period's closing month — the convention ``_run_snapshot`` enforces (§4a).
+
+    Parameters
+    ----------
+    ref_token : str
+        ISO ref date (CES, ``"2025-05-01"``) or QCEW quarter token (``"2025-Q2"``).
+
+    Returns
+    -------
+    date
+        The day-12 anchor as a ``datetime.date``.
+    """
+    if "-Q" in ref_token:
+        year_str, q_str = ref_token.split("-Q")
+        month = int(q_str) * 3  # Q1→Mar, Q2→Jun, Q3→Sep, Q4→Dec
+        return date(int(year_str), month, 12)
+    ref = date.fromisoformat(ref_token)
+    return date(ref.year, ref.month, 12)
+
+
+@app.command()
+def watch(
+    source: str = typer.Option(
+        "all", "--source", help="Which feed(s) to poll: all | ces | qcew."
+    ),
+    snapshot_after: bool = typer.Option(
+        False, "--snapshot", help="Also bake a ModelData snapshot for each new release."
+    ),
+    store: str | None = typer.Option(
+        None, "--store", help="Override the store URI/path (default: VINTAGE_STORE_PATH)."
+    ),
+) -> None:
+    """Poll the BLS release feed; trigger ``update`` on a newly-published release.
+
+    Designed for a daily cron. The feed answers only "a release is out *now*" and
+    supplies the publication day (``pubDate``); the **store** (via ``compute_status``)
+    is the source of truth for which ref-month/quarter is still uncaptured. A clean
+    no-op on days with nothing new. A same-day CES + QCEW co-release triggers both.
+    """
+    from nfp_download.release_dates.feed import (
+        CEWQTR_FEED_URL,
+        EMPSIT_FEED_URL,
+        fetch_feed,
+    )
+    from nfp_lookups.paths import VINTAGE_STORE_PATH
+
+    from nfp_vintages.store_status import compute_status
+
+    if store is not None:
+        if store.startswith(("s3://", "s3a://")):
+            from upath import UPath
+
+            store_path = UPath(store)
+        else:
+            store_path = Path(store)
+    else:
+        store_path = VINTAGE_STORE_PATH
+
+    _feeds = {"ces": EMPSIT_FEED_URL, "qcew": CEWQTR_FEED_URL}
+    if source == "all":
+        wanted = ["ces", "qcew"]
+    elif source in _feeds:
+        wanted = [source]
+    else:
+        raise typer.BadParameter("must be one of: all, ces, qcew", param_hint="--source")
+
+    for src in wanted:
+        items = fetch_feed(_feeds[src])
+        if not items:
+            print(f"  {src}: feed empty — skipping")
+            continue
+        # BLS lists newest first; the top item is the latest release.
+        latest = items[0]
+        pub = latest.pub_date  # already a date object from parse_feed
+
+        # The store decides whether this release's ref-period is captured.
+        status = compute_status(store_path, as_of=pub)
+        uncaptured = [u for u in status.uncaptured if u.startswith(f"{src}:")]
+        if not uncaptured:
+            print(f"  {src}: latest release ({pub}) already captured — no-op")
+            continue
+
+        # ref_token is the part after "src:" — ISO date (CES) or YYYY-Qn (QCEW).
+        ref_token = uncaptured[0].split(":", 1)[1]
+        print(f"  {src}: NEW release {pub} (uncaptured {ref_token}) — updating")
+        _run_update(pub, only=src, store_path=store_path)
+
+        if snapshot_after:
+            anchor = _watch_snapshot_anchor(ref_token)
+            print(f"  {src}: snapshot at day-12 anchor {anchor}")
+            _run_snapshot(anchor)
+
+
 if __name__ == '__main__':
     app()
