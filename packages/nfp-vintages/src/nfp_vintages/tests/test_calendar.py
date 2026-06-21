@@ -88,3 +88,29 @@ def test_advance_release_calendar_live(monkeypatch, tmp_path):
 
     assert vintage_dates_path.exists()
     assert pl.read_parquet(vintage_dates_path).height > 0
+
+
+def test_process_command_calls_advance_release_calendar(monkeypatch):
+    """The legacy `process` command must delegate the calendar build to the
+    lifted advance_release_calendar (kept green until §9 deletes `process`)."""
+    import nfp_vintages.__main__ as cli
+
+    calls: list[str] = []
+
+    def _spy_advance() -> None:
+        calls.append("advance")
+
+    # process imports advance_release_calendar from nfp_vintages.calendar in-body.
+    monkeypatch.setattr("nfp_vintages.calendar.advance_release_calendar", _spy_advance)
+    # Stub the three processing mains so nothing heavy runs.
+    monkeypatch.setattr(
+        "nfp_vintages.processing.ces_triangular.main", lambda: None
+    )
+    monkeypatch.setattr("nfp_vintages.processing.qcew_bulk.main", lambda: None)
+    monkeypatch.setattr("nfp_vintages.processing.combine.main", lambda: None)
+
+    cli.process()
+
+    assert calls == ["advance"]
+    # The lifted helper must no longer live in __main__.
+    assert not hasattr(cli, "_build_release_calendar")
