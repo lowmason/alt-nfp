@@ -26,6 +26,8 @@ class LatentPriors:
 
 @dataclass(frozen=True)
 class CESPriors:
+    """CES observation equation: shared bias/loading and per-vintage LogNormal sigmas."""
+
     log_sigma_mu: float = math.log(0.002)
     log_sigma_sd: float = 0.5
     alpha_sd: float = 0.005
@@ -47,6 +49,8 @@ class QCEWPriors:
 
 @dataclass(frozen=True)
 class FourierPriors:
+    """Fourier seasonal block: harmonic count and the annually-evolving GRW step SDs."""
+
     n_harmonics: int = 4
     log_sigma_mu: float = math.log(0.0003)
     log_sigma_sd: float = 0.5
@@ -55,6 +59,8 @@ class FourierPriors:
 
 @dataclass(frozen=True)
 class BirthDeathPriors:
+    """Structural birth/death block priors: intercept phi_0, shock SD sigma_bd, and cyclical-covariate loading SD phi_3 (the v2 BD term is 3-term: bd_t = phi_0 + sigma_bd*xi + phi_3*X_cycle)."""
+
     phi0_mu: float = 0.001
     phi0_sd: float = 0.002
     log_sigma_mu: float = math.log(0.003)
@@ -64,6 +70,8 @@ class BirthDeathPriors:
 
 @dataclass(frozen=True)
 class ProviderPriors:
+    """Per-provider measurement model: bias/loading, InverseGamma noise SD, and AR(1) persistence."""
+
     alpha_sd: float = 0.005
     lambda_mu: float = 1.0
     lambda_sd: float = 0.15

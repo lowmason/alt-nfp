@@ -55,8 +55,21 @@ docs = [
     "mkdocs-material>=9.7.3",
     "mkdocs-section-index>=0.3.10",
     "mkdocstrings[python]>=1.0.3",
+    "interrogate>=1.7.0",
 ]
 
+
+[tool.interrogate]
+fail-under = 100
+ignore-init-method = true
+ignore-magic = true
+ignore-private = true
+ignore-semiprivate = true
+ignore-property-decorators = true
+ignore-nested-functions = true
+ignore-module = true
+exclude = ["packages/*/src/*/tests", "scripts", "docs", "build", "dist"]
+verbose = 1
 
 [tool.black]
 line-length = 100

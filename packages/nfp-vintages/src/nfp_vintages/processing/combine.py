@@ -112,6 +112,7 @@ def build_revisions(*, save: bool = True) -> pl.DataFrame:
 
 
 def main() -> None:
+    """Entry point: build the combined revisions table and write it to ``OUTPUT_PATH``."""
     build_revisions(save=True)
 
 

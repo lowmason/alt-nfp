@@ -44,6 +44,8 @@ SCALAR_VARS = (
 
 @dataclass
 class ParityRow:
+    """One site's parity verdict: its name, pass/fail, a human-readable detail, and kind."""
+
     name: str
     passed: bool
     detail: str
@@ -52,6 +54,8 @@ class ParityRow:
 
 @dataclass
 class ParityReport:
+    """Per-fixture parity result: the fixture stem, its collected per-site rows, and computed ``passed``/``n_failed`` aggregates."""
+
     stem: str
     rows: list[ParityRow] = field(default_factory=list)
 
@@ -64,6 +68,19 @@ class ParityReport:
         return sum(not r.passed for r in self.rows)
 
     def summary(self, *, failures_only: bool = False) -> str:
+        """Render a multi-line pass/fail summary of this report.
+
+        Parameters
+        ----------
+        failures_only : bool, optional
+            When True, omit rows that passed and list only the failures.
+
+        Returns
+        -------
+        str
+            A header line (``stem: PASS`` or ``stem: FAIL (n/total)``) followed
+            by one indented line per included row.
+        """
         status = "PASS" if self.passed else f"FAIL ({self.n_failed}/{len(self.rows)})"
         lines = [f"{self.stem}: {status}"]
         for r in self.rows:

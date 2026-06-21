@@ -24,6 +24,22 @@ class RandomWalk:
         self.history = history
 
     def predict(self, ref_month: date, *, as_of: date) -> float | None:
+        """Return the most recent first-print change known by ``as_of``.
+
+        Parameters
+        ----------
+        ref_month : date
+            The reference month being predicted (unused; the random walk
+            carries the last print forward regardless of target).
+        as_of : date
+            Censoring date; only prints with ``vintage_date <= as_of`` are used.
+
+        Returns
+        -------
+        float or None
+            The last published first-print change_k, or ``None`` if no print
+            is known by ``as_of``.
+        """
         known = _known(self.history, as_of)
         if known.height == 0:
             return None
@@ -40,6 +56,22 @@ class TrailingMean:
         self.window = window
 
     def predict(self, ref_month: date, *, as_of: date) -> float | None:
+        """Return the mean of the last ``window`` first-print changes known by ``as_of``.
+
+        Parameters
+        ----------
+        ref_month : date
+            The reference month being predicted (unused; the trailing mean is
+            target-independent).
+        as_of : date
+            Censoring date; only prints with ``vintage_date <= as_of`` are used.
+
+        Returns
+        -------
+        float or None
+            The mean change_k over the trailing ``window`` published prints, or
+            ``None`` if no print is known by ``as_of``.
+        """
         known = _known(self.history, as_of)
         if known.height == 0:
             return None

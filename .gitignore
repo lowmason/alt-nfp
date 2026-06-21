@@ -9,6 +9,7 @@ output/
 
 # MkDocs build output
 site/
+/site/
 
 # Python-generated files
 __pycache__/

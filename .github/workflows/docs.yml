@@ -1,0 +1,31 @@
+name: docs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DISABLE_MKDOCS_2_WARNING: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install docs toolchain
+        run: uv sync --group docs
+
+      - name: Strict build (gate)
+        run: uv run mkdocs build --strict
+
+      - name: Coverage gate
+        run: uv run interrogate -c pyproject.toml packages
+
+      - name: Publish to gh-pages
+        run: uv run mkdocs gh-deploy --force
