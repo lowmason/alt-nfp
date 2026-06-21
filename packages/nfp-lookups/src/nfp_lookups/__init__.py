@@ -55,6 +55,7 @@ from .paths import (
     PROVIDERS_DIR,
     STORE_DIR,
     data_location,
+    output_root,
     providers_location,
     upath_for,
 )

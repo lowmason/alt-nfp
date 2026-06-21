@@ -173,6 +173,18 @@ def upath_for(uri: str) -> Any:
     )
 
 
+def output_root(arg: str) -> Any:
+    """Resolve a CLI output-root argument to a Path (local) or credentialed UPath (s3://).
+
+    Dev/eval scripts take their output root as argv; on Bloomberg it must be an
+    ``s3://`` URI (or a /tmp path), never ``./data`` (plans/15 Task 11).
+    """
+    s = str(arg)
+    if s.startswith(("s3://", "s3a://")):
+        return upath_for(s)
+    return Path(s).resolve()
+
+
 def data_location() -> Any:
     """Root for PERSISTENT non-store data artifacts (indicators, competitors,
     derived release/vintage schedules).

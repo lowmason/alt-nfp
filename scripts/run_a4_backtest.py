@@ -31,6 +31,7 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from dotenv import load_dotenv
@@ -45,20 +46,29 @@ BATCH_SEED = 9000
 SPLICE_K = 150.0  # |best-available − first-print| change_k flagging threshold
 
 
-def _read_json(path: Path) -> dict:
+from nfp_lookups.paths import is_remote, output_root, storage_options_for  # noqa: E402
+
+
+def _read_json(path: Path | Any) -> dict:
     return json.loads(path.read_text())
 
 
-def _write_json(path: Path, obj: dict) -> None:
+def _write_json(path: Path | Any, obj: dict) -> None:
     path.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n")
 
 
-def _load_npz(path: Path) -> dict:
-    with np.load(path, allow_pickle=False) as npz:
+def _load_npz(path: Path | Any) -> dict:
+    with path.open("rb") as fh, np.load(fh, allow_pickle=False) as npz:
         return {k: npz[k] for k in npz.files}
 
 
-def _snapshot_path(snap_dir: Path, as_of: str) -> Path | None:
+def _np_savez(path: Path | Any, **arrays) -> None:
+    """Write arrays to an npz via path.open() — works for both local and s3:// UPath."""
+    with path.open("wb") as fh:
+        np.savez(fh, **arrays)
+
+
+def _snapshot_path(snap_dir: Path | Any, as_of: str) -> Path | Any | None:
     hits = sorted((snap_dir / f"asof={as_of}").glob("model_data_*.npz"))
     return hits[0] if hits else None
 
@@ -97,7 +107,8 @@ def cmd_snapshot(root: Path) -> None:
     from nfp_ingest.snapshots import load_snapshot, snapshot_model_data
 
     snap_dir = root / "snapshots"
-    root.mkdir(parents=True, exist_ok=True)
+    if not is_remote(root):
+        root.mkdir(parents=True, exist_ok=True)
     manifest_path = root / "grid_manifest.json"
     manifest: dict = (
         _read_json(manifest_path)
@@ -250,7 +261,7 @@ def cmd_serial(root: Path) -> None:
             + (["QCEW"] if c in np.asarray(data["qcew_obs"]) else [])
             + [pp["name"] for pp in data["pp_data"] if c in np.asarray(pp["pp_obs"])]
         )
-        np.savez(npz_path, **arrays)
+        _np_savez(npz_path, **arrays)
         entries[key] = meta
         _write_json(out_path, entries)
         print(
@@ -306,7 +317,7 @@ def cmd_batched(root: Path) -> None:
     entries: dict = {}
     for i, (key, _t) in enumerate(targets):
         arrays, meta = batch.date_arrays(i)
-        np.savez(root / f"batched_{key}.npz", **arrays)
+        _np_savez(root / f"batched_{key}.npz", **arrays)
         entries[key] = meta
     _write_json(
         root / "batched_manifest.json",
@@ -385,7 +396,7 @@ def cmd_compare(root: Path) -> int:
         )
 
     df = pl.DataFrame(rows)
-    df.write_parquet(root / "a4_results.parquet")
+    df.write_parquet(str(root / "a4_results.parquet"), storage_options=storage_options_for(root))
 
     n_fail = sum(r.n_failed for r in reports)
     n_rows = sum(len(r.rows) for r in reports)
@@ -474,7 +485,7 @@ def cmd_compare(root: Path) -> int:
 
 def main() -> None:
     mode, root_arg = sys.argv[1], sys.argv[2]
-    root = Path(root_arg).resolve()
+    root = output_root(root_arg)
     if mode == "snapshot":
         cmd_snapshot(root)
     elif mode == "serial":
