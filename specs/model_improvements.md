@@ -1,6 +1,6 @@
 # Model improvements — private first-print targeting, diagnostics, and turning-point edge (design)
 
-Status: **design, revised 2026-06-19**. The **model-side counterpart** to `specs/a5_real_competitors.md` (evaluation-side firewall — no `nfp-model` changes). Motivated by `specs/model_research.md` (consolidated literature review) and the **validate-first pivot** in `specs/plans/0-port_and_staged_plan.md` (parity is a port-fidelity floor, **not** correctness). This spec reopens Phase A's "parity-is-done" freeze — behind new baselines — to fix two things A5's prong-2 surfaced: the model is not modeling the **object** it should (it nowcasts **private** NFP, not total), nor the **vintage** it is scored on (first print).
+Status: **design, revised 2026-06-19**. The **model-side counterpart** to `specs/completed/a5_real_competitors.md` (evaluation-side firewall — no `nfp-model` changes). Motivated by `specs/model_research.md` (consolidated literature review) and the **validate-first pivot** in `specs/plans/0-port_and_staged_plan.md` (parity is a port-fidelity floor, **not** correctness). This spec reopens Phase A's "parity-is-done" freeze — behind new baselines — to fix two things A5's prong-2 surfaced: the model is not modeling the **object** it should (it nowcasts **private** NFP, not total), nor the **vintage** it is scored on (first print).
 
 ## TL;DR
 

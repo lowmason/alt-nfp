@@ -187,4 +187,4 @@ manual door (see IND-XC-2).
   schedule) are all **clean and parity-faithful** — the original audits' worry
   about them was unfounded.
 
-Implementation plan: see [`plans/9-audit_independent.md`](../plans/9-audit_independent.md).
+Implementation plan: see [`plans/completed/9-audit_independent.md`](../plans/completed/9-audit_independent.md) (retired as stale 2026-06-21).

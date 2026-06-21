@@ -3,8 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps
 > use checkbox (`- [ ]`) syntax for tracking.
-> **Status:** DRAFT — awaiting maintainer go-ahead before any code edits (high blast radius
-> near the store path; see Global Constraints).
+> **Status:** ✅ COMPLETE (2026-06-20) — all tasks DONE or SUPERSEDED→plan 16 (see per-task
+> markers below); container-storage spine verified end-to-end against MinIO. Moved to
+> `plans/completed/` 2026-06-21. (The "DRAFT — awaiting go-ahead" banner was the pre-execution state.)
 
 **Goal:** Make the code stop writing under `./data/` so it runs on Bloomberg's small-footprint
 container: persistent artifacts the production nowcast reads go to **S3**; rebuild-only scratch

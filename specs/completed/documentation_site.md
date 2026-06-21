@@ -1,8 +1,9 @@
 # Documentation Site — Design Spec
 
-> **STATUS: finalized 2026-06-21.** Brainstorm complete; all open questions resolved.
-> This is the design record that feeds `superpowers:writing-plans`. Implementation
-> (scaffolding, config, page authoring, docstring fill) has **not** started.
+> **STATUS: ✅ IMPLEMENTED (plan 17, merged PR #9) + DEPLOYED LIVE 2026-06-21** at
+> https://lowmason.github.io/alt-nfp/. Brainstorm complete; all open questions resolved.
+> This is the design record that fed `superpowers:writing-plans` → `plans/completed/17-documentation_site.md`.
+> (The original "implementation has not started" line was the pre-execution state.)
 
 ## Goal
 

@@ -11,7 +11,7 @@ lands (the `None`-tolerant path below). This spec stays self-contained so it can
 lifted into a Bloomberg-terminal workspace. It defines (a) the **contract** the
 adapter expects — the part this repo owns and pins — and (b) a **Bloomberg-side
 retrieval recipe** to produce a file in that contract. Companions:
-`specs/a5_real_competitors.md` (the harness this consensus scores in) and
+`specs/completed/a5_real_competitors.md` (the harness this consensus scores in) and
 `specs/completed/government_wedge.md` (the government forecast that makes the Total contest
 valid — consensus is a Total object, meaningless against the private nowcast alone).
 

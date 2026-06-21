@@ -1,6 +1,6 @@
 # CLI Production Workflow — month-T updates, feed-driven automation, bootstrap separation
 
-**Status:** design (approved 2026-06-20; revised after adversarial review; pre-implementation)
+**Status:** ✅ IMPLEMENTED via `plans/completed/16-cli_production_workflow.md` (Phases 1–9 complete, merged to main); moved to `specs/completed/` 2026-06-21. (Original banner — "design; pre-implementation" — was the pre-execution state.)
 **Branch:** `a5-rebuilt-integration`
 **Scope owner:** maintainer
 **Supersedes the everyday surface of:** `nfp_vintages.__main__` (the stage-shaped `download`/
