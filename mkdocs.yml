@@ -63,4 +63,8 @@ extra_css:
 
 nav:
   - Home: index.md
+  - Get Started:
+      - Installation: get-started/installation.md
+      - Quickstart: get-started/quickstart.md
+      - The data story: get-started/data-story.md
   - API Reference: reference/
