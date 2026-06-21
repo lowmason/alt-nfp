@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date
 
 import polars as pl
+from nfp_ingest.vintage_store import append_to_vintage_store, compact_partition
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
 
@@ -81,3 +82,35 @@ def make_shutdown_sentinel_row(*, ref_month: str) -> pl.DataFrame:
         ref_month=ref_month, vintage="2025-11-12",
         revision=0, benchmark_revision=0, employment=-1.0,
     )
+
+
+def make_first_print_window(store) -> None:
+    """Seed a two-month first-print window for BOTH the 05 (private) and 00 (total) legs.
+
+    For each industry leg: month-A gets rev0/bmr0 (first print) and rev1/bmr0
+    (second print = next month's prior-month partner); month-B gets rev0/bmr0.
+    The 00 and 05 legs share vintage stamps so wedge_first_print_changes' same-release
+    check passes and it resolves a non-empty frame. Levels differ across legs so the
+    wedge is non-trivial. Compacts the partition once at the end.
+    """
+    # 05 (private) leg
+    append_to_vintage_store(
+        make_ces_rows(ref_month="2026-01-12", vintage="2026-02-06", revision=0,
+                      employment=150_000.0, industry_code="05"), store)
+    append_to_vintage_store(
+        make_ces_rows(ref_month="2026-01-12", vintage="2026-03-06", revision=1,
+                      employment=150_300.0, industry_code="05"), store)
+    append_to_vintage_store(
+        make_ces_rows(ref_month="2026-02-12", vintage="2026-03-06", revision=0,
+                      employment=150_800.0, industry_code="05"), store)
+    # 00 (total) leg — co-released vintages, larger levels (total > private)
+    append_to_vintage_store(
+        make_ces_rows(ref_month="2026-01-12", vintage="2026-02-06", revision=0,
+                      employment=300_000.0, industry_code="00"), store)
+    append_to_vintage_store(
+        make_ces_rows(ref_month="2026-01-12", vintage="2026-03-06", revision=1,
+                      employment=300_500.0, industry_code="00"), store)
+    append_to_vintage_store(
+        make_ces_rows(ref_month="2026-02-12", vintage="2026-03-06", revision=0,
+                      employment=301_400.0, industry_code="00"), store)
+    compact_partition(store, "ces", True)

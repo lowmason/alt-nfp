@@ -6,6 +6,7 @@ properties. The first run pins them so a future change to the dedup rules trips 
 
 from __future__ import annotations
 
+import polars as pl
 from nfp_ingest.vintage_store import (
     append_to_vintage_store,
     compact_partition,
@@ -68,3 +69,52 @@ class TestIdempotence:
         rel = _relation(store)
         # compact keeps MIN(vintage_date) per ukey → the early real-time level wins
         assert set(rel.values()) == {150_000.0}
+
+
+class TestFirstPrintUnchanged:
+    def test_capture_does_not_move_existing_first_prints(self, tmp_path):
+        from nfp_ingest.first_print import first_print_changes
+        from nfp_ingest.wedge_data import wedge_first_print_changes
+        from nfp_vintages.tests._fixtures import make_first_print_window
+
+        store = tmp_path / "store"
+        make_first_print_window(store)  # two months × {00 total, 05 private}, co-released
+
+        # Discriminating guard against a vacuous (empty-frame) pin: the wedge must
+        # actually resolve at least one ref_date, else the .all() below is empty.
+        wedge_before = wedge_first_print_changes(store_path=store)
+        assert wedge_before.height >= 1
+        fp05_before = first_print_changes(store_path=store, industry_code="05")
+        assert fp05_before.filter(
+            pl.col("first_print_change_k").is_not_null()
+        ).height >= 1
+
+        # A NEW, later month's capture must not move earlier months' first prints.
+        append_to_vintage_store(
+            make_ces_rows(
+                ref_month="2026-03-12", vintage="2026-04-03",
+                revision=0, employment=152_000.0, industry_code="05",
+            ),
+            store,
+        )
+        append_to_vintage_store(
+            make_ces_rows(
+                ref_month="2026-03-12", vintage="2026-04-03",
+                revision=0, employment=303_000.0, industry_code="00",
+            ),
+            store,
+        )
+        compact_partition(store, "ces", True)
+
+        fp05_after = first_print_changes(store_path=store, industry_code="05")
+        wedge_after = wedge_first_print_changes(store_path=store)
+
+        common = fp05_before.join(fp05_after, on="ref_date", suffix="_after", how="inner")
+        assert (
+            common["first_print_change_k"] == common["first_print_change_k_after"]
+        ).all()
+
+        wcommon = wedge_before.join(
+            wedge_after, on="ref_date", suffix="_after", how="inner"
+        )
+        assert (wcommon["wedge_change_k"] == wcommon["wedge_change_k_after"]).all()
