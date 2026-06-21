@@ -46,6 +46,7 @@ src/nfp_download/
 └── release_dates/
     ├── __init__.py
     ├── scraper.py           # Async scraper for BLS publication schedule HTML pages
+    ├── feed.py              # parse_feed()/fetch_feed() — BLS empsit/cewqtr RSS (curl_cffi impersonation, for watch)
     └── parser.py            # Parse scraped HTML into release date records
 ```
 

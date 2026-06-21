@@ -36,25 +36,18 @@ lives in `nfp_download.bls.bulk` since the A2 seam fix). Provides:
 ## Key Commands
 
 ```bash
-# Run all vintage pipeline steps (download → download-indicators → process → current → build)
-uv run alt-nfp
-# NOTE: bare alt-nfp calls build(None), which runs build_store without allow_canonical=True.
-# Against the canonical store (NFP_STORE_URI=s3://alt-nfp/store) this raises RuntimeError.
-# To rebuild the canonical store use: uv run alt-nfp build --allow-canonical (DANGEROUS).
+# Production month-T workflow (specs/cli_production_workflow.md)
+uv run alt-nfp update --as-of 2026-01-12 [--only ces|qcew|indicators]  # capture + append
+uv run alt-nfp status [--as-of 2026-01-12] [--store URI]               # coverage report
+uv run alt-nfp watch [--source ces|qcew|all] [--snapshot]              # feed-driven (cron)
+uv run alt-nfp snapshot --as-of 2026-01-12 [--grid-end 2026-06-12]     # hash-pinned ModelData
 
-# Individual steps
-uv run alt-nfp download            # Download CES triangular + QCEW bulk
-uv run alt-nfp download-indicators # Download FRED cyclical indicators
-uv run alt-nfp process             # Scrape BLS calendar + process revisions
-uv run alt-nfp current             # Fetch current BLS estimates (benchmark-revised)
-uv run alt-nfp build               # Merge revisions + current → data/store/
-uv run alt-nfp build --releases PATH
-uv run alt-nfp snapshot --as-of 2026-01-12 [--grid-end 2026-06-12]  # hash-pinned ModelData snapshots
+# One-time historical rebuild + promote — a SCRIPT, not a CLI command:
+uv run python scripts/bootstrap_store.py --scratch s3://alt-nfp/store-rebuild \
+    --canonical s3://alt-nfp/store
 
-# Run vintage tests
+# Run vintage tests / lint
 pytest src/nfp_vintages/tests/
-
-# Lint
 ruff check src/nfp_vintages/
 ```
 
@@ -63,7 +56,9 @@ ruff check src/nfp_vintages/
 ```
 src/nfp_vintages/
 ├── __init__.py             # Exports: real_time_view, final_view, vintage_diff
-├── __main__.py             # CLI entry point (typer app)
+├── __main__.py             # CLI entry point (update/status/watch/snapshot; legacy build chain retired §10)
+├── calendar.py             # advance_release_calendar() — release-calendar scrape (lifted from __main__)
+├── store_status.py         # compute_status()/format_status() — read-only coverage report (status)
 ├── views.py                # real_time_view(), final_view(), specific_vintage_view()
 ├── evaluation.py           # vintage_diff(), build_noise_multiplier_vector()
 ├── build_store.py          # Merge revisions + current → Hive-partitioned store
@@ -103,7 +98,7 @@ Downloads (`download_ces`, `download_qcew`, `download_qcew_bulk`) moved to
 - **SAE processing** (`processing/sae_states.py`): State and Area Employment, fetched via httpx.
 - **Views** (`views.py`): pure Polars operations on vintage DataFrames. `real_time_view()` returns what was known at a given date. `final_view()` returns latest available revision.
 - **Evaluation** (`evaluation.py`): `vintage_diff()` computes revision magnitudes. `build_noise_multiplier_vector()` constructs empirical noise multipliers by source and revision. Uses `nfp_lookups.revision_schedules` for CES/QCEW revision specs.
-- **CLI** (`__main__.py`): typer app with subcommands: `download`, `download-indicators`, `process`, `current`, `build`. Each step is idempotent.
+- **CLI** (`__main__.py`): typer app with the production subcommands `update` (capture month-T prints → append to store), `status` (read-only coverage + uncaptured alarm), `watch` (BLS-feed-driven trigger for cron), and `snapshot` (hash-pinned ModelData, day-12). The legacy stage commands (`download`/`download-indicators`/`process`/`current`/`build`/`build-rebuild`) and the bare-run chain were retired in the production-workflow reshape (§10); the one-time historical rebuild is now the `scripts/bootstrap_store.py` script, not a CLI command.
 - **Total assembly seam** (`assembly.py`, Track B): the private nowcast draws are in **growth/index space**, the wedge draws are native **change-k** — `assemble_total` converts the private leg via `scoreboard.change_draws_k` (using a **first-finite** `(base_index, idx_to_level)` anchor from `nfp_ingest.model_data.levels_provenance`, to avoid the `base_index` NaN class) and resamples it to the **wedge** draw count before the element-wise add. The two MCMC fits are independent (no shared seed); pairing is positional after resample. A residual-coupling knob exists but is **default off** (point-invariant). Consumed by `scripts/run_a5_backtest.py:cmd_total`.
 
 ## Data Layout

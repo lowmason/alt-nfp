@@ -49,6 +49,8 @@ src/nfp_ingest/
 ├── __init__.py
 ├── base.py                 # validate_panel(), empty_panel() — uses schemas from nfp_lookups
 ├── vintage_store.py        # read/write vintage store, transform_to_panel(), rank-based censoring
+├── qcew_acquire.py         # acquire_qcew_levels()/acquire_qcew_size_native() — CEW API slices (was private in nfp-vintages)
+├── capture.py              # capture_ces_print()/capture_qcew_quarter() — month-T current-print → store (update)
 ├── ces_national.py         # CES national-level ingestion
 ├── ces_state.py            # CES state-level ingestion
 ├── qcew.py                 # QCEW ingestion (4 input streams, industry hierarchy)

@@ -38,7 +38,12 @@ uv sync                                   # install workspace + dev group
 uv run pytest -m "not network" --no-cov   # full local suite (~3 min; MCMC smoke included)
 uv run pytest -m "not network and not slow" --no-cov  # fast suite (~30s), skips MCMC smoke
 uv run ruff check .                       # lint (line 100; E,W,F,I,B,C4,UP)
-uv run alt-nfp --help                     # vintage pipeline CLI
+uv run alt-nfp --help                     # production vintage-store CLI
+uv run alt-nfp update --as-of 2026-01-12  # capture knowable month-T prints, append to store
+uv run alt-nfp status                     # store coverage + uncaptured/corrected alarm
+uv run alt-nfp watch --source all         # BLS-feed-driven trigger (cron)
+uv run python scripts/bootstrap_store.py \  # one-time historical rebuild + promote (NOT a command)
+    --scratch s3://alt-nfp/store-rebuild --canonical s3://alt-nfp/store
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff + the non-network suite on push/PR
@@ -77,13 +82,16 @@ to `main`.
   `…/store-rebuild` on 2026-06-18 via `plans/10` T8, prior canonical preserved at
   `…/store-prev-20260618`). It is **not** append-only/irreplaceable — the old
   "live-captured, exists in no raw input" framing is retired (see memory
-  `store-replaceable-and-rebuild-backlog`). Still: never `alt-nfp build` straight
-  to `…/store`. Rebuilds target a scratch prefix
+  `store-replaceable-and-rebuild-backlog`). Still: the everyday CLI has **no**
+  `build` command — the one-time rebuild is `scripts/bootstrap_store.py` (never
+  write straight to `…/store`). Rebuilds target a scratch prefix
   (`NFP_STORE_URI=s3://alt-nfp/store-rebuild …`); promotion to canonical is the
-  deliberate T8 cutover — snapshot the prior canonical first, then copy-then-delete
-  per partition (filenames encode vintage ranges, so a plain overwrite would leave
-  both files and corrupt the store). `is_canonical_store` still guards
-  `build_store`/`mirror_store` against accidental clobber.
+  deliberate copy-then-delete cutover the bootstrap generalizes from `plans/10`
+  T8 — snapshot the prior canonical first, then copy-then-delete per partition
+  (filenames encode vintage ranges, so a plain overwrite would leave both files
+  and corrupt the store). `is_canonical_store` still guards
+  `write_rebuild_store`/`build_store`/`mirror_store` (and `bootstrap_store.py`
+  refuses a canonical `--scratch`) against accidental clobber.
 - **Specs workflow**: implemented specs move from `specs/` to `specs/completed/`;
   implemented plans move from `specs/plans/` to `specs/plans/completed/`. Superseded
   pre-port material (old todos) lives in `specs/completed/todos/`.
