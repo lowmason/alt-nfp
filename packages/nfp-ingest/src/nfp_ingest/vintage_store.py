@@ -806,6 +806,9 @@ def compact_partition(
         "geographic_code",
         "revision",
         "benchmark_revision",
+        "ownership",
+        "size_class_type",
+        "size_class_code",
     ]
 
     combined = (

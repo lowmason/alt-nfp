@@ -680,11 +680,14 @@ class TestCompactPartition:
         def _row(emp, vint):
             return pl.DataFrame({
                 "geographic_type": ["national"], "geographic_code": ["00"],
+                "ownership": ["total"],
                 "industry_type": ["national"], "industry_code": ["00"],
                 "ref_date": [date(2024, 1, 1)], "vintage_date": [vint],
                 "revision": pl.Series([0], dtype=pl.UInt8),
                 "benchmark_revision": pl.Series([0], dtype=pl.UInt8),
                 "employment": [emp],
+                "size_class_type": pl.Series([None], dtype=pl.Utf8),
+                "size_class_code": pl.Series([None], dtype=pl.Utf8),
             })
 
         # Same uniqueness key, two vintage_dates, two fragment files.
@@ -1264,3 +1267,51 @@ class TestAppendUkeySizeClassAndOwnership:
         assert append_to_vintage_store(row, tmp_path) == 1
         # Identical re-append must skip (null size_class_* compared as equal).
         assert append_to_vintage_store(row, tmp_path) == 0
+
+
+# ---------------------------------------------------------------------------
+# compact ukey under-keying fix (Decision A — spec §6.1)
+# ---------------------------------------------------------------------------
+
+
+class TestCompactUkeySizeClass:
+    """Spec §6.1: compact must key on ownership + size_class_{type,code}."""
+
+    def test_compact_keeps_distinct_size_class_codes(self, tmp_path):
+        """Distinct QCEW Q1 size buckets across two fragments must survive compaction.
+
+        compact_partition no-ops at <=1 file, so write two fragment parquets
+        (bucket '1' in one, buckets '2'/'3' in the other). Under the legacy
+        7-col ukey unique(subset=ukey) collapses all three to a single row.
+        """
+        common = {
+            "source": "qcew",
+            "sa": False,
+            "ownership": "private",
+            "industry_code": "10",
+            "size_class_type": "size",
+        }
+        pdir = tmp_path / "source=qcew" / "seasonally_adjusted=false"
+        pdir.mkdir(parents=True)
+
+        frag_a = pl.DataFrame(
+            [_store_row(**common, size_class_code="1", employment=100.0)],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+        frag_b = pl.DataFrame(
+            [
+                _store_row(**common, size_class_code="2", employment=200.0),
+                _store_row(**common, size_class_code="3", employment=300.0),
+            ],
+            schema=VINTAGE_STORE_SCHEMA,
+        )
+        frag_a.drop(["source", "seasonally_adjusted"]).write_parquet(pdir / "a.parquet")
+        frag_b.drop(["source", "seasonally_adjusted"]).write_parquet(pdir / "b.parquet")
+
+        compact_partition(tmp_path, "qcew", False)
+
+        files = list(pdir.glob("*.parquet"))
+        assert len(files) == 1
+        assert files[0].name == "compacted.parquet"
+        compacted = pl.read_parquet(files[0])
+        assert sorted(compacted["size_class_code"].to_list()) == ["1", "2", "3"]
