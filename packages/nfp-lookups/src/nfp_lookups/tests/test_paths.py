@@ -8,6 +8,27 @@ from nfp_lookups import paths
 from nfp_lookups.paths import _find_base_dir, _store_location, is_canonical_store
 
 
+@pytest.fixture(autouse=True)
+def _isolate_paths_module():
+    """Undo any ``reload(nfp_lookups.paths)`` a test in this module performs.
+
+    Two tests below reload the module to exercise ``data_location()``'s env
+    switch. These tests are unmarked, so the root ``conftest._block_live_store``
+    fixture has blanked the store creds (``AWS_*``/``NFP_STORE_URI``) for them —
+    which means the reload rebuilds the module-level ``VINTAGE_STORE_PATH`` with a
+    *blanked-credential* s3fs instance baked in. Left in place, that poisoned
+    path leaks to later ``@pytest.mark.real_store`` tests (e.g. ``test_diagnostics``),
+    whose dynamic ``from nfp_lookups.paths import VINTAGE_STORE_PATH`` then reads
+    an empty store and fails ``assert height > 0``. Snapshot the module dict before
+    the test and restore it after, reinstating the real-credential objects (and
+    every other env-derived constant) regardless of the cred state at teardown.
+    """
+    snapshot = dict(paths.__dict__)
+    yield
+    paths.__dict__.clear()
+    paths.__dict__.update(snapshot)
+
+
 def test_is_canonical_store_matches_canonical_uri():
     assert is_canonical_store("s3://alt-nfp/store") is True
     assert is_canonical_store("s3://alt-nfp/store/") is True
@@ -129,7 +150,7 @@ def test_data_location_remote_when_set(monkeypatch):
     loc = paths.data_location()
     assert paths.is_remote(loc)
     assert str(loc / "indicators").startswith("s3://alt-nfp/indicators")
-    reload(paths)  # restore module state for other tests
+    # Module state is restored by the autouse _isolate_paths_module fixture.
 
 
 class TestStorageOptions:
