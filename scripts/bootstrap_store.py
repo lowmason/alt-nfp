@@ -21,12 +21,15 @@ Usage::
 Scope is national-only, 2017+ (the intended canonical scope). QCEW is fetched
 live from the CEW API (not the bulk ZIPs), so only ``download_ces`` is wired.
 
-Container-safety (plans/15): every byproduct that the legacy lineage parked under
-``./data`` is routed to a run-scoped ``tempfile.TemporaryDirectory`` here — the
-raw ``cesvinall/`` extract and the CES read both point at ``tmp``. The only
-artifact that survives the run is the rebuilt **store** on S3 (the scratch
-``NFP_STORE_URI`` prefix). ``write_rebuild_store`` is itself container-safe
-(``str(path)`` + ``storage_options_for`` + ``is_remote`` mkdir guard).
+Container-safety (plans/15): no byproduct lands under ``./data``. The raw
+``download_ces`` ``cesvinall/`` extract (and the CES read of it) is routed to this
+run-scoped ``tempfile.TemporaryDirectory`` via ``data_dir=tmp``;
+``advance_release_calendar`` self-routes its scraped release HTML to its OWN
+tempdir (it must, since it also runs on the ``alt-nfp update`` hot path), so this
+script does not have to redirect it. The only artifact that survives the run is the
+rebuilt **store** on S3 (the scratch ``NFP_STORE_URI`` prefix), written by the
+container-safe ``write_rebuild_store`` (``str(path)`` + ``storage_options_for`` +
+``is_remote`` mkdir guard).
 
 The promote step copies rebuild files into the canonical prefix then deletes the
 old orphans (filenames encode vintage ranges, so a plain overwrite-mirror would
