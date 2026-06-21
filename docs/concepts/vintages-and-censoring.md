@@ -141,7 +141,7 @@ analogue in Layer 1:
   (`provider_pub_lag_weeks = 3`). Months whose `ref_date + 3 weeks` falls after
   `D` are masked to missing.
 - **Cyclical-indicator publication lags.** Each cyclical indicator (jobless
-  claims, NFCI, business applications, JOLTS) has its own publication lag
+  claims, JOLTS) has its own publication lag
   (`CyclicalIndicator.pub_lag`). A month is masked when its
   lag-offset reference month would only be published after `D`.
 
