@@ -72,6 +72,23 @@ class Consensus:
         self.table = table
 
     def predict(self, ref_month: date, *, as_of: date) -> float | None:
+        """Return the consensus median for ``ref_month`` once its survey has locked.
+
+        Parameters
+        ----------
+        ref_month : date
+            The reference month being predicted; bucketed to month-start before
+            lookup so the caller's day convention does not matter.
+        as_of : date
+            Censoring date; the value is withheld until ``as_of`` reaches the
+            survey date (so the consensus is a T-1-only competitor).
+
+        Returns
+        -------
+        float or None
+            The consensus median change_k, or ``None`` when no table is loaded,
+            the month is absent, or the survey has not locked by ``as_of``.
+        """
         if self.table is None:
             return None
         # The file's ``ref_month`` is month-start (day=1, per

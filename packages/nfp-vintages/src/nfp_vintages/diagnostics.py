@@ -14,6 +14,8 @@ import polars as pl
 
 @dataclass(frozen=True)
 class OLSResult:
+    """Fitted OLS output: coefficients, their covariance, R^2, sample size, and residuals."""
+
     coeffs: np.ndarray      # (k,)
     cov: np.ndarray         # (k, k) coefficient covariance
     r2: float
@@ -170,6 +172,8 @@ def build_aruoba_design(
 
 @dataclass(frozen=True)
 class AruobaResult:
+    """Aruoba revision-regression result: the first-print bias intercept, R^2, and coefficients."""
+
     intercept_k: float          # alpha — the first-print bias (feeds section 5A)
     r2: float                   # forecastable share of revision variance
     coef_names: list[str]
@@ -189,6 +193,8 @@ def aruoba_regression(revision_k: np.ndarray, X: np.ndarray, names: list[str]) -
 
 @dataclass(frozen=True)
 class MZResult:
+    """Mincer-Zarnowitz efficiency result: alpha/beta plus the joint Wald test of (alpha=0, beta=1)."""
+
     alpha: float
     beta: float
     joint_stat: float    # Wald chi^2 for (alpha=0, beta=1)
@@ -218,6 +224,8 @@ def mincer_zarnowitz(actual: np.ndarray, forecast: np.ndarray) -> MZResult:
 
 @dataclass(frozen=True)
 class GateConfig:
+    """Thresholds gating Tier 2/3 funding: the normal-month R^2 floor and turning-point excess."""
+
     normal_r2_floor: float = 0.10           # below this, monthly revisions ~ noise
     turning_point_excess: float = 0.15      # tp R2 must exceed normal by this to fund BD
 

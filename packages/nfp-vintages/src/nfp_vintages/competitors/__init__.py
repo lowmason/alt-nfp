@@ -13,6 +13,8 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class Competitor(Protocol):
+    """Structural protocol for an A5 competitor: a ``name`` plus an as-of-aware ``predict``."""
+
     name: str
 
     def predict(self, ref_month: date, *, as_of: date) -> float | None:

@@ -24,6 +24,13 @@ WEDGE_DETERMINISTIC_SITES = ("mu", "season")
 
 
 def wedge_model(data: dict) -> None:
+    """Change-space STS for the government wedge: drift + sum-to-zero monthly season + interventions.
+
+    The wedge month-over-month change is ``mu_t = drift + season[month_t] +
+    X_intervention @ coef`` with a masked iid-Normal likelihood. *data* is a
+    dict of arrays (``T``, ``month_of_year``, ``X_intervention``, intervention
+    priors, ``y``, ``mask``).
+    """
     T = int(data["T"])
     moy = jnp.asarray(data["month_of_year"]) - 1          # 0..11
     X = jnp.asarray(data["X_intervention"])               # (T, K)
