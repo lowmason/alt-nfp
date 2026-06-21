@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 
 from nfp_lookups.paths import BASE_DIR
 
@@ -68,3 +69,64 @@ def test_doc_path_for_init_is_index(tmp_path):
     by_id = {t.identifier: t for t in gen.iter_doc_targets(_make_pkg(tmp_path))}
     assert by_id["nfp_lookups"].doc_path == "nfp_lookups/index.md"
     assert by_id["nfp_lookups.public_mod"].doc_path == "nfp_lookups/public_mod.md"
+
+
+class _FakeFile:
+    """Records what mkdocs_gen_files.open() is written, on context exit."""
+
+    def __init__(self, store, path):
+        self._store, self._path, self._buf = store, path, []
+
+    def write(self, s):
+        self._buf.append(s)
+
+    def writelines(self, lines):
+        self._buf.extend(lines)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._store[self._path] = "".join(self._buf)
+        return False
+
+
+class _FakeNav(dict):
+    """Minimal stand-in for mkdocs_gen_files.Nav."""
+
+    def build_literate_nav(self):
+        return [f"* [{'.'.join(k)}]({v})\n" for k, v in self.items()]
+
+
+def _fake_gen_files():
+    fake = types.ModuleType("mkdocs_gen_files")
+    fake.files = {}
+    fake.Nav = _FakeNav
+    fake.open = lambda path, mode: _FakeFile(fake.files, path)
+    return fake
+
+
+def test_generate_emits_reference_index_landing():
+    """_generate() must write reference/index.md and lead SUMMARY with it.
+
+    Regression guard for the /reference/ 404: without a landing page that URL has
+    nothing to serve, and mkdocs --strict logs the dangling link only at INFO.
+    """
+    gen = _load_gen()
+    fake = _fake_gen_files()
+    prev = sys.modules.get("mkdocs_gen_files")
+    sys.modules["mkdocs_gen_files"] = fake
+    try:
+        gen._generate()
+    finally:
+        if prev is None:
+            sys.modules.pop("mkdocs_gen_files", None)
+        else:
+            sys.modules["mkdocs_gen_files"] = prev
+
+    assert "reference/index.md" in fake.files
+    assert "# API Reference" in fake.files["reference/index.md"]
+    # The landing must be the first SUMMARY entry so section-index attaches it.
+    assert fake.files["reference/SUMMARY.md"].startswith("* [Overview](index.md)\n")
+    # The real packages still get pages (walk ran against the live tree).
+    assert any(p.startswith("reference/nfp_lookups") for p in fake.files)

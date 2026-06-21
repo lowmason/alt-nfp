@@ -40,6 +40,26 @@ def _is_public(parts: tuple[str, ...]) -> bool:
     return not any(p == "tests" or p.startswith("_") for p in parts)
 
 
+# Landing page served at /reference/. Without it that URL 404s (mkdocs --strict
+# does not catch the dangling directory link, which it logs only at INFO), and
+# section-index promotes it to the clickable "API Reference" nav header.
+_INDEX_MD = """\
+# API Reference
+
+Auto-generated reference for every **public** module in the workspace — one page
+per module, in dependency-chain order:
+
+- **`nfp_lookups`** — schemas, hierarchies, revision schedules, canonical paths.
+- **`nfp_download`** — BLS + FRED HTTP clients/scrapers.
+- **`nfp_ingest`** — vintage store, as-of censoring, panel/ModelData construction.
+- **`nfp_vintages`** — historical vintage reconstruction + the `alt-nfp` CLI.
+- **`nfp_model`** — JAX/NumPyro inference (ModelData arrays in, posterior out).
+
+Private modules (`_`-prefixed) and test packages are intentionally omitted. Pick a
+package from the navigation to browse its modules.
+"""
+
+
 def iter_doc_targets(packages_root: Path) -> list[DocTarget]:
     """Walk every workspace package under *packages_root* into public DocTargets.
 
@@ -76,12 +96,16 @@ def _generate() -> None:
     import mkdocs_gen_files
 
     root = Path(__file__).resolve().parent.parent  # repo root
+    with mkdocs_gen_files.open("reference/index.md", "w") as fd:
+        fd.write(_INDEX_MD)
     nav = mkdocs_gen_files.Nav()
     for target in iter_doc_targets(root / "packages"):
         nav[target.nav_parts] = target.doc_path
         with mkdocs_gen_files.open(f"reference/{target.doc_path}", "w") as fd:
             fd.write(f"::: {target.identifier}\n")
     with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as fd:
+        # Lead with the landing page so section-index attaches it to the section.
+        fd.write("* [Overview](index.md)\n")
         fd.writelines(nav.build_literate_nav())
 
 

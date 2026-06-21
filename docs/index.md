@@ -16,4 +16,4 @@ state-space model — decomposed as **private employment + a government wedge**.
   [Concepts & Methodology](concepts/vintages-and-censoring.md) — the vintage data
   model and the additive Bayesian nowcast.
 
-The full public API is in the [API Reference](reference/).
+The full public API is in the [API Reference](reference/index.md).
