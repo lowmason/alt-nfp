@@ -43,11 +43,16 @@ uv run alt-nfp status
     If `status` prints `LOCAL FALLBACK`, either `NFP_STORE_URI` is not set in your `.env`
     or your process didn't load `.env` before starting. See the [`.env` gotcha](installation.md#the-env-gotcha).
 
-You can also pass an explicit store URI or a reference date:
+You can also pass an explicit store URI or a knowability cutoff date:
 
 ```bash
 uv run alt-nfp status --as-of 2026-03-12 --store s3://alt-nfp/store
 ```
+
+`--as-of` on `status` sets the cutoff for the **`UNCAPTURED` alarm** — it controls which
+periods are flagged as not yet captured relative to that date. It does **not** censor or
+limit which store rows are visible (that is what `update --as-of` does when advancing
+capture). Use it to check what *would* be uncaptured as of a past or future date.
 
 ## Capture a monthly update
 
@@ -72,7 +77,8 @@ uv run alt-nfp update --as-of 2026-01-12 --only indicators
     at startup — not a silent empty capture.
 
 `update` is idempotent: running it twice for the same `--as-of` is safe — the second run
-appends zero rows and re-compacts any fragmented partitions.
+appends zero rows and re-compacts any fragmented partitions **(local store only — compaction
+is skipped on a remote `s3://` store)**.
 
 ## Bake a ModelData snapshot
 
@@ -105,7 +111,7 @@ uv run alt-nfp watch --source all --snapshot
 
 The initial store is built with a separate script, not a CLI command:
 
-```python
+```bash
 # scripts/bootstrap_store.py — run ONCE to reconstruct the full triangular store
 uv run python scripts/bootstrap_store.py \
     --scratch s3://alt-nfp/store-rebuild \

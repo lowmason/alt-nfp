@@ -75,5 +75,6 @@ and is not seeded by this repo.
 | Code, specs, docs | This repo | Yes |
 | CES/QCEW vintage store | `NFP_STORE_URI` (S3) | No (proprietary operational data) |
 | ModelData snapshots | `NFP_SNAPSHOTS_URI` (S3) | No |
+| Indicators, consensus, release schedules | `NFP_DATA_URI` (S3) | No |
 | Provider data | `NFP_PROVIDERS_URI` (S3) | No |
 | `data/` on disk | Local fallback (dev/CI only) | Gitignored |
