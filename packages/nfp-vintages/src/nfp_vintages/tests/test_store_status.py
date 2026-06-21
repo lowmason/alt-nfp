@@ -12,12 +12,14 @@ from datetime import date
 
 import polars as pl
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
+from nfp_vintages.__main__ import app
 from nfp_vintages.store_status import (
     PartitionCoverage,
     StoreStatus,
     compute_status,
     format_status,
 )
+from typer.testing import CliRunner
 
 
 def _row(
@@ -222,3 +224,34 @@ def test_format_status_local_fallback_warning(tmp_path):
     assert "LOCAL FALLBACK" in text
     assert "NFP_STORE_URI" in text
     assert "ces" in text
+
+
+def test_status_command_renders_report(tmp_path):
+    """`alt-nfp status --store <tmp> --as-of D` prints the coverage report."""
+    rows = [
+        _row(
+            source="ces",
+            sa=True,
+            ref_date=date(2025, 9, 1),
+            vintage_date=date(2025, 11, 20),
+            employment=159000.0,
+        ),
+        _row(
+            source="qcew",
+            sa=False,
+            ref_date=date(2025, 1, 1),
+            vintage_date=date(2025, 9, 1),
+            employment=140000.0,
+        ),
+    ]
+    _write_store_rows(tmp_path, rows)
+
+    result = CliRunner().invoke(
+        app,
+        ["status", "--store", str(tmp_path), "--as-of", "2025-12-12"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "coverage" in result.output
+    assert "ces" in result.output
+    assert "qcew" in result.output

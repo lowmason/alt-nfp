@@ -204,6 +204,37 @@ def _run_snapshot(as_of: date, grid_end: date | None = None) -> None:
 
 
 @app.command()
+def status(
+    as_of: str | None = typer.Option(
+        None, "--as-of", help="Knowability cutoff for the UNCAPTURED alarm (YYYY-MM-DD)."
+    ),
+    store: str | None = typer.Option(
+        None, "--store", help="Override the store URI/path (default: VINTAGE_STORE_PATH)."
+    ),
+) -> None:
+    """Read-only store coverage + 'what's uncaptured' report (spec §8)."""
+    from datetime import date as _date
+
+    from nfp_lookups.paths import VINTAGE_STORE_PATH
+
+    from nfp_vintages.store_status import compute_status, format_status
+
+    if store is not None:
+        if store.startswith(("s3://", "s3a://")):
+            from upath import UPath
+
+            store_path = UPath(store)
+        else:
+            store_path = Path(store)
+    else:
+        store_path = VINTAGE_STORE_PATH
+
+    as_of_date = _date.fromisoformat(as_of) if as_of is not None else None
+    report = compute_status(store_path, as_of=as_of_date)
+    print(format_status(report))
+
+
+@app.command()
 def snapshot(
     as_of: str = typer.Option(..., "--as-of", help="Knowledge cutoff, YYYY-MM-DD (day-12)."),
     grid_end: str | None = typer.Option(
