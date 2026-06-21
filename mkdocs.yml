@@ -67,6 +67,10 @@ nav:
       - Installation: get-started/installation.md
       - Quickstart: get-started/quickstart.md
       - The data story: get-started/data-story.md
+  - Concepts & Methodology:
+      - Vintage data model & as-of censoring: concepts/vintages-and-censoring.md
+      - Additive Nowcast Framework:
+          - Overview: concepts/additive/overview.md
   - Architecture & Internals:
       - The package chain: architecture/package-chain.md
       - Boundaries & paths: architecture/boundaries-and-paths.md
