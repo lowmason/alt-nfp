@@ -19,9 +19,13 @@ from pathlib import Path
 import polars as pl
 from nfp_lookups.industry import ownership_for
 from nfp_lookups.paths import VINTAGE_STORE_PATH
+from nfp_lookups.revision_schedules import get_qcew_vintage_date
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
+from nfp_ingest.qcew_acquire import acquire_qcew_levels, acquire_qcew_size_native
+from nfp_ingest.qcew_crosswalk import build_qcew_panel
 from nfp_ingest.releases import _fetch_ces_releases
+from nfp_ingest.size_class import build_size_class_panel
 from nfp_ingest.vintage_store import (
     append_to_vintage_store,
     compact_partition,
@@ -281,17 +285,184 @@ def capture_ces_print(
     )
 
 
+# ---------------------------------------------------------------------------
+# QCEW conditional quarter capture (spec §5.2)
+# ---------------------------------------------------------------------------
+
+# How far back to scan for a knowable quarter. QCEW rev-0 lags the reference
+# quarter by ~5 months, so 8 candidate quarters (2 years) always covers the
+# newest-knowable quarter for any monthly as-of.
+_QCEW_CANDIDATE_QUARTERS = 8
+
+
+def _knowable_qcew_quarter(as_of: date) -> tuple[str, int] | None:
+    """Most recent QCEW quarter whose rev-0 ``vintage_date`` is ``<= as_of``.
+
+    Iterates candidate ``(ref_quarter, ref_year)`` pairs newest-first and returns
+    the first whose ``get_qcew_vintage_date(..., revision=0)`` is on or before
+    ``as_of``. Returns ``None`` when no candidate is knowable yet (the steady-state
+    monthly no-op — QCEW is quarterly, §5.2).
+
+    Requires the §5.0 calendar to be advanced so the schedule returns real release
+    dates rather than the day-1 lag fallback (``revision_schedules.py:358-365``).
+
+    Parameters
+    ----------
+    as_of : date
+        Knowability cutoff.
+
+    Returns
+    -------
+    tuple[str, int] | None
+        ``(ref_quarter, ref_year)`` for the newest knowable quarter (e.g.
+        ``("Q1", 2024)``), or ``None`` when none is knowable as of ``as_of``.
+    """
+    # The quarter containing ``as_of`` cannot have been published yet, so start
+    # from the previous quarter and walk back.
+    q = (as_of.month - 1) // 3 + 1
+    year = as_of.year
+    q -= 1
+    if q == 0:
+        q = 4
+        year -= 1
+
+    for _ in range(_QCEW_CANDIDATE_QUARTERS):
+        ref_quarter = f"Q{q}"
+        rev0_vdate = get_qcew_vintage_date(ref_quarter, year, 0)
+        if rev0_vdate <= as_of:
+            return (ref_quarter, year)
+        q -= 1
+        if q == 0:
+            q = 4
+            year -= 1
+    return None
+
+
 def capture_qcew_quarter(
     as_of: date,
     *,
     store_path: Path = VINTAGE_STORE_PATH,
 ) -> CaptureResult:
-    """Stub — QCEW quarterly capture is implemented in Phase 6 (spec §6.3).
+    """Capture the newest knowable QCEW quarter and append it to the store.
 
-    Defined now (cross-phase adjustment §14/4) so the Phase 5 ``update`` body and
-    its tests can reference and monkeypatch this symbol before Phase 6 replaces
-    the stub with the real single-quarter capture.
+    Most months this is a **no-op** (QCEW is quarterly): if no new quarter is
+    knowable as of ``as_of``, or the newest knowable quarter is already in the
+    store, returns ``CaptureResult(appended=0, corrected=[], skipped=1)``.
+
+    Otherwise (spec §5.2) fetches the containing **year** via the relocated public
+    acquire helpers, filters to the single knowable quarter, runs the crosswalk
+    (``build_qcew_panel`` for levels, ``build_size_class_panel`` for the Q1 size
+    cross-product), null-fills the ``size_class_*`` columns the levels builder
+    omits, censors ``vintage_date <= as_of``, runs the §6.3 corrected-level
+    comparison, then appends + compacts the ``(qcew, seasonally_adjusted=False)``
+    partition. QCEW is NSA-only, so every row is tagged ``revision=0`` /
+    ``seasonally_adjusted=False`` by the builders.
+
+    Parameters
+    ----------
+    as_of : date
+        Knowability cutoff. No row with ``vintage_date > as_of`` is appended.
+    store_path : Path
+        Root of the Hive-partitioned vintage store.
+
+    Returns
+    -------
+    CaptureResult
+        ``skipped=1`` (and ``appended=0``) when there is no new quarter to
+        capture; otherwise the append count and any corrected-level warnings.
     """
-    raise NotImplementedError(
-        "capture_qcew_quarter is implemented in Phase 6 (spec §6.3)"
+    knowable = _knowable_qcew_quarter(as_of)
+    if knowable is None:
+        logger.info("QCEW: no knowable quarter as of %s — skipping", as_of)
+        return CaptureResult(appended=0, corrected=[], skipped=1)
+
+    ref_quarter, ref_year = knowable
+    qtr = int(ref_quarter[1])
+
+    # Already-stored short-circuit (spec §5.2): the docstring's "or the newest
+    # knowable quarter is already in the store" no-op — return BEFORE the network
+    # fetch so the steady-state monthly run does no work. Read-only; mirrors
+    # _detect_corrected_levels' existence guard, so it is container-safe and uses
+    # the passed store_path (hermetic under pytest — no wipe risk). All QCEW in
+    # this store is rev-0 (acquire tags revision=0), so a rev-0 row in any month
+    # of the quarter means the quarter is captured.
+    partition_dir = store_path / "source=qcew" / "seasonally_adjusted=false"
+    if partition_dir.exists():
+        quarter_months = [date(ref_year, (qtr - 1) * 3 + m, 1) for m in (1, 2, 3)]
+        already = (
+            read_vintage_store(store_path, source="qcew", seasonally_adjusted=False)
+            .filter(pl.col("ref_date").is_in(quarter_months) & (pl.col("revision") == 0))
+            .select("ref_date")
+            .head(1)
+            .collect()
+        )
+        if already.height:
+            logger.info("QCEW: %s %d already stored — skipping", ref_quarter, ref_year)
+            return CaptureResult(appended=0, corrected=[], skipped=1)
+
+    # Fetch the containing YEAR (the helpers loop over full years), then filter to
+    # the one knowable quarter. The levels endpoint carries year+qtr; the size
+    # endpoint is Q1-only by URL path, so the size leg only runs for Q1.
+    raw_levels = acquire_qcew_levels(ref_year, ref_year)
+    raw_levels_q = raw_levels.filter(
+        (pl.col("year").cast(pl.Int64) == ref_year)
+        & (pl.col("qtr").cast(pl.Int64) == qtr)
     )
+    levels = build_qcew_panel(raw_levels_q)
+    # build_qcew_panel's .select omits size_class_* (qcew_crosswalk.py); the store
+    # schema requires them, so null-fill before append.
+    levels = levels.with_columns(
+        size_class_type=pl.lit(None, pl.Utf8),
+        size_class_code=pl.lit(None, pl.Utf8),
+    )
+
+    parts: list[pl.DataFrame] = [levels]
+    if qtr == 1:
+        raw_size = acquire_qcew_size_native(ref_year, ref_year)
+        size = build_size_class_panel(raw_size)
+        if size.height:
+            parts.append(size)
+
+    new_rows = (
+        pl.concat(parts, how="diagonal_relaxed")
+        .select(list(VINTAGE_STORE_SCHEMA))
+        .cast(VINTAGE_STORE_SCHEMA)
+    )
+
+    # Censor to the knowability cutoff.
+    new_rows = new_rows.filter(pl.col("vintage_date") <= as_of)
+    if new_rows.height == 0:
+        logger.info(
+            "QCEW: %s %d knowable but no rows survive vintage_date <= %s",
+            ref_quarter,
+            ref_year,
+            as_of,
+        )
+        return CaptureResult(appended=0, corrected=[], skipped=1)
+
+    # §6.3 corrected-level comparison BEFORE the append anti-join.
+    corrected = _detect_corrected_levels(
+        new_rows, store_path, source="qcew", seasonally_adjusted=False
+    )
+    for c in corrected:
+        logger.warning(
+            "CORRECTED-LEVEL qcew %s rev=%d bmr=%d: stored=%.1f incoming=%.1f",
+            c.ref_date,
+            c.revision,
+            c.benchmark_revision,
+            c.stored_employment,
+            c.incoming_employment,
+        )
+
+    appended = append_to_vintage_store(new_rows, store_path)
+    compact_partition(store_path, source="qcew", seasonally_adjusted=False)
+
+    skipped = 0 if appended else 1
+    logger.info(
+        "QCEW: captured %s %d — appended %d rows (%d corrected)",
+        ref_quarter,
+        ref_year,
+        appended,
+        len(corrected),
+    )
+    return CaptureResult(appended=appended, corrected=corrected, skipped=skipped)
