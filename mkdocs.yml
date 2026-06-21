@@ -67,4 +67,8 @@ nav:
       - Installation: get-started/installation.md
       - Quickstart: get-started/quickstart.md
       - The data story: get-started/data-story.md
+  - Architecture & Internals:
+      - The package chain: architecture/package-chain.md
+      - Boundaries & paths: architecture/boundaries-and-paths.md
+      - Storage contract: architecture/storage-contract.md
   - API Reference: reference/
