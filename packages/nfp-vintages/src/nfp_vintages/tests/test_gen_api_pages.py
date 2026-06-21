@@ -17,8 +17,18 @@ def _load_gen():
     spec = importlib.util.spec_from_file_location("gen_api_pages", path)
     assert spec and spec.loader, f"cannot load {path}"
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod  # required on Py 3.12: @dataclass resolves annotations via sys.modules
-    spec.loader.exec_module(mod)  # __name__ == "gen_api_pages" -> no I/O
+    # Register before exec_module: on Python 3.12 a frozen @dataclass needs its
+    # module in sys.modules during class creation. Restore the prior state after,
+    # so the test leaves no stray "gen_api_pages" entry behind.
+    prev = sys.modules.get(spec.name)
+    sys.modules[spec.name] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        if prev is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = prev
     return mod
 
 
