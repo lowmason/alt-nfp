@@ -1,14 +1,22 @@
-"""Unified CLI for the vintage-building pipeline.
+"""Production CLI for the alt-nfp vintage store.
 
 Usage::
 
-    alt-nfp                          # Run all steps (or: python -m nfp_vintages)
-    alt-nfp download                  # Download CES + QCEW revision files
-    alt-nfp download-indicators       # Download cyclical indicators from FRED
-    alt-nfp process                   # Scrape BLS calendar + process revisions
-    alt-nfp current                   # Fetch current BLS estimates
-    alt-nfp build                     # Combine + build vintage_store
-    alt-nfp build --releases PATH      # Build store using given releases.parquet
+    alt-nfp update --as-of T [--only ces|qcew|indicators]  # capture knowable prints for T
+    alt-nfp status [--as-of T] [--store URI]               # store coverage + uncaptured alarm
+    alt-nfp watch [--source ces|qcew|all] [--snapshot]     # feed-driven trigger (cron)
+    alt-nfp snapshot --as-of T [--grid-end E]              # hash-pinned ModelData (day-12)
+
+One-time historical load is a SCRIPT, not a command::
+
+    uv run python scripts/bootstrap_store.py --scratch s3://alt-nfp/store-rebuild \\
+        --canonical s3://alt-nfp/store
+
+The legacy stage pipeline (download / download-indicators / process / current /
+build / build-rebuild and the bare-run chain) was retired in the production-workflow
+reshape (specs/cli_production_workflow.md §10). The calendar scrape it used now lives in
+nfp_vintages.calendar.advance_release_calendar (invoked by `update`); the rebuild compose/
+write moved to scripts/bootstrap_store.py.
 """
 
 from __future__ import annotations
@@ -19,167 +27,13 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
-app = typer.Typer(help="Vintage-building pipeline for alt-nfp.")
+app = typer.Typer(help="Production vintage-store CLI for alt-nfp.", no_args_is_help=True)
 
 
-@app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
-    """Run all pipeline stages, or a single subcommand."""
+@app.callback()
+def main() -> None:
+    """Load environment config before any command resolves store paths."""
     load_dotenv()
-    if ctx.invoked_subcommand is None:
-        download()
-        download_indicators()
-        process()
-        current()
-        build(None, allow_canonical=False)
-
-
-@app.command()
-def download() -> None:
-    """Download CES and QCEW data files."""
-    from nfp_download.bls.bulk import download_ces, download_qcew, download_qcew_bulk
-
-    print('Downloading CES vintage data...')
-    download_ces()
-    print('Downloading QCEW revisions CSV...')
-    download_qcew()
-    print('Downloading QCEW bulk quarterly files (2003-2025)...')
-    download_qcew_bulk()
-    print('Done.')
-
-
-@app.command("download-indicators")
-def download_indicators() -> None:
-    """Download cyclical indicators from FRED into data/indicators/."""
-    from nfp_ingest.indicators import download_indicators
-
-    print('Downloading cyclical indicators from FRED...')
-    results = download_indicators()
-    total = sum(results.values())
-    print(f'Done: {total} total rows across {len(results)} indicators.')
-
-
-@app.command()
-def process() -> None:
-    """Scrape BLS release calendar, then process CES/QCEW revisions."""
-    from nfp_vintages.calendar import advance_release_calendar
-    from nfp_vintages.processing.ces_triangular import main as ces_triangular_main
-    from nfp_vintages.processing.combine import main as combine_main
-    from nfp_vintages.processing.qcew_bulk import main as qcew_main
-
-    print('=== Building BLS release calendar ===')
-    advance_release_calendar()
-
-    print('\n=== Processing CES national revisions ===')
-    ces_triangular_main()
-    print('\n=== Processing QCEW revisions ===')
-    qcew_main()
-    print('\n=== Combining revisions ===')
-    combine_main()
-
-
-@app.command()
-def current() -> None:
-    """Fetch current BLS estimates and write releases.parquet."""
-    from nfp_ingest.releases import build_releases
-
-    print('=== Fetching current BLS estimates ===')
-    build_releases()
-
-
-@app.command()
-def build(
-    releases_path: Path | None = typer.Option(
-        None,
-        "--releases",
-        path_type=Path,
-        help="Path to releases.parquet (default: use built-in location).",
-    ),
-    allow_canonical: bool = typer.Option(
-        False,
-        "--allow-canonical",
-        help="Permit overwriting the canonical (production) store in place (DANGEROUS — prefer the plans/10 T8 backup-first cutover).",
-    ),
-) -> None:
-    """Build the Hive-partitioned vintage store."""
-    from nfp_vintages.build_store import build_store
-
-    build_store(releases_path=releases_path, allow_canonical=allow_canonical)
-
-
-@app.command("build-rebuild")
-def build_rebuild(
-    start_year: int = typer.Option(
-        2017,
-        "--start-year",
-        help="First QCEW reference year to fetch (default 2017, the rebuild scope).",
-    ),
-    end_year: int | None = typer.Option(
-        None,
-        "--end-year",
-        help="Last QCEW reference year (inclusive; default = current year). "
-        "Set --start-year == --end-year for a one-year small-window smoke build.",
-    ),
-    allow_canonical: bool = typer.Option(
-        False,
-        "--allow-canonical",
-        help=(
-            "Permit writing to the canonical store in place "
-            "(DANGEROUS — only for explicit maintainer override)."
-        ),
-    ),
-) -> None:
-    """Compose CES + QCEW panels into the scratch rebuild store.
-
-    CES is built from the cached ``cesvinall/`` triangular CSVs (no network).
-    QCEW levels and size are fetched from the BLS API slices (area + size
-    endpoints) over plain httpx — so this command needs network access, and
-    writes to ``NFP_STORE_URI`` (the scratch ``s3://alt-nfp/store-rebuild``
-    prefix; the canonical store is refused unless ``--allow-canonical``).
-
-    Use ``--start-year 2024 --end-year 2024`` for a one-year small-window smoke
-    build (fetch → compose → scratch write) before the full 2017-present run.
-    See specs/store_rebuild_acquire.md for the acquire design.
-    """
-    from nfp_ingest.ces_builder import build_ces_panel
-    from nfp_ingest.qcew_acquire import (
-        acquire_qcew_levels,
-        acquire_qcew_size_native,
-    )
-    from nfp_ingest.qcew_crosswalk import build_qcew_panel
-    from nfp_ingest.size_class import build_size_class_panel
-
-    from nfp_vintages.rebuild_store import (
-        compose_rebuild_panel,
-        write_rebuild_store,
-    )
-
-    print("=== Build-rebuild: composing CES + QCEW panels ===")
-
-    print("Building CES panel from cesvinall/ triangular CSVs...")
-    ces = build_ces_panel()
-    print(f"  CES: {ces.height:,} rows")
-
-    # Fetch QCEW area-endpoint slices (all quarters) → crosswalk.
-    print(f"Acquiring QCEW levels (BLS area API slices, {start_year}-{end_year or 'now'})...")
-    raw_qcew = acquire_qcew_levels(start_year=start_year, end_year=end_year)
-    qcew_levels = build_qcew_panel(raw_qcew)
-    print(f"  QCEW levels: {qcew_levels.height:,} rows")
-
-    # Fetch QCEW Q1 size-endpoint slices (size_code 1-9) → crosswalk.
-    # acquire_qcew_size_native already crosswalks to CES codes (it is NOT raw CSV).
-    print(f"Acquiring QCEW size native rows (BLS size API slices, {start_year}-{end_year or 'now'})...")
-    size_native = acquire_qcew_size_native(start_year=start_year, end_year=end_year)
-    size = build_size_class_panel(size_native)
-    print(f"  QCEW size: {size.height:,} rows")
-
-    print("Composing panels...")
-    panel = compose_rebuild_panel(ces, qcew_levels, size)
-    print(f"  Combined: {panel.height:,} rows")
-
-    print("Writing rebuild store...")
-    write_rebuild_store(panel, allow_canonical=allow_canonical)
-    print("Done.")
 
 
 def _run_snapshot(as_of: date, grid_end: date | None = None) -> None:
