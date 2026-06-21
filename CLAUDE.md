@@ -67,7 +67,9 @@ to `main`.
   `NFP_STORE_URI`: `NFP_SNAPSHOTS_URI` (ModelData snapshots), `NFP_DATA_URI` (indicators,
   `competitors/consensus`, the vintage/release-date schedules), and `NFP_PROVIDERS_URI`
   (the **separate** provider store — not under `NFP_DATA_URI`, not seeded by this repo).
-  All resolve via `nfp_lookups.paths.*_location()` and thread `storage_options_for` + an
+  Store/data/providers locations resolve in `nfp_lookups.paths` (`_store_location`,
+  `data_location`, `providers_location`); `NFP_SNAPSHOTS_URI` resolves in
+  `nfp_ingest.snapshots.snapshots_location`. All thread `storage_options_for` + an
   `is_remote` mkdir guard. Rebuild scratch (raw downloads, HTTP cache, SAE checkpoint)
   goes to `tempfile` automatically; dev scripts must take their output root as an
   arg/env (a `/tmp` path or `s3://` URI), never `data/`. See `.env.example` and
