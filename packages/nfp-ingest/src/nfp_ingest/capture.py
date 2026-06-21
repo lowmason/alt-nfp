@@ -13,10 +13,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
 import polars as pl
 from nfp_lookups.industry import ownership_for
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
+
+from nfp_ingest.vintage_store import read_vintage_store
 
 logger = logging.getLogger(__name__)
 
@@ -111,3 +114,87 @@ def _remap_ces_to_store_schema(df: pl.DataFrame) -> pl.DataFrame:
         .select(list(VINTAGE_STORE_SCHEMA))
         .cast(VINTAGE_STORE_SCHEMA)
     )
+
+
+# Extended store ukey: the 7-col append/compact key (vintage_store.py:709-717)
+# plus the rebuilt axes added in spec §6.1. Excludes vintage_date + employment.
+_CES_CORRECTED_UKEY: list[str] = [
+    "ref_date",
+    "industry_type",
+    "industry_code",
+    "geographic_type",
+    "geographic_code",
+    "revision",
+    "benchmark_revision",
+    "ownership",
+    "size_class_type",
+    "size_class_code",
+]
+
+
+def _detect_corrected_levels(
+    new_rows: pl.DataFrame,
+    store_path: Path,
+    source: str,
+    seasonally_adjusted: bool,
+) -> list[CorrectedLevel]:
+    """Flag incoming rows whose ukey exists in the store with a *different* level.
+
+    Compares each incoming ``employment`` against the stored value for the same
+    extended ukey (spec §5.1.4 / §6.3), *before* the append anti-join would drop
+    it. Returns one :class:`CorrectedLevel` per divergence; an absent partition
+    yields ``[]``.
+
+    Parameters
+    ----------
+    new_rows : pl.DataFrame
+        Capture rows in ``VINTAGE_STORE_SCHEMA`` for one ``(source, sa)``.
+    store_path : Path
+        Root of the Hive-partitioned vintage store.
+    source : str
+        Source partition key (``'ces'``, ``'qcew'``).
+    seasonally_adjusted : bool
+        Seasonal-adjustment partition key.
+
+    Returns
+    -------
+    list[CorrectedLevel]
+        One record per same-ukey/different-level row, sorted by ref_date.
+    """
+    partition_dir = (
+        store_path
+        / f"source={source}"
+        / f"seasonally_adjusted={str(seasonally_adjusted).lower()}"
+    )
+    if not partition_dir.exists():
+        return []
+
+    stored = (
+        read_vintage_store(
+            store_path, source=source, seasonally_adjusted=seasonally_adjusted
+        )
+        .select([*_CES_CORRECTED_UKEY, "employment"])
+        .rename({"employment": "stored_employment"})
+        .collect()
+    )
+    if stored.is_empty():
+        return []
+
+    joined = new_rows.select([*_CES_CORRECTED_UKEY, "employment"]).join(
+        stored, on=_CES_CORRECTED_UKEY, how="inner", nulls_equal=True
+    )
+    diverged = joined.filter(
+        pl.col("employment") != pl.col("stored_employment")
+    ).sort("ref_date")
+
+    return [
+        CorrectedLevel(
+            ref_date=r["ref_date"],
+            industry_code=r["industry_code"],
+            revision=r["revision"],
+            benchmark_revision=r["benchmark_revision"],
+            stored_employment=r["stored_employment"],
+            incoming_employment=r["employment"],
+        )
+        for r in diverged.iter_rows(named=True)
+    ]

@@ -3,7 +3,7 @@
 from datetime import date
 
 import polars as pl
-from nfp_ingest.capture import _remap_ces_to_store_schema
+from nfp_ingest.capture import _detect_corrected_levels, _remap_ces_to_store_schema
 from nfp_ingest.releases import COMBINED_SCHEMA
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
@@ -77,3 +77,87 @@ def test_remap_nulls_size_class_columns():
 
     assert out["size_class_type"].null_count() == out.height
     assert out["size_class_code"].null_count() == out.height
+
+
+def _store_row(
+    *,
+    industry_code: str = "05",
+    industry_type: str = "total",
+    ownership: str = "private",
+    ref_date: date = date(2026, 1, 1),
+    vintage_date: date = date(2026, 2, 6),
+    revision: int = 0,
+    benchmark_revision: int = 0,
+    employment: float = 1000.0,
+    sa: bool = True,
+) -> dict:
+    """One VINTAGE_STORE_SCHEMA row (CES headline)."""
+    return {
+        "geographic_type": "national",
+        "geographic_code": "00",
+        "ownership": ownership,
+        "industry_type": industry_type,
+        "industry_code": industry_code,
+        "ref_date": ref_date,
+        "vintage_date": vintage_date,
+        "revision": revision,
+        "benchmark_revision": benchmark_revision,
+        "employment": employment,
+        "size_class_type": None,
+        "size_class_code": None,
+        "source": "ces",
+        "seasonally_adjusted": sa,
+    }
+
+
+def _seed_store(store_path, rows: list[dict]) -> None:
+    """Write VINTAGE_STORE_SCHEMA rows as a Hive-partitioned store under store_path."""
+    df = pl.DataFrame(rows, schema=VINTAGE_STORE_SCHEMA)
+    for (source, sa), part in df.group_by(["source", "seasonally_adjusted"]):
+        sa_str = str(sa).lower()
+        pdir = store_path / f"source={source}" / f"seasonally_adjusted={sa_str}"
+        pdir.mkdir(parents=True, exist_ok=True)
+        part.drop(["source", "seasonally_adjusted"]).write_parquet(pdir / "data.parquet")
+
+
+def test_detect_corrected_flags_changed_level(tmp_path):
+    _seed_store(tmp_path, [_store_row(employment=1000.0)])
+    incoming = pl.DataFrame(
+        [_store_row(employment=1234.0)], schema=VINTAGE_STORE_SCHEMA
+    )
+
+    corrected = _detect_corrected_levels(
+        incoming, tmp_path, source="ces", seasonally_adjusted=True
+    )
+
+    assert len(corrected) == 1
+    cl = corrected[0]
+    assert cl.ref_date == date(2026, 1, 1)
+    assert cl.industry_code == "05"
+    assert cl.stored_employment == 1000.0
+    assert cl.incoming_employment == 1234.0
+
+
+def test_detect_corrected_ignores_matching_level(tmp_path):
+    _seed_store(tmp_path, [_store_row(employment=1000.0)])
+    incoming = pl.DataFrame(
+        [_store_row(employment=1000.0)], schema=VINTAGE_STORE_SCHEMA
+    )
+
+    corrected = _detect_corrected_levels(
+        incoming, tmp_path, source="ces", seasonally_adjusted=True
+    )
+
+    assert corrected == []
+
+
+def test_detect_corrected_empty_store_returns_empty(tmp_path):
+    incoming = pl.DataFrame(
+        [_store_row(employment=1000.0)], schema=VINTAGE_STORE_SCHEMA
+    )
+
+    corrected = _detect_corrected_levels(
+        incoming, tmp_path, source="ces", seasonally_adjusted=True
+    )
+
+    assert corrected == []
