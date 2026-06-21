@@ -220,5 +220,70 @@ def snapshot(
         raise typer.BadParameter(str(exc), param_hint="--as-of") from exc
 
 
+def _run_update(
+    as_of: date,
+    *,
+    only: str | None = None,
+    refresh_calendar: bool = True,
+    store_path=None,
+) -> None:
+    """Capture month-T prints into the store; plain helper (no Typer types)."""
+    from nfp_lookups.paths import VINTAGE_STORE_PATH
+
+    store_path = store_path if store_path is not None else VINTAGE_STORE_PATH
+
+    if refresh_calendar:
+        from nfp_vintages.calendar import advance_release_calendar
+
+        advance_release_calendar()
+
+    if only in (None, "ces"):
+        from nfp_ingest.capture import capture_ces_print
+
+        res = capture_ces_print(as_of, store_path=store_path)
+        print(f"  CES: appended {res.appended}, skipped {res.skipped}")
+        for c in res.corrected:
+            print(f"  CORRECTED-LEVEL ces {c.ref_date} {c.industry_code} "
+                  f"rev{c.revision}/bmr{c.benchmark_revision}: "
+                  f"{c.stored_employment} -> {c.incoming_employment}")
+
+    if only in (None, "qcew"):
+        from nfp_ingest.capture import capture_qcew_quarter
+
+        res = capture_qcew_quarter(as_of, store_path=store_path)
+        print(f"  QCEW: appended {res.appended}, skipped {res.skipped}")
+        for c in res.corrected:
+            print(f"  CORRECTED-LEVEL qcew {c.ref_date} {c.industry_code} "
+                  f"rev{c.revision}/bmr{c.benchmark_revision}: "
+                  f"{c.stored_employment} -> {c.incoming_employment}")
+
+    if only in (None, "indicators"):
+        from nfp_ingest.indicators import download_indicators
+
+        results = download_indicators()
+        total = sum(results.values()) if results else 0
+        print(f"  Indicators: {total} rows across {len(results or {})} series")
+
+
+@app.command()
+def update(
+    as_of: str = typer.Option(..., "--as-of", help="Knowledge cutoff, YYYY-MM-DD."),
+    only: str | None = typer.Option(
+        None, "--only", help="Limit to one source: ces | qcew | indicators."
+    ),
+    no_refresh_calendar: bool = typer.Option(
+        False, "--no-refresh-calendar", help="Skip the release-calendar scrape (assume current)."
+    ),
+) -> None:
+    """Advance the calendar, capture month-T prints, and append them to the store."""
+    from datetime import date as _date
+
+    if only is not None and only not in ("ces", "qcew", "indicators"):
+        raise typer.BadParameter("must be ces, qcew, or indicators", param_hint="--only")
+    _run_update(
+        _date.fromisoformat(as_of), only=only, refresh_calendar=not no_refresh_calendar
+    )
+
+
 if __name__ == '__main__':
     app()

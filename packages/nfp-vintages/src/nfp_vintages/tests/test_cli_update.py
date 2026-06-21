@@ -35,3 +35,81 @@ class TestSnapshotDay12:
         _no_real_snapshot(monkeypatch)
         result = runner.invoke(app, ["snapshot", "--as-of", "2026-03-05"])
         assert result.exit_code != 0
+
+
+class TestUpdateOrchestration:
+    def test_update_runs_calendar_then_ces_then_qcew_then_indicators(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "nfp_vintages.calendar.advance_release_calendar",
+            lambda: calls.append("calendar"),
+        )
+
+        class _Res:
+            appended, corrected, skipped = 3, [], 0
+
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_ces_print",
+            lambda as_of, *, store_path=None: calls.append("ces") or _Res(),
+        )
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_qcew_quarter",
+            lambda as_of, *, store_path=None: calls.append("qcew") or _Res(),
+        )
+        monkeypatch.setattr(
+            "nfp_ingest.indicators.download_indicators",
+            lambda: calls.append("indicators") or {},
+        )
+
+        result = runner.invoke(app, ["update", "--as-of", "2026-06-12"])
+        assert result.exit_code == 0, result.output
+        assert calls == ["calendar", "ces", "qcew", "indicators"]
+
+    def test_only_ces_skips_qcew_and_indicators(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "nfp_vintages.calendar.advance_release_calendar", lambda: calls.append("calendar")
+        )
+
+        class _Res:
+            appended, corrected, skipped = 1, [], 0
+
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_ces_print",
+            lambda as_of, *, store_path=None: calls.append("ces") or _Res(),
+        )
+        monkeypatch.setattr(
+            "nfp_ingest.indicators.download_indicators",
+            lambda: calls.append("indicators"),
+        )
+        result = runner.invoke(app, ["update", "--as-of", "2026-06-12", "--only", "ces"])
+        assert result.exit_code == 0, result.output
+        assert calls == ["calendar", "ces"]
+
+    def test_no_refresh_calendar_skips_scrape(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "nfp_vintages.calendar.advance_release_calendar", lambda: calls.append("calendar")
+        )
+
+        class _Res:
+            appended, corrected, skipped = 0, [], 1
+
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_ces_print",
+            lambda as_of, *, store_path=None: _Res(),
+        )
+        monkeypatch.setattr(
+            "nfp_ingest.capture.capture_qcew_quarter",
+            lambda as_of, *, store_path=None: _Res(),
+        )
+        monkeypatch.setattr("nfp_ingest.indicators.download_indicators", lambda: {})
+        result = runner.invoke(
+            app, ["update", "--as-of", "2026-06-12", "--no-refresh-calendar"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "calendar" not in calls
+
+    def test_invalid_only_rejected(self):
+        result = runner.invoke(app, ["update", "--as-of", "2026-06-12", "--only", "bogus"])
+        assert result.exit_code != 0
