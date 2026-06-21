@@ -114,3 +114,41 @@ def make_first_print_window(store) -> None:
         make_ces_rows(ref_month="2026-02-12", vintage="2026-03-06", revision=0,
                       employment=301_400.0, industry_code="00"), store)
     compact_partition(store, "ces", True)
+
+
+def overlap_level_divergence(
+    bootstrap: pl.DataFrame, capture: pl.DataFrame
+) -> pl.DataFrame:
+    """Per-row level divergence on score-relevant rows over a bootstrap∩capture window.
+
+    Compares ``employment`` on the rows that drive the A5 score — first print
+    (``rev0/bmr0``) and its prior-month partner (``rev1/bmr0``) — between a bootstrap
+    reconstruction and a capture. The ``-1.0`` shutdown sentinel is EXCLUDED
+    (``employment > 0``) so a real-level capture is not false-flagged against a
+    bootstrap ``-1``. Per §7.2 this is a *diagnostic*: it returns the divergence; it
+    does not assert it is zero ("replaceable, not identical").
+
+    Returns one row per overlapping score-key with ``bootstrap_employment``,
+    ``capture_employment``, ``abs_diff``.
+    """
+    score_key = [
+        "ref_date", "industry_type", "industry_code", "geographic_type",
+        "geographic_code", "revision", "benchmark_revision", "ownership",
+    ]
+
+    def _scored(df: pl.DataFrame) -> pl.DataFrame:
+        return df.filter(
+            (pl.col("employment") > 0)
+            & (pl.col("benchmark_revision") == 0)
+            & (pl.col("revision").is_in([0, 1]))
+        )
+
+    b = _scored(bootstrap).select([*score_key, pl.col("employment").alias("bootstrap_employment")])
+    c = _scored(capture).select([*score_key, pl.col("employment").alias("capture_employment")])
+    return (
+        b.join(c, on=score_key, how="inner", nulls_equal=True)
+        .with_columns(
+            (pl.col("capture_employment") - pl.col("bootstrap_employment")).abs().alias("abs_diff")
+        )
+        .sort("ref_date", "revision")
+    )

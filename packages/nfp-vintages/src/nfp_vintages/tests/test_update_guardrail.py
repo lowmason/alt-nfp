@@ -146,3 +146,43 @@ class TestCalendarNotAdvancedLoudFailure:
         # _run_update lets the capture exception propagate → Typer non-zero exit.
         assert result.exit_code != 0
         assert "calendar" in (result.output + str(result.exception)).lower()
+
+
+class TestOverlapDivergence:
+    def test_overlap_diagnostic_excludes_sentinel_and_flags(self, tmp_path):
+        from nfp_vintages.tests._fixtures import (
+            make_shutdown_sentinel_row,
+            overlap_level_divergence,
+        )
+
+        store = tmp_path / "store"
+        # Bootstrap leg: a real rev0 + a -1 sentinel slot.
+        append_to_vintage_store(
+            make_ces_rows(ref_month="2025-11-12", vintage="2025-12-05",
+                          revision=0, employment=150_800.0, industry_code="05"),
+            store,
+        )
+        append_to_vintage_store(
+            make_shutdown_sentinel_row(ref_month="2025-10-12"), store
+        )
+        compact_partition(store, "ces", True)
+        bootstrap = read_vintage_store(
+            store, source="ces", seasonally_adjusted=True
+        ).collect()
+
+        # Capture leg: the same Nov row at a *diverged* level (replaceable not identical),
+        # and crucially NO -1 sentinel (the real path never emits one).
+        capture = make_ces_rows(
+            ref_month="2025-11-12", vintage="2025-12-05",
+            revision=0, employment=151_100.0, industry_code="05",
+        )
+
+        report = overlap_level_divergence(bootstrap, capture)
+
+        # (a) the -1 sentinel ref_date is excluded from the scored comparison
+        assert -1.0 not in report["bootstrap_employment"].to_list()
+        assert -1.0 not in report["capture_employment"].to_list()
+        # (b) a divergence record is produced (flag, NOT asserted zero — §7.2)
+        assert report.height >= 1
+        assert "abs_diff" in report.columns
+        assert (report["abs_diff"] >= 0).all()
