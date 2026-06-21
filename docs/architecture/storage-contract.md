@@ -23,8 +23,11 @@ for development and CI.
 | `NFP_DATA_URI` | Indicators, competitors/consensus, release/vintage-date schedules | `data/` |
 | `NFP_PROVIDERS_URI` | The provider store (separate from `NFP_DATA_URI`) | `data/providers/` |
 
-All four are resolved in `nfp_lookups.paths` via `upath_for(uri)` and the
-`*_location()` helpers (`data_location()`, `providers_location()`, etc.).
+Three of the four (`NFP_STORE_URI`, `NFP_DATA_URI`, `NFP_PROVIDERS_URI`) are
+resolved in `nfp_lookups.paths` via `upath_for(uri)` and the `*_location()`
+helpers (`data_location()`, `providers_location()`, etc.). The exception is
+`NFP_SNAPSHOTS_URI`, which is resolved by `nfp_ingest.snapshots.snapshots_location()`
+— same `upath_for` / `storage_options_for` pattern, just in a different package.
 
 ### S3 credentials
 
