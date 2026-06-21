@@ -9,15 +9,20 @@ This is the v2 repo: the data layer is ported from a prior reference
 implementation, and the model layer is rewritten in JAX/NumPyro. The port was
 gated against the old repo for fidelity, but that repo is a work-in-progress,
 not validated truth — correctness is validated against external ground truth
-(published BLS / ALFRED real-time vintages). See [docs/](docs/) and
+(published BLS / ALFRED real-time vintages). The documentation site is published
+at <https://lowmason.github.io/alt-nfp/> (source in [docs/](docs/)); see
 [specs/](specs/) for the design record.
 
 ## Layout
 
-A [uv](https://docs.astral.sh/uv/) workspace with a linear dependency chain:
+A [uv](https://docs.astral.sh/uv/) workspace. The four data packages form a
+linear dependency chain; the model layer sits apart and imports no `nfp_*`
+package:
 
 ```
 nfp-lookups  →  nfp-download  →  nfp-ingest  →  nfp-vintages
+                                     ⇣ (arrays / snapshots only, no import)
+                                 nfp-model
 ```
 
 | Package | Role |
@@ -26,6 +31,7 @@ nfp-lookups  →  nfp-download  →  nfp-ingest  →  nfp-vintages
 | [`nfp-download`](packages/nfp-download/) | HTTP clients and scrapers for BLS and FRED — fetching only, no transformation |
 | [`nfp-ingest`](packages/nfp-ingest/) | Vintage store, as-of censoring, panel construction, provider ingestion, compositing |
 | [`nfp-vintages`](packages/nfp-vintages/) | Historical vintage reconstruction pipeline (CES triangular revisions, QCEW bulk) and the `alt-nfp` CLI |
+| [`nfp-model`](packages/nfp-model/) | JAX/NumPyro inference: `ModelData` arrays in, posterior out — imports only jax/numpyro/numpy (importing it enables global float64); sits apart from the chain |
 
 Each package has a `CLAUDE.md` with its internal map.
 
@@ -35,7 +41,7 @@ Each package has a `CLAUDE.md` with its internal map.
 uv sync                              # install workspace + dev tools
 uv run pytest -m "not network"       # test suite (network-marked tests excluded)
 uv run ruff check .                  # lint
-uv run alt-nfp --help                # vintage pipeline CLI
+uv run alt-nfp --help                # production vintage-store CLI (update / status / watch)
 ```
 
 ## Data
@@ -51,8 +57,9 @@ AWS_ENDPOINT_URL=http://127.0.0.1:9000
 ```
 
 With `NFP_STORE_URI` unset the store falls back to the local `data/store/`
-(this is how CI runs). Tests that need the store self-skip when it is
-unavailable. `scripts/mirror_store.py` uploads a local store into the bucket.
+(the default for a fresh checkout with no object store configured). Tests that
+need the store self-skip when it is unavailable. `scripts/mirror_store.py`
+uploads a local store into the bucket.
 
 The rest of `data/` (downloads, intermediate pipeline artifacts, proprietary
 provider files) stays local and is not in the repository. The directory
