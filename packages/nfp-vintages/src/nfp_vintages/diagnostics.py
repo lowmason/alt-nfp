@@ -306,8 +306,9 @@ def encompassing(
 
     # Bates–Granger optimal convex weight on the model from error (co)variance.
     em, ec = av - mv, av - cv
-    vm, vc = float(np.var(em)), float(np.var(ec))
-    cov = float(np.cov(em, ec)[0, 1]) if n > 1 else 0.0
+    cmat = np.cov(em, ec)            # 2x2, ddof=1 throughout
+    vm, vc = float(cmat[0, 0]), float(cmat[1, 1])
+    cov = float(cmat[0, 1])
     denom = vm + vc - 2.0 * cov
     w_model = float(np.clip((vc - cov) / denom, 0.0, 1.0)) if denom > 0 else 0.5
 

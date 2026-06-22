@@ -557,8 +557,9 @@ def cmd_total(root: Path) -> None:
     manifest = _read_json(root / "grid_manifest.json")
     prov = manifest["provenance"]
     idx_to_level = float(prov["idx_to_level"])
-    consensus = Consensus(load_consensus())
-    implied_govt = ImpliedGovernment(load_consensus())
+    _ct = load_consensus()
+    consensus = Consensus(_ct)
+    implied_govt = ImpliedGovernment(_ct)
     rows = {}
     # decomp_rows: per target signed-error decomposition
     # Fields: regime, key, total_err, private_err, govt_err, implied_govt_err (None at t7)
@@ -667,6 +668,11 @@ def _write_total_report(root: Path, decomp_rows: list[dict]) -> None:
         "Total = private nowcast (`'05'`) + government wedge. Errors are signed "
         "**pred − actual** (positive = model over-estimated). The identity "
         "`total_err = private_err + govt_err` holds by construction.",
+        "",
+        "> **Note:** `total_err` below is a **component-mean decomposition diagnostic** "
+        "(private + wedge point estimates) and **differs second-order from the scored "
+        "`point_err` in `total_scores.json`** (which uses the resampled assembled-Total "
+        "draws) — the latter is the authoritative model error.",
         "",
         "## Total-error decomposition",
         "",
