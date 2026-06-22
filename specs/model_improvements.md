@@ -1,12 +1,23 @@
 # Model improvements — private first-print targeting, diagnostics, and turning-point edge (design)
 
-Status: **design, revised 2026-06-19**. The **model-side counterpart** to `specs/completed/a5_real_competitors.md` (evaluation-side firewall — no `nfp-model` changes). Motivated by `specs/model_research.md` (consolidated literature review) and the **validate-first pivot** in `specs/plans/0-port_and_staged_plan.md` (parity is a port-fidelity floor, **not** correctness). This spec reopens Phase A's "parity-is-done" freeze — behind new baselines — to fix two things A5's prong-2 surfaced: the model is not modeling the **object** it should (it nowcasts **private** NFP, not total), nor the **vintage** it is scored on (first print).
+Status: **design, revised 2026-06-19; amended 2026-06-22 (§12 — consensus on both tracks)**. The **model-side counterpart** to `specs/completed/a5_real_competitors.md` (evaluation-side firewall — no `nfp-model` changes). Motivated by `specs/model_research.md` (consolidated literature review) and the **validate-first pivot** in `specs/plans/0-port_and_staged_plan.md` (parity is a port-fidelity floor, **not** correctness). This spec reopens Phase A's "parity-is-done" freeze — behind new baselines — to fix two things A5's prong-2 surfaced: the model is not modeling the **object** it should (it nowcasts **private** NFP, not total), nor the **vintage** it is scored on (first print).
+
+> **Amendment 2026-06-22 — consensus is available on BOTH tracks (supersedes TL;DR #3 / §3).**
+> The Bloomberg consensus file is now on MinIO (`s3://alt-nfp/competitors/consensus.parquet`) and
+> carries **both** Total (`'00'`, ownership total) **and private** (`'05'`, ownership private) survey
+> medians/means — **173 months each, 2012-01 → 2026-05**, on the model's exact object (total private,
+> SA, first-print headline change); the adapter already keys on `industry_code` (`consensus.py`). So the
+> premise that "consensus is a Total object, meaningless against the private nowcast" is **false**. The
+> private nowcast gains its first real competitor; the **government wedge gains its first competitor ever**
+> (`Total − Private` = an *implied-government* consensus); and a model–consensus **combination** is now on
+> the table behind a falsifiable gate. The two-track A/B framing is **re-priced, not removed** — the wedge
+> stays (load-bearing for the strong-Total headline). Full design, gate, and scope in **§12**.
 
 ## TL;DR
 
 1.  **The model nowcasts PRIVATE NFP — target the private first print.** The model's signal is inherently private: it is anchored to QCEW (private in this store) and its richest inputs are **private payroll providers**. It cannot see government employment. So its object is **CES total private** (`industry_code='05'`), and it must be scored against the **private** first print and **private** QCEW truth. The run-path currently defaults to `'00'` (total nonfarm) — a **latent mismatch** being corrected here, *not* the intended target. (The `'00'` total data exists for the **Track B** "private nowcast + government forecast = total" assembly — whose government forecast, the `00 − 05` wedge, is now **built**; §2 below.)
 2.  **Second, even on private it targets the wrong vintage.** The latent passes through a single, vintage-*pooled* CES observation equation, so the nowcast predicts a *revised/third-print*-ish value — then it is scored against the **first** print. The headline model fix (§5) makes it a genuine **first-print** predictor.
-3.  **Two evaluation tracks.** **Track A (now):** the private nowcast vs **naive floors only**, scored on the private first print + the private QCEW-settled truth (the **primary** truth comparison), decomposed by regime, judged on **calibration**. **Track B (built locally 2026-06-19; validate-on-port):** Total NFP = **private nowcast + government forecast** → compared to the Total-NFP **consensus** + Total first print. Consensus is a **Total** object — it has no meaning against the private nowcast alone. The government forecast (the **wedge** `00 − 05`), the Total assembly, and the consensus scoring are now **designed + built + tested** (`specs/completed/government_wedge.md`, `specs/plans/completed/14-government_wedge.md`); only the **accuracy/keep-drop verdict vs consensus** is deferred to the port — exactly Track A's build-here/validate-on-port posture (TL;DR #4).
+3.  **Two evaluation tracks.** **Track A (now):** the private nowcast vs **naive floors only**, scored on the private first print + the private QCEW-settled truth (the **primary** truth comparison), decomposed by regime, judged on **calibration**. **Track B (built locally 2026-06-19; validate-on-port):** Total NFP = **private nowcast + government forecast** → compared to the Total-NFP **consensus** + Total first print. Consensus is a **Total** object — it has no meaning against the private nowcast alone. **[Superseded 2026-06-22 — §12: the consensus file also carries the private `'05'` series, so the private nowcast now has its own consensus competitor and the two-track framing is re-priced, not removed.]** The government forecast (the **wedge** `00 − 05`), the Total assembly, and the consensus scoring are now **designed + built + tested** (`specs/completed/government_wedge.md`, `specs/plans/completed/14-government_wedge.md`); only the **accuracy/keep-drop verdict vs consensus** is deferred to the port — exactly Track A's build-here/validate-on-port posture (TL;DR #4).
 4.  **Build here, validate on the port.** This compute (Opus 4.8, no limits) is for *building*; the local eval is a providerless **skeleton** that can confirm code **runs and converges** but cannot **validate accuracy**. So build the full stack here (Tiers 1–3, each behind its parity baseline), confirm correctness + convergence locally, and defer the **accuracy verdict, tuning, and keep/drop** to the Bloomberg port. Tier 1 diagnostics are **instrumentation** (the Aruoba intercept feeds §5A) — **not** a build-blocker.
 5.  **Out of scope / deferred:** a benchmark / Early-Benchmark revision layer; a full first-release-vintage store rebuild (unless §4 justifies); supersector logic (Phase B). **ADP is out entirely** — not a competitor, not a regressor. (The **government forecast** — formerly listed here as Track B's undesigned critical path — is now **built**: the `00 − 05` wedge, `specs/completed/government_wedge.md` / `specs/plans/completed/14`. What remains deferred to the port is its **accuracy verdict vs consensus**, the port-only refinements, and two input gates — §2.) Model changes land behind **new parity baselines** (§8).
 
@@ -39,7 +50,7 @@ Status: **design, revised 2026-06-19**. The **model-side counterpart** to `specs
 
 ## 3. Tier 0 — Private scoreboard correctness *(evaluation-side; extends the A5 harness, no model code)*
 
-Score the **private nowcast** against the **private** first print, by `competitor × horizon-regime × month-type`. **Competitors: naive floors only** (random-walk, trailing-mean). **No consensus** (a Total object → Track B); **no ADP**. The **private QCEW-settled scoreboard** (§Task-5 in the plan) is the **primary truth** comparison — the model is QCEW-anchored, so the QCEW-settled private value is the closest administrative truth it can be held to. Tier 0 adds:
+Score the **private nowcast** against the **private** first print, by `competitor × horizon-regime × month-type`. **Competitors: naive floors only** (random-walk, trailing-mean). **No consensus** (a Total object → Track B); **no ADP**. **[Superseded 2026-06-22 — §12: the private consensus (`'05'`) is now available and IS a competitor on this private board; see §12.1/§12.3. ADP stays out.]** The **private QCEW-settled scoreboard** (§Task-5 in the plan) is the **primary truth** comparison — the model is QCEW-anchored, so the QCEW-settled private value is the closest administrative truth it can be held to. Tier 0 adds:
 
 1.  **Month-type decomposition.** Split every metric by **normal / large-revision / turning-point / benchmark-window**, alongside the T−7/T−1 horizon split. Definitions: *large-revision* = |first→third **private** revision| above a fixed percentile of the historical distribution; *turning-point* = a cyclical-state flag (claims-momentum / direction-change); *benchmark-window* = the Feb-release months most affected by annual-benchmark + seasonal-factor updates; *normal* = the complement. Pooled MAE hides where edge lives — the **provider edge in normal months, the BD edge at turns**.
 2.  **Calibration metrics.** Interval coverage (80/90% hit-rate) and CRPS beside the point metrics. In normal months — and in every providerless local run — the Bayesian model's value is *honest uncertainty*, not a point-MAE edge (ties to §10).
@@ -111,6 +122,111 @@ The published consensus ceiling (~48k MAE / 60–65k RMSE; sampling SE ~67.5k) i
 -   **`biz_apps` wiring.** Verify it threads through `panel_adapter` / `model_inputs` into the model path before §6.1 — data-layer config (`CYCLICAL_INDICATORS`), not a model default (`indicator_names`).
 -   **Tuning against a skeleton.** The provider edge cannot be tested locally; defer edge-layer tuning to the full regime.
 -   **Dirty-month validation set.** COVID (2020–21) and shutdown exclusions overlap the very turning-point months §6 needs; curate the Tier-3 validation set deliberately.
+
+## 12. Consensus on both tracks — benchmarks + the combination gate *(2026-06-22 amendment)*
+
+The premise behind TL;DR #3 and §3 — "consensus is a Total object, meaningless against the private
+nowcast" — is **false as of 2026-06-22**. `s3://alt-nfp/competitors/consensus.parquet` carries both the
+Total (`'00'`) and private (`'05'`, `ownership='private'`) survey median/mean, **173 months each,
+2012-01 → 2026-05**, on the model's exact object (total private, SA, first-print headline change in
+k-jobs). `consensus.py` already keys on `industry_code`, so consuming the private series needs **no new
+adapter**. This unblocks three things the original two-track design could not express. **Deliverable
+context (maintainer, 2026-06-22): the product is *both* Total and private, with strong emphasis on
+Total** — so the headline is the additive assembly, and its quality is gated by its weakest link.
+
+### 12.1 The fully-benchmarked additive stack
+
+Each layer of `Total = private nowcast + government wedge` now has a professional competitor:
+
+```
+  private nowcast    → vs  Private consensus ('05')     (NEW; replaces "naive floors only" on §3's board)
++ government wedge    → vs  Total − Private             (NEW; the wedge's first competitor ever)
+─────────────────
+= Total (headline)   → vs  Total consensus ('00')       (existing Track B; now DECOMPOSABLE)
+```
+
+The payoff is the decomposition: a Total-headline miss splits into a **private-side** miss and a
+**government-side** miss, so you can see *where* the headline is lost — which the single Total contest
+(§9 Track B) could not show.
+
+### 12.2 The implied-government benchmark — the underrated prize
+
+Under strong-Total emphasis the headline is gated by the **government wedge**, the one place the model
+has no signal and whose priors are placeholder 2025-RIF magnitudes (`government_wedge.md` §8, a *blocking
+maintainer input-gate*). `Total − Private` consensus is the street's monthly government-employment
+expectation, and it does two things the wedge never had: (a) gives the wedge an **external accuracy
+check** for the first time (its verdict was deferred entirely — §11), and (b) is a candidate
+**prior/anchor that may obviate the RIF input-gate**. Validate-first (consistent with the gate below):
+score the wedge against implied-govt first; fold implied-govt into the wedge's priors only if it beats
+the RIF-priored wedge. **Implication: strong-Total should redirect real attention onto the wedge** — the
+part of the system this data finally makes improvable instead of a leap of faith.
+
+### 12.3 The combination gate — the go/no-go for touching the model
+
+**Decision (maintainer, 2026-06-22):** the private consensus is a **benchmark first; a model-combination
+partner only if diagnostics justify** — and "justify" is a **regime- and horizon-decomposed optimal
+combination**, not a vibe:
+
+- For each **month-type × horizon** cell (month-types per §3.1: normal / large-revision / turning-point /
+  benchmark-window; horizons T−7/T−1), fit the forecast-encompassing regression
+  `first_print_private = a + b·model + c·private_consensus` and read the implied optimal combination
+  weight `w*` (Granger–Ramanathan / Fair–Shiller combination).
+- The gate **fires for a cell** when the encompassing test rejects "consensus encompasses the model"
+  *and* the (model, consensus) blend beats **both** standalone on MAE/RMSE/CRPS.
+- **Expected shape if the §1 two-edge thesis holds:** `w*(model)` high in the **turning-point** cells
+  (the BD edge; Klein 2022 street under-reaction), low in **normal** months (consensus is the near-
+  efficient ceiling). If it does *not* come out that way, that is the honest signal the edge isn't there.
+
+### 12.4 Consensus is T−1-only → the combination is a T−1 phenomenon
+
+The street median locks release-eve: `consensus.py` withholds the value until
+`as_of ≥ release_date − _LOCK_LAG` (1 day). So **at T−7 there is no consensus** — the model stands alone
+(vs naive floors), the cleanest expression of its *earliness* edge. The combination cells are therefore
+**T−1 × {month-type}**; the **T−7-vs-T−1 contrast measures what the model's early call is worth versus
+waiting to blend with consensus.**
+
+### 12.5 Phase 2 — the combination layer (gated, post-hoc, a port decision)
+
+If the gate fires, add a **`model_combo`** competitor row: a month-type×horizon-weighted blend of
+`model_5a` (or `model`) and `consensus`, weights from §12.3, applied **post-hoc in jobs-space** in
+`run_a5_backtest.py` — **the §5A pattern exactly** (blend the point *and* the predictive draws so
+coverage/CRPS move; **zero `nfp-model` code → no A3 baseline break**; reversible). In-model consensus
+conditioning is the later, principled escalation (a 5A→5B analog) — built only if post-hoc proves
+insufficient. Because the gate cannot truly fire on the providerless local **skeleton** (TL;DR #4),
+**Phase 2 — and whether the gate fires at all — is a Bloomberg-port decision.**
+
+### 12.6 Scope — built here vs deferred to the port
+
+**Build now, off the firewall, locally correctness-testable** (extends the A5 harness; touches no
+`nfp-model` and no pinned path):
+
+1. Wire the three consensus series as **series-keyed competitors** — private `'05'` on the private board,
+   implied-govt `Total − Private` on a new wedge board, Total `'00'` on the Total board.
+2. The **Total-error decomposition** (private-side vs government-side attribution).
+3. The **gate computation** — the encompassing regression + optimal combination weights, by
+   month-type × horizon (T−1 cells).
+
+**Do NOT build locally:** the `model_combo` combination layer (§12.5) — it is gated and the gate cannot
+fire on the skeleton; and any in-model consensus conditioning. The gate firing, the weights, the wedge
+prior change (§12.2), and Phase 2 are the **port's** decisions (build-here/validate-on-port).
+
+**Wiring:** set `NFP_CONSENSUS_PATH=s3://alt-nfp/competitors/consensus.parquet` — today only
+`NFP_STORE_URI` is set in `.env`, so the harness renders consensus as `—` until this is added.
+
+### 12.7 Updates to earlier sections
+
+This amendment **supersedes** TL;DR #3 and §3 (the private nowcast now has a consensus competitor) and
+**extends** §4.2 (the consensus Mincer–Zarnowitz can now run on the **private** track too, not only Track
+B) and §10 (the private nowcast now has its **own** consensus ceiling — no longer only a Total figure).
+The §9 sequencing gains: Track A step 2 wires the private/implied-govt consensus competitors + the gate
+computation; Track B step gains the implied-govt wedge benchmark. The two-track A/B framing **stands**,
+re-priced.
+
+**Strategic framing (the product story).** Honest expectation: the model **matches** consensus in normal
+months and **beats** it at turning points (the first print is near-efficient month to month — Klein 2022;
+the defensible separation is at turns). That *is* the product proposition — *indistinguishable from the
+street in the months nobody remembers, visibly better in the ~20% that move markets* — so the scoreboard
+must **surface the turning-point cell**, not bury it in a blended MAE.
 
 ## Appendix — source map
 
