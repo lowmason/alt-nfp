@@ -536,18 +536,33 @@ def cmd_total(root: Path) -> None:
     is the persisted ``nowcast_pred_draws`` from the existing batched private fit;
     the wedge leg is an as-of-censored wedge fit per release-eve. Read-only on the
     store (READ + FIT only — never writes the store).
+
+    Also emits ``total_report.md`` with a ``## Total-error decomposition`` section:
+    signed errors (pred − actual) decomposed as ``total_err = private_err + govt_err``
+    (an arithmetic identity — total = private + wedge by construction), plus the
+    implied-govt benchmark error beside the model wedge error.
     """
     from datetime import date
 
     from nfp_ingest.wedge_data import build_wedge_model_data
     from nfp_model.wedge import fit_wedge, wedge_pred_draws
     from nfp_vintages.assembly import assemble_total, score_total
-    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+    from nfp_vintages.competitors.consensus import (
+        Consensus,
+        ImpliedGovernment,
+        load_consensus,
+    )
+    from nfp_vintages.scoreboard import change_draws_k
 
     manifest = _read_json(root / "grid_manifest.json")
     prov = manifest["provenance"]
+    idx_to_level = float(prov["idx_to_level"])
     consensus = Consensus(load_consensus())
+    implied_govt = ImpliedGovernment(load_consensus())
     rows = {}
+    # decomp_rows: per target signed-error decomposition
+    # Fields: regime, key, total_err, private_err, govt_err, implied_govt_err (None at t7)
+    decomp_rows: list[dict] = []
     for rname in REGIMES:
         reg = manifest["regimes"][rname]
         for key, t in sorted(reg["targets"].items()):
@@ -584,12 +599,126 @@ def cmd_total(root: Path) -> None:
             wedge = wedge_pred_draws(wfit, wdata["target_idx"], seed=BATCH_SEED)
             total = assemble_total(priv_growth, wedge,
                                    prev_index=float(t["prev_index"]),
-                                   idx_to_level=float(prov["idx_to_level"]))
+                                   idx_to_level=idx_to_level)
             cons = consensus.predict(target, as_of=as_of)
             rows[f"{rname}:{key}"] = score_total(
                 total, first_print_k=total_actual, consensus_k=cons)
+
+            # ---- Total-error decomposition (signed: pred − actual) ----
+            # Derive component point estimates directly (not from the assembled
+            # draws, which are resampled and would give an inexact identity):
+            #   total_point = priv_point + wedge_point  (exact by construction)
+            #   total_err   = private_err + govt_err     (arithmetic identity)
+            # Units: all change-k.
+            priv_change_k = change_draws_k(
+                priv_growth, prev_index=float(t["prev_index"]), idx_to_level=idx_to_level
+            )
+            priv_point = float(priv_change_k.mean())
+            wedge_point = float(wedge.mean())
+
+            # Realized private first print — None for months at the store edge
+            fp05 = t.get("first_print_change_k")        # private '05' first print
+            if fp05 is None:
+                # Cannot decompose without the private first print; still score Total
+                print(f"[{rname}] {key}: no '05' first print — decomp skipped", flush=True)
+                continue
+
+            fp05 = float(fp05)
+            fp00 = float(total_actual)                   # Total '00' first print
+            realized_govt = fp00 - fp05                  # realized government contribution
+
+            # Signed errors: pred − actual (positive = model over-estimated)
+            private_err = priv_point - fp05
+            govt_err = wedge_point - realized_govt
+            total_err = private_err + govt_err           # == (priv_point+wedge_point) − fp00
+
+            implied_k = implied_govt.predict(target, as_of=as_of)   # None at t7
+            implied_govt_err = None if implied_k is None else implied_k - realized_govt
+
+            decomp_rows.append({
+                "regime": rname,
+                "key": key,
+                "target": target.isoformat(),
+                "total_err": total_err,
+                "private_err": private_err,
+                "govt_err": govt_err,
+                "implied_govt_err": implied_govt_err,
+            })
+
     _write_json(root / "total_scores.json", rows)
     print(f"Scored {len(rows)} Total targets → {root / 'total_scores.json'}")
+
+    # ---- Emit total_report.md ----
+    _write_total_report(root, decomp_rows)
+
+
+def _fmt_err(v: float | None) -> str:
+    """Format a signed error (k) for markdown tables; '—' when absent."""
+    if v is None:
+        return "—"
+    return f"{v:+,.0f}k"
+
+
+def _write_total_report(root: Path, decomp_rows: list[dict]) -> None:
+    """Write total_report.md with the Total-error decomposition section."""
+    lines = [
+        "# Track B — Total backtest report",
+        "",
+        "Total = private nowcast (`'05'`) + government wedge. Errors are signed "
+        "**pred − actual** (positive = model over-estimated). The identity "
+        "`total_err = private_err + govt_err` holds by construction.",
+        "",
+        "## Total-error decomposition",
+        "",
+        "### Per-target",
+        "",
+        "| regime | target | total_err | private_err | govt_err | implied_govt_err |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in decomp_rows:
+        lines.append(
+            f"| {r['regime']} | {r['target']} "
+            f"| {_fmt_err(r['total_err'])} "
+            f"| {_fmt_err(r['private_err'])} "
+            f"| {_fmt_err(r['govt_err'])} "
+            f"| {_fmt_err(r['implied_govt_err'])} |"
+        )
+
+    # Pooled by regime
+    lines += ["", "### Pooled by regime", ""]
+    lines += [
+        "Signed errors: ME = mean(pred − actual); MAE = mean |pred − actual|. "
+        "`implied_govt` is T−1 only (None at T−7 by design).",
+        "",
+        "| regime | component | n | ME | MAE |",
+        "|---|---|---|---|---|",
+    ]
+    for rname in REGIMES:
+        sub = [r for r in decomp_rows if r["regime"] == rname]
+        for comp in ("total_err", "private_err", "govt_err"):
+            vals = [r[comp] for r in sub if r[comp] is not None]
+            if not vals:
+                lines.append(f"| {rname} | {comp} | 0 | — | — |")
+            else:
+                arr = np.array(vals, dtype=float)
+                lines.append(
+                    f"| {rname} | {comp} | {len(arr)} "
+                    f"| {arr.mean():+,.0f}k | {np.abs(arr).mean():,.0f}k |"
+                )
+        # implied_govt: only present at t1
+        ig_vals = [r["implied_govt_err"] for r in sub if r["implied_govt_err"] is not None]
+        if ig_vals:
+            ig_arr = np.array(ig_vals, dtype=float)
+            lines.append(
+                f"| {rname} | implied_govt_err | {len(ig_arr)} "
+                f"| {ig_arr.mean():+,.0f}k | {np.abs(ig_arr).mean():,.0f}k |"
+            )
+        else:
+            lines.append(f"| {rname} | implied_govt_err | 0 | — | — |")
+
+    report_path = root / "total_report.md"
+    report_path.write_text("\n".join(lines) + "\n")
+    print(f"Total report → {report_path}")
 
 
 def main() -> None:
