@@ -332,20 +332,20 @@ def test_combination_gate_fires_only_where_model_adds_info_and_combo_wins():
     import numpy as np
     from nfp_vintages.diagnostics import combination_gate
     rng = np.random.default_rng(2)
-    # turning_point/t1: model adds info → should fire
+    # turning_point/t1: BOTH forecasts informative, model better → interior optimum
+    # (0 < w_model < 1) so the blend STRICTLY beats both → fires. (A pure-noise
+    # consensus would saturate w_model at 1.0, degenerating the blend to the model
+    # alone so combo_mae == model_mae and the strict 'beats both' could never fire.)
     a_tp = rng.normal(0, 80, 60)
+    m_tp = a_tp + rng.normal(0, 20, 60)   # model: good signal
+    c_tp = a_tp + rng.normal(0, 35, 60)   # consensus: weaker but real signal
+    # normal/t1: consensus tracks, model is pure noise → model adds no info → must not fire
+    a_n = rng.normal(150, 40, 60)
+    m_n = rng.normal(150, 40, 60)
+    c_n = a_n + rng.normal(0, 6, 60)
     cells = {
-        ("turning_point", "t1"): {
-            "actual": a_tp.tolist(),
-            "model": (a_tp + rng.normal(0, 8, 60)).tolist(),
-            "consensus": rng.normal(0, 80, 60).tolist(),
-        },
-        # normal/t1: consensus encompasses; model is noise → must not fire
-        ("normal", "t1"): {
-            "actual": (a_n := rng.normal(150, 40, 60)).tolist(),
-            "model": rng.normal(150, 40, 60).tolist(),
-            "consensus": (a_n + rng.normal(0, 6, 60)).tolist(),
-        },
+        ("turning_point", "t1"): {"actual": a_tp.tolist(), "model": m_tp.tolist(), "consensus": c_tp.tolist()},
+        ("normal", "t1"): {"actual": a_n.tolist(), "model": m_n.tolist(), "consensus": c_n.tolist()},
         # turning_point/t7: no consensus → skipped (insufficient obs)
         ("turning_point", "t7"): {"actual": [1.0, 2.0], "model": [1.0, 2.0], "consensus": [float("nan"), float("nan")]},
     }
