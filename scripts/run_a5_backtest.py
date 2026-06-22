@@ -7,10 +7,11 @@
 Track A (private): the model nowcasts **total private** NFP (``industry_code=
 '05'``) — the object it is actually built for (QCEW-anchored, private-provider
 inputs, private birth/death) — and is scored against the **private** first print
-and **private** QCEW-settled truth. Competitors are **naive floors only**
-(random-walk, trailing-mean). Consensus (a Total-NFP object) and ADP are removed:
-they belong to the deferred Track B (Total = private nowcast + government
-forecast). See ``specs/model_improvements.md``.
+and **private** QCEW-settled truth. Competitors: naive floors (random-walk,
+trailing-mean) plus the **private consensus** (``industry_code='05'``) at T−1
+(it locks release-eve, so it is absent at T−7 by design). **ADP** is removed
+entirely. The **Total** consensus contest lives in ``cmd_total`` (Track B).
+See ``specs/model_improvements.md``.
 
 Reuses the A4 batched harness verbatim (``fit_model_batch``); only the as-of
 dates differ (release(M) − {7,1}). Snapshots live under ``<root>/<regime>/``.
@@ -272,6 +273,7 @@ def cmd_score(root: Path) -> int:
     import polars as pl
     from nfp_ingest.first_print import first_print_changes
     from nfp_vintages.a5 import score
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
     from nfp_vintages.diagnostics import build_revision_table, pooled_first_print_bias
     from nfp_vintages.scoreboard import (
@@ -289,9 +291,11 @@ def cmd_score(root: Path) -> int:
     # Private first-print target ('05') — the object the model nowcasts.
     fp = first_print_changes(industry_code=HEADLINE_INDUSTRY)
     fp_hist = fp.select(["ref_date", "first_print_change_k", "vintage_date"])
-    # Track A competitors: naive floors only. Consensus (a Total-NFP object) and
-    # ADP are removed — they belong to deferred Track B (see module docstring).
+    # Track A competitors: naive floors + private consensus at T−1.
+    # Consensus (private '05') locks release-eve → None at t7, present at t1.
+    # ADP is removed entirely. Total consensus contest lives in cmd_total.
     naive_rw, naive_mean = RandomWalk(fp_hist), TrailingMean(fp_hist, window=12)
+    consensus_priv = Consensus(load_consensus(), industry_code="05")  # private '05'; None at t7 (lock)
 
     # Month-type inputs (skeleton-safe: empty maps degrade to "normal"/"benchmark").
     rev_tbl = build_revision_table()  # [ref_date, first_print_change_k, later_change_k, revision_k]
@@ -313,6 +317,7 @@ def cmd_score(root: Path) -> int:
     month_type = classify_month_types(rev_months, rev_abs, claims_arr, MonthTypeConfig())
 
     rows = []
+    gate_cells: dict[tuple[str, str], dict] = {}
     for rname, _days_before in REGIMES.items():
         reg = manifest["regimes"][rname]
         batched = _read_json(root / f"{rname}_batched_manifest.json")["entries"]
@@ -351,9 +356,17 @@ def cmd_score(root: Path) -> int:
             preds = {
                 "model": model,
                 "model_5a": model - delta_k,   # §5A post-hoc first-print offset
+                "consensus": consensus_priv.predict(ref, as_of=as_of),  # None at t7 (lock)
                 "naive_rw": naive_rw.predict(ref, as_of=as_of),
                 "naive_mean": naive_mean.predict(ref, as_of=as_of),
             }
+            # Accumulate gate cells: only t1 will have non-None consensus.
+            cons = preds["consensus"]
+            if cons is not None:
+                cell = gate_cells.setdefault((mtype, rname), {"actual": [], "model": [], "consensus": []})
+                cell["actual"].append(actual)
+                cell["model"].append(preds["model"])
+                cell["consensus"].append(cons)
             for comp, pred in preds.items():
                 c80, c90, ck = calib.get(comp, (None, None, None))
                 rows.append({
@@ -392,12 +405,13 @@ def cmd_score(root: Path) -> int:
     lines = ["# A5 backtest report", "",
              "**Track A — the private nowcast.** The model nowcasts CES **total "
              "private** (`industry_code='05'`) and is scored against the **private** "
-             "first print at T−7 and T−1, decomposed by month type. Competitors are "
-             "**naive floors only** (random-walk, trailing-mean).",
-             "Consensus and ADP are absent by design: consensus forecasts **Total** "
-             "NFP, which has no meaning against the private nowcast alone — it belongs "
-             "to the deferred **Track B** (Total = private nowcast + government "
-             "forecast). ADP is removed entirely. See `specs/model_improvements.md`.",
+             "first print at T−7 and T−1, decomposed by month type. Competitors: "
+             "naive floors (random-walk, trailing-mean) plus the **private consensus** "
+             "(`industry_code='05'`) at T−1 (it locks release-eve, so it is absent "
+             "at T−7 by design).",
+             "**ADP** is removed entirely. The **Total** consensus contest lives in "
+             "`cmd_total` (Track B = private nowcast + government forecast). "
+             "See `specs/model_improvements.md`.",
              f"Venue(s) in this run: **{', '.join(venues) or 'public-only'}** — a "
              "`public-only` run scores a providerless skeleton (spec section 10).",
              "COVID (2020–2021) and shutdown-flagged months excluded from metrics.", ""]
@@ -409,7 +423,7 @@ def cmd_score(root: Path) -> int:
             n_months = sub.select(pl.col("ref_month").n_unique()).item()
             lines += [f"### {mtype} ({n_months} months)", "",
                       "| competitor | n | ME | MAE | RMSE |", "|---|---|---|---|---|"]
-            for comp in ["model", "model_5a", "naive_rw", "naive_mean"]:
+            for comp in ["model", "model_5a", "consensus", "naive_rw", "naive_mean"]:
                 e = sub.filter(pl.col("competitor") == comp)["error_k"].to_numpy()
                 m = score(e)
                 if m["n"] == 0:
@@ -429,6 +443,42 @@ def cmd_score(root: Path) -> int:
                               f"{_c} calibration — 80% coverage: {cov80:.0%}, "
                               f"90% coverage: {cov90:.0%}, mean CRPS: {crps:,.0f}k"]
             lines.append("")
+
+    # ---- Combination gate (t1; build-here/validate-on-port) ----
+    from nfp_vintages.diagnostics import combination_gate
+
+    gate = combination_gate(gate_cells)
+    gate_lines = [
+        "",
+        "## Combination gate (t1; build-here/validate-on-port)",
+        "",
+        "> **Skeleton run — informational only; the gate fires on the Bloomberg full regime "
+        "(§12.6). Locally `NFP_CONSENSUS_PATH` is unset so consensus is None everywhere and "
+        "no cells are populated.**",
+        "",
+        "| month_type | horizon | n | w_model | p_model_adds_info | model MAE | consensus MAE "
+        "| combo MAE | fires |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for (mtype, rname), cell in sorted(gate.items()):
+        r = cell.get("result")
+        fires = cell.get("fires", False)
+        if r is None:
+            reason = cell.get("reason", "—")
+            gate_lines.append(
+                f"| {mtype} | {rname} | {cell.get('n', 0)} | — | — | — | — | — | "
+                f"False ({reason}) |"
+            )
+        else:
+            gate_lines.append(
+                f"| {mtype} | {rname} | {r.n} | {r.w_model:.2f} | "
+                f"{r.p_model_adds_info:.3f} | {r.model_mae:,.0f}k | "
+                f"{r.consensus_mae:,.0f}k | {r.combo_mae:,.0f}k | {fires} |"
+            )
+    if not gate:
+        gate_lines.append("| (no cells — consensus absent; run on Bloomberg for live results) | | | | | | | | |")
+    lines += gate_lines
+
     (root / "a5_report.md").write_text("\n".join(lines) + "\n")
     print((root / "a5_report.md").read_text())
 

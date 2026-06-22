@@ -342,3 +342,16 @@ def test_combination_gate_fires_only_where_model_adds_info_and_combo_wins():
     assert out[("normal", "t1")]["fires"] is False
     assert out[("turning_point", "t7")]["fires"] is False
     assert out[("turning_point", "t7")]["reason"] == "insufficient_paired_obs"
+
+
+def test_combination_gate_accepts_harness_cell_shape():
+    from nfp_vintages.diagnostics import combination_gate
+
+    # Varied values so the encompassing design matrix is full-rank (identical
+    # rows → singular X.T@X → LinAlgError in ols; vary each series).
+    actual = [100.0, 120.0, 90.0, 140.0, 110.0, 130.0]
+    model = [105.0, 115.0, 95.0, 135.0, 108.0, 128.0]
+    consensus = [102.0, 118.0, 88.0, 138.0, 112.0, 132.0]
+    cells = {("normal", "t1"): {"actual": actual, "model": model, "consensus": consensus}}
+    out = combination_gate(cells)
+    assert ("normal", "t1") in out and "fires" in out[("normal", "t1")]
