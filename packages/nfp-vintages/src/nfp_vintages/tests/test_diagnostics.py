@@ -312,3 +312,33 @@ def test_encompassing_consensus_encompasses_model_when_model_is_noise():
     assert r is not None
     assert r.p_model_adds_info > 0.10          # cannot reject b == 0
     assert r.w_model < 0.2                      # weight piles onto consensus
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Per-cell combination gate (month-type × horizon)
+# ---------------------------------------------------------------------------
+
+
+def test_combination_gate_fires_only_where_model_adds_info_and_combo_wins():
+    from nfp_vintages.diagnostics import combination_gate
+    rng = np.random.default_rng(2)
+    # turning_point/t1: BOTH forecasts informative, model better → interior optimum
+    # (w_model strictly between 0 and 1) so the blend strictly beats both → fires.
+    a_tp = rng.normal(0, 80, 60)
+    m_tp = a_tp + rng.normal(0, 20, 60)   # model: good signal
+    c_tp = a_tp + rng.normal(0, 35, 60)   # consensus: weaker but real signal (independent noise)
+    # normal/t1: consensus tracks, model is pure noise → model adds no info → must not fire.
+    a_n = rng.normal(150, 40, 60)
+    m_n = rng.normal(150, 40, 60)
+    c_n = a_n + rng.normal(0, 6, 60)
+    cells = {
+        ("turning_point", "t1"): {"actual": a_tp.tolist(), "model": m_tp.tolist(), "consensus": c_tp.tolist()},
+        ("normal", "t1"): {"actual": a_n.tolist(), "model": m_n.tolist(), "consensus": c_n.tolist()},
+        # turning_point/t7: no consensus (nan) → skipped (insufficient obs)
+        ("turning_point", "t7"): {"actual": [1.0, 2.0], "model": [1.0, 2.0], "consensus": [float("nan"), float("nan")]},
+    }
+    out = combination_gate(cells)
+    assert out[("turning_point", "t1")]["fires"] is True
+    assert out[("normal", "t1")]["fires"] is False
+    assert out[("turning_point", "t7")]["fires"] is False
+    assert out[("turning_point", "t7")]["reason"] == "insufficient_paired_obs"

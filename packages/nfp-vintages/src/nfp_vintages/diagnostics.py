@@ -398,3 +398,32 @@ def qcew_settled_changes(store_path=None) -> pl.DataFrame:
         .drop_nulls("qcew_settled_change_k")
     )
     return df
+
+
+def combination_gate(
+    cells: dict[tuple[str, str], dict], *, alpha: float = 0.10
+) -> dict[tuple[str, str], dict]:
+    """Run the encompassing/combination analysis per (month_type, horizon) cell.
+
+    Distinct from ``gate_decision`` (the §4 Aruoba model-layer gate). This is the §12
+    *combination* gate: for each cell with consensus present (t1), decide whether a
+    model–consensus blend earns its keep. t7 cells carry no consensus and are skipped.
+
+    A cell **fires** iff the model adds information beyond consensus
+    (``p_model_adds_info < alpha``) AND the blend beats both standalone
+    (``combo_mae < min(model_mae, consensus_mae)``).
+    """
+    out: dict[tuple[str, str], dict] = {}
+    for key, d in cells.items():
+        r = encompassing(
+            np.asarray(d["actual"], dtype=float),
+            np.asarray(d["model"], dtype=float),
+            np.asarray(d["consensus"], dtype=float),
+        )
+        if r is None:
+            out[key] = {"result": None, "fires": False,
+                        "reason": "insufficient_paired_obs", "n": len(d["actual"])}
+            continue
+        fires = (r.p_model_adds_info < alpha) and (r.combo_mae < min(r.model_mae, r.consensus_mae))
+        out[key] = {"result": r, "fires": fires}
+    return out
