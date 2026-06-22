@@ -252,3 +252,28 @@ def test_pooled_first_print_bias_drops_null_revisions():
     rev = pl.DataFrame({"revision_k": [-8.0, None, -8.0, -8.0]})
     assert pooled_first_print_bias(rev, method="median") == approx(-8.0)
     assert pooled_first_print_bias(rev, method="mean") == approx(-8.0)
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Implied-government consensus
+# ---------------------------------------------------------------------------
+
+
+def test_implied_government_consensus_is_total_minus_private():
+    from nfp_vintages.diagnostics import implied_government_consensus
+
+    tbl = pl.DataFrame({
+        "ownership": ["total", "private", "total", "private"],
+        "industry_type": ["total"] * 4,
+        "industry_code": ["00", "05", "00", "05"],
+        "ref_date": [_d(2024, 1, 1), _d(2024, 1, 1), _d(2024, 2, 1), _d(2024, 2, 1)],
+        "release_date": [_d(2024, 2, 2), _d(2024, 2, 2), _d(2024, 3, 8), _d(2024, 3, 8)],
+        "consensus_mean": [180.0, 160.0, 200.0, 175.0],
+        "consensus_median": [185.0, 165.0, 210.0, 180.0],
+    })
+    out = implied_government_consensus(tbl)  # median by default
+    assert out.columns == ["ref_date", "release_date", "implied_govt_k"]
+    assert out.height == 2
+    got = dict(zip(out["ref_date"].to_list(), out["implied_govt_k"].to_list(), strict=True))
+    assert got[_d(2024, 1, 1)] == 185.0 - 165.0   # 20.0
+    assert got[_d(2024, 2, 1)] == 210.0 - 180.0   # 30.0

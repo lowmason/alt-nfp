@@ -149,6 +149,45 @@ def pooled_first_print_bias(rev_tbl: pl.DataFrame, *, method: str = "median") ->
     raise ValueError(f"unknown method {method!r}; expected 'median' or 'mean'")
 
 
+def implied_government_consensus(
+    table: pl.DataFrame, *, statistic: str = "median"
+) -> pl.DataFrame:
+    """Implied government consensus = Total (``'00'``) − Private (``'05'``) per ref month.
+
+    The street's monthly expectation for the government contribution to headline NFP,
+    derived from the two published consensus series. It is the government wedge's first
+    external benchmark (the wedge previously had none). One row per ``ref_date`` present
+    in **both** series.
+
+    Parameters
+    ----------
+    table : pl.DataFrame
+        The loaded consensus file (``load_consensus``), carrying ``'00'`` and ``'05'``.
+    statistic : {"median", "mean"}, default "median"
+        Which survey statistic to difference.
+
+    Returns
+    -------
+    pl.DataFrame
+        Columns ``ref_date``, ``release_date``, ``implied_govt_k`` (thousands), sorted by ref_date.
+    """
+    if statistic not in ("median", "mean"):
+        raise ValueError(f"statistic must be 'median' or 'mean', got {statistic!r}")
+    col = f"consensus_{statistic}"
+    total = table.filter(pl.col("industry_code") == "00").select(
+        "ref_date", "release_date", pl.col(col).alias("_total")
+    )
+    private = table.filter(pl.col("industry_code") == "05").select(
+        "ref_date", pl.col(col).alias("_private")
+    )
+    return (
+        total.join(private, on="ref_date", how="inner")
+        .with_columns((pl.col("_total") - pl.col("_private")).alias("implied_govt_k"))
+        .select("ref_date", "release_date", "implied_govt_k")
+        .sort("ref_date")
+    )
+
+
 def build_aruoba_design(
     ref_months: list, regressors: dict[str, dict]
 ) -> tuple[np.ndarray, list[str], list[str]]:
