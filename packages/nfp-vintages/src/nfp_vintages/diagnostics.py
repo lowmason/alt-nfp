@@ -262,6 +262,69 @@ def mincer_zarnowitz(actual: np.ndarray, forecast: np.ndarray) -> MZResult:
 
 
 @dataclass(frozen=True)
+class EncompassingResult:
+    """Forecast-encompassing + optimal-combination readout for one cell.
+
+    ``actual = a + b·model + c·consensus``; ``p_model_adds_info`` is the Wald p that
+    ``b == 0`` (small ⇒ consensus does NOT encompass the model). ``w_model`` is the
+    Bates–Granger optimal convex weight on the model from the error covariance.
+    """
+    n: int
+    w_model: float
+    p_model_adds_info: float
+    model_mae: float
+    consensus_mae: float
+    combo_mae: float
+    b: float
+    c: float
+
+
+def encompassing(
+    actual: np.ndarray, model: np.ndarray, consensus: np.ndarray
+) -> EncompassingResult | None:
+    """Encompassing test + Bates–Granger combination weight for paired forecasts.
+
+    Returns ``None`` when fewer than 5 finite ``(actual, model, consensus)`` triples
+    exist (e.g. a t7 cell, where consensus has not locked).
+    """
+    from scipy.stats import chi2
+
+    a_, m_, c_ = (np.asarray(x, dtype=float) for x in (actual, model, consensus))
+    ok = np.isfinite(a_) & np.isfinite(m_) & np.isfinite(c_)
+    n = int(ok.sum())
+    if n < 5:
+        return None
+    av, mv, cv = a_[ok], m_[ok], c_[ok]
+
+    # Fair–Shiller encompassing regression actual = a + b·model + c·consensus.
+    X = np.column_stack([np.ones(n), mv, cv])
+    res = ols(X, av)
+    b, c = float(res.coeffs[1]), float(res.coeffs[2])
+    var_b = float(res.cov[1, 1])
+    wald = (b * b) / var_b if var_b > 0 else 0.0
+    p_model_adds_info = float(chi2.sf(wald, df=1))
+
+    # Bates–Granger optimal convex weight on the model from error (co)variance.
+    em, ec = av - mv, av - cv
+    vm, vc = float(np.var(em)), float(np.var(ec))
+    cov = float(np.cov(em, ec)[0, 1]) if n > 1 else 0.0
+    denom = vm + vc - 2.0 * cov
+    w_model = float(np.clip((vc - cov) / denom, 0.0, 1.0)) if denom > 0 else 0.5
+
+    combo = w_model * mv + (1.0 - w_model) * cv
+    return EncompassingResult(
+        n=n,
+        w_model=w_model,
+        p_model_adds_info=p_model_adds_info,
+        model_mae=float(np.mean(np.abs(em))),
+        consensus_mae=float(np.mean(np.abs(ec))),
+        combo_mae=float(np.mean(np.abs(av - combo))),
+        b=b,
+        c=c,
+    )
+
+
+@dataclass(frozen=True)
 class GateConfig:
     """Thresholds gating Tier 2/3 funding: the normal-month R^2 floor and turning-point excess."""
 

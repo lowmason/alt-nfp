@@ -277,3 +277,38 @@ def test_implied_government_consensus_is_total_minus_private():
     got = dict(zip(out["ref_date"].to_list(), out["implied_govt_k"].to_list(), strict=True))
     assert got[_d(2024, 1, 1)] == 185.0 - 165.0   # 20.0
     assert got[_d(2024, 2, 1)] == 210.0 - 180.0   # 30.0
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Forecast-encompassing + Bates–Granger weight
+# ---------------------------------------------------------------------------
+
+
+def test_encompassing_returns_none_below_min_obs():
+    from nfp_vintages.diagnostics import encompassing
+    assert encompassing(np.arange(4.0), np.arange(4.0), np.arange(4.0)) is None
+
+
+def test_encompassing_model_adds_info_when_consensus_is_noise():
+    from nfp_vintages.diagnostics import encompassing
+    rng = np.random.default_rng(0)
+    actual = rng.normal(150, 50, 60)
+    model = actual + rng.normal(0, 5, 60)      # model tracks actual tightly
+    consensus = rng.normal(150, 50, 60)        # consensus ~ pure noise
+    r = encompassing(actual, model, consensus)
+    assert r is not None and r.n == 60
+    assert r.p_model_adds_info < 0.05          # model clearly adds info
+    assert r.w_model > 0.8                     # weight piles onto the model
+    assert r.combo_mae <= min(r.model_mae, r.consensus_mae) + 1e-6
+
+
+def test_encompassing_consensus_encompasses_model_when_model_is_noise():
+    from nfp_vintages.diagnostics import encompassing
+    rng = np.random.default_rng(1)
+    actual = rng.normal(150, 50, 60)
+    consensus = actual + rng.normal(0, 5, 60)  # consensus tracks actual
+    model = rng.normal(150, 50, 60)            # model ~ pure noise
+    r = encompassing(actual, model, consensus)
+    assert r is not None
+    assert r.p_model_adds_info > 0.10          # cannot reject b == 0
+    assert r.w_model < 0.2                      # weight piles onto consensus
