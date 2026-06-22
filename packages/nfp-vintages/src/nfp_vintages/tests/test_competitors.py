@@ -161,3 +161,34 @@ def test_consensus_path_local_default(monkeypatch):
     reload(m)
     p = m.consensus_path()
     assert str(p).endswith("competitors/consensus.parquet")
+
+
+def test_implied_government_predicts_total_minus_private_at_t1(tmp_path):
+    from datetime import timedelta
+
+    from nfp_vintages.competitors.consensus import ImpliedGovernment, load_consensus
+
+    tbl = load_consensus(_consensus_file(tmp_path))
+    ig = ImpliedGovernment(tbl)
+    assert ig.name == "implied_govt"
+
+    # pick a row from the fixture; consensus locks at release_date − 1 day
+    row = tbl.filter(tbl["industry_code"] == "00").row(0, named=True)
+    ref, rel = row["ref_date"], row["release_date"]
+    priv = tbl.filter((tbl["industry_code"] == "05") & (tbl["ref_date"] == ref)).row(
+        0, named=True
+    )
+    expected = row["consensus_median"] - priv["consensus_median"]
+
+    assert (
+        ig.predict(ref, as_of=rel - timedelta(days=1))
+        == pytest.approx(expected)
+    )  # locked at release-eve
+    assert ig.predict(ref, as_of=rel - timedelta(days=7)) is None  # t7: not yet locked
+
+
+def test_implied_government_none_when_unconfigured():
+    from nfp_vintages.competitors.consensus import ImpliedGovernment
+
+    ig = ImpliedGovernment(None)
+    assert ig.predict(date(2024, 1, 1), as_of=date(2024, 3, 1)) is None

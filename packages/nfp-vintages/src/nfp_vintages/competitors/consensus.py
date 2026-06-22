@@ -131,4 +131,37 @@ class Consensus:
         return float(row[self._col][0])
 
 
-__all__ = ["consensus_path", "load_consensus", "Consensus"]
+class ImpliedGovernment:
+    """T−1-only competitor for the government wedge: Total − Private consensus.
+
+    The street's implied monthly government contribution. Same release-eve lock as
+    :class:`Consensus`, so it is ``None`` at t7 and present at t1. ``None`` when no
+    table is loaded or the month/series is absent.
+    """
+
+    name = "implied_govt"
+
+    def __init__(self, table: pl.DataFrame | None, *, statistic: str = "median") -> None:
+        if statistic not in ("median", "mean"):
+            raise ValueError(f"statistic must be 'median' or 'mean', got {statistic!r}")
+        if table is None:
+            self._table = None
+        else:
+            from ..diagnostics import implied_government_consensus
+
+            self._table = implied_government_consensus(table, statistic=statistic)
+
+    def predict(self, ref_month: date, *, as_of: date) -> float | None:
+        if self._table is None:
+            return None
+        month = date(ref_month.year, ref_month.month, 1)
+        hit = self._table.filter(pl.col("ref_date").dt.truncate("1mo") == month)
+        if hit.height == 0:
+            return None
+        row = hit.row(0, named=True)
+        if as_of < row["release_date"] - _LOCK_LAG:
+            return None
+        return float(row["implied_govt_k"])
+
+
+__all__ = ["consensus_path", "load_consensus", "Consensus", "ImpliedGovernment"]
