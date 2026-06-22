@@ -4,18 +4,28 @@ Reads the contract file defined in ``specs/bloomberg_consensus.md`` §1, or
 returns ``None`` when unconfigured (the staged state — the scoreboard then
 renders the consensus column as ``-``). A T-1-only competitor: the street
 median locks ~release-eve.
+
+The file carries **both** Total NFP (``industry_code == "00"``) and private
+(``"05"``) series, each with a survey ``consensus_mean`` and ``consensus_median``
+keyed on ``ref_date`` (the BLS reference month, on the CES ref day — the 12th).
+``Consensus`` selects one series (industry code + statistic); Track B scores the
+Total median against the assembled Total NFP.
 """
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
-_REQUIRED = ("ref_month", "consensus_median_change_k", "survey_date",
-             "release_date", "source")
+_REQUIRED = ("ownership", "industry_type", "industry_code", "ref_date",
+             "release_date", "consensus_mean", "consensus_median")
+
+# No survey_date in the file: the median locks at release-eve, so a value is
+# withheld until ``as_of`` reaches ``release_date - _LOCK_LAG`` (no lookahead).
+_LOCK_LAG = timedelta(days=1)
 
 
 def _as_path(p: str | Path | Any) -> Path | Any:
@@ -55,54 +65,70 @@ def load_consensus(path: str | Path | None = None) -> pl.DataFrame | None:
     missing = set(_REQUIRED) - set(df.columns)
     if missing:
         raise ValueError(f"consensus file missing required columns: {sorted(missing)}")
-    if df["ref_month"].n_unique() != df.height:
-        raise ValueError("consensus ref_month must be unique")
-    bad = df.filter(pl.col("survey_date") >= pl.col("release_date"))
-    if bad.height:
-        raise ValueError("consensus survey_date must precede release_date")
-    return df.sort("ref_month")
+    # Each (industry_code, ref_date) is one survey snapshot — must be unique so a
+    # lookup resolves to a single value (mirrors the store's censored-selection
+    # discipline).
+    if df.select("industry_code", "ref_date").is_duplicated().any():
+        raise ValueError("consensus (industry_code, ref_date) pairs must be unique")
+    return df.sort("industry_code", "ref_date")
 
 
 class Consensus:
-    """T-1-only competitor: returns the median once the survey has locked."""
+    """T-1-only competitor: returns one series' value once it has locked.
+
+    Parameters
+    ----------
+    table : pl.DataFrame or None
+        The loaded consensus file, or ``None`` when unconfigured.
+    industry_code : str, default ``"00"``
+        Which series to read: ``"00"`` (Total NFP — the Track B default) or
+        ``"05"`` (private). Kept as a string so leading zeros are not lost.
+    statistic : ``"median"`` or ``"mean"``, default ``"median"``
+        Which survey statistic to return.
+    """
 
     name = "consensus"
 
-    def __init__(self, table: pl.DataFrame | None) -> None:
+    def __init__(self, table: pl.DataFrame | None, *, industry_code: str = "00",
+                 statistic: str = "median") -> None:
+        if statistic not in ("median", "mean"):
+            raise ValueError(f"statistic must be 'median' or 'mean', got {statistic!r}")
         self.table = table
+        self.industry_code = industry_code
+        self._col = f"consensus_{statistic}"
 
     def predict(self, ref_month: date, *, as_of: date) -> float | None:
-        """Return the consensus median for ``ref_month`` once its survey has locked.
+        """Return the consensus value for ``ref_month``'s series once it has locked.
 
         Parameters
         ----------
         ref_month : date
-            The reference month being predicted; bucketed to month-start before
-            lookup so the caller's day convention does not matter.
+            The reference month being predicted; month-bucketed before lookup so
+            the caller's day convention (month-start vs the CES 12th) does not
+            matter. The file's ``ref_date`` is likewise bucketed to its month.
         as_of : date
-            Censoring date; the value is withheld until ``as_of`` reaches the
-            survey date (so the consensus is a T-1-only competitor).
+            Censoring date; the value is withheld until ``as_of`` reaches
+            release-eve (``release_date - _LOCK_LAG``), so consensus stays a
+            T-1-only competitor with no lookahead.
 
         Returns
         -------
         float or None
-            The consensus median change_k, or ``None`` when no table is loaded,
-            the month is absent, or the survey has not locked by ``as_of``.
+            The selected series' value, or ``None`` when no table is loaded, the
+            month/series is absent, or it has not locked by ``as_of``.
         """
         if self.table is None:
             return None
-        # The file's ``ref_month`` is month-start (day=1, per
-        # ``specs/bloomberg_consensus.md``); the harness keys targets on the model
-        # date axis (the CES ref day, the 12th). Month-bucket so the lookup is
-        # agnostic to the caller's day convention.
         ref_m = date(ref_month.year, ref_month.month, 1)
-        row = self.table.filter(pl.col("ref_month") == ref_m)
+        row = self.table.filter(
+            (pl.col("industry_code") == self.industry_code)
+            & (pl.col("ref_date").dt.truncate("1mo") == ref_m)
+        )
         if row.height == 0:
             return None
-        survey = row["survey_date"][0]
-        if as_of < survey:  # not locked yet (e.g. T-7)
+        if as_of < row["release_date"][0] - _LOCK_LAG:  # not locked yet
             return None
-        return float(row["consensus_median_change_k"][0])
+        return float(row[self._col][0])
 
 
 __all__ = ["consensus_path", "load_consensus", "Consensus"]

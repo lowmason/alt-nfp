@@ -50,14 +50,23 @@ def test_predict_none_when_no_history_available():
 
 
 def _consensus_file(tmp_path):
+    # Mirrors the real file: BOTH Total NFP ('00') and private ('05') rows, each
+    # carrying a survey mean and median; ref_date keyed on the CES ref day (12th),
+    # no survey_date column (release_date only). industry_code stays a string so
+    # the leading-zero codes ('00'/'05') survive the parquet round-trip.
     df = pl.DataFrame(
         {
-            "ref_month": [date(2024, 5, 1), date(2024, 6, 1)],
-            "consensus_median_change_k": [180.0, 190.0],
-            "survey_date": [date(2024, 6, 5), date(2024, 7, 3)],
-            "release_date": [date(2024, 6, 7), date(2024, 7, 5)],
-            "source": ["bloomberg", "bloomberg"],
-        }
+            "ownership": ["total", "total", "private", "private"],
+            "industry_type": ["total", "total", "total", "total"],
+            "industry_code": ["00", "00", "05", "05"],
+            "ref_date": [date(2024, 5, 12), date(2024, 6, 12),
+                         date(2024, 5, 12), date(2024, 6, 12)],
+            "release_date": [date(2024, 6, 7), date(2024, 7, 5),
+                             date(2024, 6, 7), date(2024, 7, 5)],
+            "consensus_mean": [182.0, 191.0, 170.0, 174.0],
+            "consensus_median": [180.0, 190.0, 168.0, 172.0],
+        },
+        schema_overrides={"industry_code": pl.Utf8},
     )
     p = tmp_path / "consensus.parquet"
     df.write_parquet(p)
@@ -75,28 +84,55 @@ def test_load_consensus_validates_and_reads(tmp_path):
 
     df = load_consensus(_consensus_file(tmp_path))
     assert df is not None
-    assert df.height == 2
-    assert {"ref_month", "consensus_median_change_k", "survey_date",
-            "release_date", "source"}.issubset(df.columns)
+    assert df.height == 4
+    assert {"ownership", "industry_type", "industry_code", "ref_date",
+            "release_date", "consensus_mean", "consensus_median"}.issubset(df.columns)
+    assert df["industry_code"].dtype == pl.Utf8  # leading zeros preserved
 
 
-def test_consensus_competitor_t1_lookup(tmp_path):
+def test_consensus_competitor_t1_lookup_total(tmp_path):
     from nfp_vintages.competitors.consensus import Consensus, load_consensus
 
+    # Default series = Total NFP ('00') median (what Track B scores).
     c = Consensus(load_consensus(_consensus_file(tmp_path)))
     # at T-1 (release_date - 1 = 2024-07-04) consensus for 2024-06 is known
     assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) == pytest.approx(190.0)
 
 
+def test_consensus_selects_private_series(tmp_path):
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+
+    # The file also carries the private ('05') consensus — selectable.
+    c = Consensus(load_consensus(_consensus_file(tmp_path)), industry_code="05")
+    assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) == pytest.approx(172.0)
+
+
+def test_consensus_selects_mean_statistic(tmp_path):
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+
+    # mean is selectable alongside the default median.
+    c = Consensus(load_consensus(_consensus_file(tmp_path)), statistic="mean")
+    assert c.predict(date(2024, 6, 1), as_of=date(2024, 7, 4)) == pytest.approx(191.0)
+
+
 def test_consensus_lookup_is_month_keyed(tmp_path):
     # The backtest harness keys targets on the model date axis (the CES ref day,
-    # the 12th), but the consensus file's ref_month is month-start (day=1, per
-    # specs/bloomberg_consensus.md). predict must month-bucket so the lookup hits
-    # — else consensus silently scores None for every month once the file lands.
+    # the 12th) and normalizes to month-start (day=1); the file's ref_date is the
+    # 12th. predict must month-bucket BOTH sides so the lookup hits — else
+    # consensus silently scores None for every month.
     from nfp_vintages.competitors.consensus import Consensus, load_consensus
 
     c = Consensus(load_consensus(_consensus_file(tmp_path)))
     assert c.predict(date(2024, 6, 12), as_of=date(2024, 7, 4)) == pytest.approx(190.0)
+
+
+def test_consensus_withheld_before_release_eve(tmp_path):
+    # No survey_date in the file: the value locks at release-eve (release_date - 1).
+    # A too-early as_of must withhold it (no lookahead).
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+
+    c = Consensus(load_consensus(_consensus_file(tmp_path)))
+    assert c.predict(date(2024, 6, 1), as_of=date(2024, 6, 30)) is None
 
 
 def test_consensus_none_when_unconfigured():

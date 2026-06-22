@@ -1,6 +1,8 @@
 # Bloomberg consensus integration (independent spec)
 
-Status: **independent / portable; adapter built, file pending (2026-06-19).** The
+Status: **independent / portable; adapter built, file landed (2026-06-22 — schema
+re-cut to the delivered file: dual `00`/`05` series, mean+median, `ref_date`-keyed,
+no `survey_date`; lives at `s3://alt-nfp/competitors/consensus.parquet`).** The
 `alt-nfp` consensus adapter (`nfp_vintages/competitors/consensus.py`:
 `load_consensus`, `Consensus`) is **built and wired** — it is consumed by the
 **Total-track (Track B)** backtest `run_a5_backtest.py:cmd_total`, which scores the
@@ -23,14 +25,16 @@ CSV).
 
 ## TL;DR
 
-1. Produce a parquet/CSV with one row per BLS reference month:
-   `ref_month, consensus_median_change_k, survey_date, release_date, source`
-   (+ optional dispersion fields). Units: **thousands of jobs, MoM net
-   change in total nonfarm payrolls, SA** — identical to `alt-nfp`'s
-   `change_k`.
+1. Produce a parquet/CSV with one row per (series, BLS reference month):
+   `ownership, industry_type, industry_code, ref_date, release_date,
+   consensus_mean, consensus_median`. The file carries **both** the Total NFP
+   series (`industry_code == "00"`) and the private series (`"05"`). Units:
+   **thousands of jobs, MoM net change in nonfarm payrolls, SA** — identical to
+   `alt-nfp`'s `change_k`.
 2. The consensus value for reference month *M* is the **median forecast as
    recorded at release-eve of M** (the final survey before BLS prints), so it
-   aligns to A5's *release-eve* regime.
+   aligns to A5's *release-eve* regime. There is no `survey_date` column: the
+   value locks at **release-eve** (`release_date - 1 day`).
 3. Bloomberg source: economic-release ticker **`NFP TCH Index`** (US Nonfarm
    Payrolls Total MoM Net Change, SA), survey field **`BN_SURVEY_MEDIAN`**,
    release date **`ECO_RELEASE_DT`**; optional **`BN_SURVEY_AVERAGE`**,
@@ -48,26 +52,26 @@ with exactly these columns:
 
 | column | type | meaning | required |
 |---|---|---|---|
-| `ref_month` | date | first of the BLS **reference** month being forecast (e.g. `2025-06-01` for the June payrolls report) | ✅ |
-| `consensus_median_change_k` | float | median economist forecast of the MoM net change in total nonfarm payrolls, **thousands, SA** | ✅ |
-| `survey_date` | date | date the median snapshot was taken (≈ release-eve of M) | ✅ |
-| `release_date` | date | BLS release date for `ref_month`'s first print | ✅ |
-| `source` | str | provenance tag, e.g. `"bloomberg"` | ✅ |
-| `consensus_mean_change_k` | float | survey average | optional |
-| `consensus_high_change_k` | float | survey high | optional |
-| `consensus_low_change_k` | float | survey low | optional |
-| `n_forecasts` | int | number of contributing forecasters | optional |
-| `consensus_std_k` | float | cross-forecaster std dev | optional |
+| `ownership` | str | `"total"` or `"private"` — human label for the series | ✅ |
+| `industry_type` | str | series industry grain (`"total"`) | ✅ |
+| `industry_code` | str | `"00"` (Total NFP) or `"05"` (private). **String** — leading zeros are semantic | ✅ |
+| `ref_date` | date | the BLS **reference** month being forecast, on the CES ref day — the 12th (e.g. `2025-06-12` for the June payrolls report). Month-bucketed on lookup | ✅ |
+| `release_date` | date | BLS release date for `ref_date`'s first print | ✅ |
+| `consensus_median` | float | median economist forecast of the MoM net change, **thousands, SA** | ✅ |
+| `consensus_mean` | float | survey average, same units | ✅ |
+
+Both the Total (`00`) and private (`05`) series live in the same file — two rows
+per reference month. `Consensus(table, industry_code=…, statistic=…)` selects one
+series; Track B reads the Total median.
 
 Rules the adapter enforces (fail-fast, mirroring the store's
 `_validate_censored_selection` discipline):
 
-- `ref_month` unique, day = 1, monotonic.
-- `consensus_median_change_k` in thousands (sanity bound: `|x| < 2000`
+- `(industry_code, ref_date)` pairs unique (one survey snapshot per series-month).
+- `consensus_median` / `consensus_mean` in thousands (sanity bound: `|x| < 2000`
   outside obvious COVID months; warn, don't drop).
-- `survey_date < release_date` and `survey_date` within ~10 days before
-  `release_date` (the median must be a pre-release snapshot, not a backfill of
-  the actual).
+- No `survey_date` column: the value locks at **release-eve**
+  (`release_date - 1 day`); `predict` withholds it for any earlier `as_of`.
 - Units are **net change**, not the level and not a percentage.
 
 **Default location.** `data/competitors/consensus.parquet`
@@ -83,6 +87,12 @@ structurally satisfied (the join/scoring path is exercised by a small
 committed fixture under `tests/`).
 
 ## 2. Bloomberg-side retrieval (reference recipe — verify in-terminal)
+
+> **Note (2026-06-22):** the file has landed and §1 is the live contract. The
+> recipe below is the original production guidance; its field names
+> (`ref_month`, `survey_date`, `consensus_median_change_k`) predate the
+> delivered schema — map them to §1's columns (`ref_date`, no `survey_date`,
+> `consensus_median`, dual `00`/`05` series) when reading it.
 
 The goal is the **historical point-in-time median** for each past NFP
 release: the consensus *as it stood just before* each release, not a single
@@ -162,8 +172,8 @@ file — not the API path.
 The adapter lives at `nfp_vintages/competitors/consensus.py` (per
 `a5_real_competitors.md` §6). It is consumed on the **Total track (Track B)**, not
 the private one: `run_a5_backtest.py:cmd_total` calls `load_consensus()`, wraps it in
-`Consensus`, and for each release-eve target scores
-`consensus_median_change_k` against the **assembled Total** (private nowcast +
+`Consensus` (defaulting to the Total `00` median), and for each release-eve target scores
+the consensus median against the **assembled Total** (private nowcast +
 government wedge) and the **Total `00` first print** — consensus forecasts the Total
 number, so it is meaningless against the private nowcast alone. (It does **not**
 appear on the private scoreboard or in the private MZ.) Until the file exists,
