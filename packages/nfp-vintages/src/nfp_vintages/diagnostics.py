@@ -149,6 +149,45 @@ def pooled_first_print_bias(rev_tbl: pl.DataFrame, *, method: str = "median") ->
     raise ValueError(f"unknown method {method!r}; expected 'median' or 'mean'")
 
 
+def implied_government_consensus(
+    table: pl.DataFrame, *, statistic: str = "median"
+) -> pl.DataFrame:
+    """Implied government consensus = Total (``'00'``) − Private (``'05'``) per ref month.
+
+    The street's monthly expectation for the government contribution to headline NFP,
+    derived from the two published consensus series. It is the government wedge's first
+    external benchmark (the wedge previously had none). One row per ``ref_date`` present
+    in **both** series.
+
+    Parameters
+    ----------
+    table : pl.DataFrame
+        The loaded consensus file (``load_consensus``), carrying ``'00'`` and ``'05'``.
+    statistic : {"median", "mean"}, default "median"
+        Which survey statistic to difference.
+
+    Returns
+    -------
+    pl.DataFrame
+        Columns ``ref_date``, ``release_date``, ``implied_govt_k`` (thousands), sorted by ref_date.
+    """
+    if statistic not in ("median", "mean"):
+        raise ValueError(f"statistic must be 'median' or 'mean', got {statistic!r}")
+    col = f"consensus_{statistic}"
+    total = table.filter(pl.col("industry_code") == "00").select(
+        "ref_date", "release_date", pl.col(col).alias("_total")
+    )
+    private = table.filter(pl.col("industry_code") == "05").select(
+        "ref_date", pl.col(col).alias("_private")
+    )
+    return (
+        total.join(private, on="ref_date", how="inner")
+        .with_columns((pl.col("_total") - pl.col("_private")).alias("implied_govt_k"))
+        .select("ref_date", "release_date", "implied_govt_k")
+        .sort("ref_date")
+    )
+
+
 def build_aruoba_design(
     ref_months: list, regressors: dict[str, dict]
 ) -> tuple[np.ndarray, list[str], list[str]]:
@@ -220,6 +259,70 @@ def mincer_zarnowitz(actual: np.ndarray, forecast: np.ndarray) -> MZResult:
     p = float(chi2.sf(wald, df=2))
     return MZResult(alpha=float(theta[0]), beta=float(theta[1]),
                     joint_stat=wald, joint_p=p, r2=res.r2, n=res.n)
+
+
+@dataclass(frozen=True)
+class EncompassingResult:
+    """Forecast-encompassing + optimal-combination readout for one cell.
+
+    ``actual = a + b·model + c·consensus``; ``p_model_adds_info`` is the Wald p that
+    ``b == 0`` (small ⇒ consensus does NOT encompass the model). ``w_model`` is the
+    Bates–Granger optimal convex weight on the model from the error covariance.
+    """
+    n: int
+    w_model: float
+    p_model_adds_info: float
+    model_mae: float
+    consensus_mae: float
+    combo_mae: float
+    b: float
+    c: float
+
+
+def encompassing(
+    actual: np.ndarray, model: np.ndarray, consensus: np.ndarray
+) -> EncompassingResult | None:
+    """Encompassing test + Bates–Granger combination weight for paired forecasts.
+
+    Returns ``None`` when fewer than 5 finite ``(actual, model, consensus)`` triples
+    exist (e.g. a t7 cell, where consensus has not locked).
+    """
+    from scipy.stats import chi2
+
+    a_, m_, c_ = (np.asarray(x, dtype=float) for x in (actual, model, consensus))
+    ok = np.isfinite(a_) & np.isfinite(m_) & np.isfinite(c_)
+    n = int(ok.sum())
+    if n < 5:
+        return None
+    av, mv, cv = a_[ok], m_[ok], c_[ok]
+
+    # Fair–Shiller encompassing regression actual = a + b·model + c·consensus.
+    X = np.column_stack([np.ones(n), mv, cv])
+    res = ols(X, av)
+    b, c = float(res.coeffs[1]), float(res.coeffs[2])
+    var_b = float(res.cov[1, 1])
+    wald = (b * b) / var_b if var_b > 0 else 0.0
+    p_model_adds_info = float(chi2.sf(wald, df=1))
+
+    # Bates–Granger optimal convex weight on the model from error (co)variance.
+    em, ec = av - mv, av - cv
+    cmat = np.cov(em, ec)            # 2x2, ddof=1 throughout
+    vm, vc = float(cmat[0, 0]), float(cmat[1, 1])
+    cov = float(cmat[0, 1])
+    denom = vm + vc - 2.0 * cov
+    w_model = float(np.clip((vc - cov) / denom, 0.0, 1.0)) if denom > 0 else 0.5
+
+    combo = w_model * mv + (1.0 - w_model) * cv
+    return EncompassingResult(
+        n=n,
+        w_model=w_model,
+        p_model_adds_info=p_model_adds_info,
+        model_mae=float(np.mean(np.abs(em))),
+        consensus_mae=float(np.mean(np.abs(ec))),
+        combo_mae=float(np.mean(np.abs(av - combo))),
+        b=b,
+        c=c,
+    )
 
 
 @dataclass(frozen=True)
@@ -296,3 +399,32 @@ def qcew_settled_changes(store_path=None) -> pl.DataFrame:
         .drop_nulls("qcew_settled_change_k")
     )
     return df
+
+
+def combination_gate(
+    cells: dict[tuple[str, str], dict], *, alpha: float = 0.10
+) -> dict[tuple[str, str], dict]:
+    """Run the encompassing/combination analysis per (month_type, horizon) cell.
+
+    Distinct from ``gate_decision`` (the §4 Aruoba model-layer gate). This is the §12
+    *combination* gate: for each cell with consensus present (t1), decide whether a
+    model–consensus blend earns its keep. t7 cells carry no consensus and are skipped.
+
+    A cell **fires** iff the model adds information beyond consensus
+    (``p_model_adds_info < alpha``) AND the blend beats both standalone
+    (``combo_mae < min(model_mae, consensus_mae)``).
+    """
+    out: dict[tuple[str, str], dict] = {}
+    for key, d in cells.items():
+        r = encompassing(
+            np.asarray(d["actual"], dtype=float),
+            np.asarray(d["model"], dtype=float),
+            np.asarray(d["consensus"], dtype=float),
+        )
+        if r is None:
+            out[key] = {"result": None, "fires": False,
+                        "reason": "insufficient_paired_obs", "n": len(d["actual"])}
+            continue
+        fires = (r.p_model_adds_info < alpha) and (r.combo_mae < min(r.model_mae, r.consensus_mae))
+        out[key] = {"result": r, "fires": fires}
+    return out

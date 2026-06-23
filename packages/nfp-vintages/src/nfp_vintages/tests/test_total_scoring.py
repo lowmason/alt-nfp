@@ -17,10 +17,10 @@ def test_absent_consensus_renders_none(tmp_path):
 def test_populated_consensus_scores(tmp_path):
     p = tmp_path / "consensus_populated.parquet"
     pl.DataFrame({
-        "ref_month": [date(2025, 4, 1)], "consensus_median_change_k": [150.0],
-        "survey_date": [date(2025, 5, 1)], "release_date": [date(2025, 5, 2)],
-        "source": ["synthetic"],
-    }).write_parquet(p)
+        "ownership": ["total"], "industry_type": ["total"], "industry_code": ["00"],
+        "ref_date": [date(2025, 4, 12)], "release_date": [date(2025, 5, 2)],
+        "consensus_mean": [152.0], "consensus_median": [150.0],
+    }, schema_overrides={"industry_code": pl.Utf8}).write_parquet(p)
     c = Consensus(load_consensus(p))
     cons = c.predict(date(2025, 4, 1), as_of=date(2025, 5, 1))
     assert cons == 150.0

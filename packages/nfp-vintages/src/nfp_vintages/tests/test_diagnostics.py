@@ -252,3 +252,106 @@ def test_pooled_first_print_bias_drops_null_revisions():
     rev = pl.DataFrame({"revision_k": [-8.0, None, -8.0, -8.0]})
     assert pooled_first_print_bias(rev, method="median") == approx(-8.0)
     assert pooled_first_print_bias(rev, method="mean") == approx(-8.0)
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Implied-government consensus
+# ---------------------------------------------------------------------------
+
+
+def test_implied_government_consensus_is_total_minus_private():
+    from nfp_vintages.diagnostics import implied_government_consensus
+
+    tbl = pl.DataFrame({
+        "ownership": ["total", "private", "total", "private"],
+        "industry_type": ["total"] * 4,
+        "industry_code": ["00", "05", "00", "05"],
+        "ref_date": [_d(2024, 1, 1), _d(2024, 1, 1), _d(2024, 2, 1), _d(2024, 2, 1)],
+        "release_date": [_d(2024, 2, 2), _d(2024, 2, 2), _d(2024, 3, 8), _d(2024, 3, 8)],
+        "consensus_mean": [180.0, 160.0, 200.0, 175.0],
+        "consensus_median": [185.0, 165.0, 210.0, 180.0],
+    })
+    out = implied_government_consensus(tbl)  # median by default
+    assert out.columns == ["ref_date", "release_date", "implied_govt_k"]
+    assert out.height == 2
+    got = dict(zip(out["ref_date"].to_list(), out["implied_govt_k"].to_list(), strict=True))
+    assert got[_d(2024, 1, 1)] == 185.0 - 165.0   # 20.0
+    assert got[_d(2024, 2, 1)] == 210.0 - 180.0   # 30.0
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Forecast-encompassing + Bates–Granger weight
+# ---------------------------------------------------------------------------
+
+
+def test_encompassing_returns_none_below_min_obs():
+    from nfp_vintages.diagnostics import encompassing
+    assert encompassing(np.arange(4.0), np.arange(4.0), np.arange(4.0)) is None
+
+
+def test_encompassing_model_adds_info_when_consensus_is_noise():
+    from nfp_vintages.diagnostics import encompassing
+    rng = np.random.default_rng(0)
+    actual = rng.normal(150, 50, 60)
+    model = actual + rng.normal(0, 5, 60)      # model tracks actual tightly
+    consensus = rng.normal(150, 50, 60)        # consensus ~ pure noise
+    r = encompassing(actual, model, consensus)
+    assert r is not None and r.n == 60
+    assert r.p_model_adds_info < 0.05          # model clearly adds info
+    assert r.w_model > 0.8                     # weight piles onto the model
+    assert r.combo_mae <= min(r.model_mae, r.consensus_mae) + 1e-6
+
+
+def test_encompassing_consensus_encompasses_model_when_model_is_noise():
+    from nfp_vintages.diagnostics import encompassing
+    rng = np.random.default_rng(1)
+    actual = rng.normal(150, 50, 60)
+    consensus = actual + rng.normal(0, 5, 60)  # consensus tracks actual
+    model = rng.normal(150, 50, 60)            # model ~ pure noise
+    r = encompassing(actual, model, consensus)
+    assert r is not None
+    assert r.p_model_adds_info > 0.10          # cannot reject b == 0
+    assert r.w_model < 0.2                      # weight piles onto consensus
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Per-cell combination gate (month-type × horizon)
+# ---------------------------------------------------------------------------
+
+
+def test_combination_gate_fires_only_where_model_adds_info_and_combo_wins():
+    from nfp_vintages.diagnostics import combination_gate
+    rng = np.random.default_rng(2)
+    # turning_point/t1: BOTH forecasts informative, model better → interior optimum
+    # (w_model strictly between 0 and 1) so the blend strictly beats both → fires.
+    a_tp = rng.normal(0, 80, 60)
+    m_tp = a_tp + rng.normal(0, 20, 60)   # model: good signal
+    c_tp = a_tp + rng.normal(0, 35, 60)   # consensus: weaker but real signal (independent noise)
+    # normal/t1: consensus tracks, model is pure noise → model adds no info → must not fire.
+    a_n = rng.normal(150, 40, 60)
+    m_n = rng.normal(150, 40, 60)
+    c_n = a_n + rng.normal(0, 6, 60)
+    cells = {
+        ("turning_point", "t1"): {"actual": a_tp.tolist(), "model": m_tp.tolist(), "consensus": c_tp.tolist()},
+        ("normal", "t1"): {"actual": a_n.tolist(), "model": m_n.tolist(), "consensus": c_n.tolist()},
+        # turning_point/t7: no consensus (nan) → skipped (insufficient obs)
+        ("turning_point", "t7"): {"actual": [1.0, 2.0], "model": [1.0, 2.0], "consensus": [float("nan"), float("nan")]},
+    }
+    out = combination_gate(cells)
+    assert out[("turning_point", "t1")]["fires"] is True
+    assert out[("normal", "t1")]["fires"] is False
+    assert out[("turning_point", "t7")]["fires"] is False
+    assert out[("turning_point", "t7")]["reason"] == "insufficient_paired_obs"
+
+
+def test_combination_gate_accepts_harness_cell_shape():
+    from nfp_vintages.diagnostics import combination_gate
+
+    # Varied values so the encompassing design matrix is full-rank (identical
+    # rows → singular X.T@X → LinAlgError in ols; vary each series).
+    actual = [100.0, 120.0, 90.0, 140.0, 110.0, 130.0]
+    model = [105.0, 115.0, 95.0, 135.0, 108.0, 128.0]
+    consensus = [102.0, 118.0, 88.0, 138.0, 112.0, 132.0]
+    cells = {("normal", "t1"): {"actual": actual, "model": model, "consensus": consensus}}
+    out = combination_gate(cells)
+    assert ("normal", "t1") in out and "fires" in out[("normal", "t1")]

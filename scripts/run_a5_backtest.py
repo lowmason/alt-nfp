@@ -7,10 +7,11 @@
 Track A (private): the model nowcasts **total private** NFP (``industry_code=
 '05'``) — the object it is actually built for (QCEW-anchored, private-provider
 inputs, private birth/death) — and is scored against the **private** first print
-and **private** QCEW-settled truth. Competitors are **naive floors only**
-(random-walk, trailing-mean). Consensus (a Total-NFP object) and ADP are removed:
-they belong to the deferred Track B (Total = private nowcast + government
-forecast). See ``specs/model_improvements.md``.
+and **private** QCEW-settled truth. Competitors: naive floors (random-walk,
+trailing-mean) plus the **private consensus** (``industry_code='05'``) at T−1
+(it locks release-eve, so it is absent at T−7 by design). **ADP** is removed
+entirely. The **Total** consensus contest lives in ``cmd_total`` (Track B).
+See ``specs/model_improvements.md``.
 
 Reuses the A4 batched harness verbatim (``fit_model_batch``); only the as-of
 dates differ (release(M) − {7,1}). Snapshots live under ``<root>/<regime>/``.
@@ -272,6 +273,7 @@ def cmd_score(root: Path) -> int:
     import polars as pl
     from nfp_ingest.first_print import first_print_changes
     from nfp_vintages.a5 import score
+    from nfp_vintages.competitors.consensus import Consensus, load_consensus
     from nfp_vintages.competitors.naive import RandomWalk, TrailingMean
     from nfp_vintages.diagnostics import build_revision_table, pooled_first_print_bias
     from nfp_vintages.scoreboard import (
@@ -289,9 +291,11 @@ def cmd_score(root: Path) -> int:
     # Private first-print target ('05') — the object the model nowcasts.
     fp = first_print_changes(industry_code=HEADLINE_INDUSTRY)
     fp_hist = fp.select(["ref_date", "first_print_change_k", "vintage_date"])
-    # Track A competitors: naive floors only. Consensus (a Total-NFP object) and
-    # ADP are removed — they belong to deferred Track B (see module docstring).
+    # Track A competitors: naive floors + private consensus at T−1.
+    # Consensus (private '05') locks release-eve → None at t7, present at t1.
+    # ADP is removed entirely. Total consensus contest lives in cmd_total.
     naive_rw, naive_mean = RandomWalk(fp_hist), TrailingMean(fp_hist, window=12)
+    consensus_priv = Consensus(load_consensus(), industry_code="05")  # private '05'; None at t7 (lock)
 
     # Month-type inputs (skeleton-safe: empty maps degrade to "normal"/"benchmark").
     rev_tbl = build_revision_table()  # [ref_date, first_print_change_k, later_change_k, revision_k]
@@ -313,6 +317,7 @@ def cmd_score(root: Path) -> int:
     month_type = classify_month_types(rev_months, rev_abs, claims_arr, MonthTypeConfig())
 
     rows = []
+    gate_cells: dict[tuple[str, str], dict] = {}
     for rname, _days_before in REGIMES.items():
         reg = manifest["regimes"][rname]
         batched = _read_json(root / f"{rname}_batched_manifest.json")["entries"]
@@ -351,9 +356,17 @@ def cmd_score(root: Path) -> int:
             preds = {
                 "model": model,
                 "model_5a": model - delta_k,   # §5A post-hoc first-print offset
+                "consensus": consensus_priv.predict(ref, as_of=as_of),  # None at t7 (lock)
                 "naive_rw": naive_rw.predict(ref, as_of=as_of),
                 "naive_mean": naive_mean.predict(ref, as_of=as_of),
             }
+            # Accumulate gate cells: only t1 will have non-None consensus.
+            cons = preds["consensus"]
+            if cons is not None:
+                cell = gate_cells.setdefault((mtype, rname), {"actual": [], "model": [], "consensus": []})
+                cell["actual"].append(actual)
+                cell["model"].append(preds["model"])
+                cell["consensus"].append(cons)
             for comp, pred in preds.items():
                 c80, c90, ck = calib.get(comp, (None, None, None))
                 rows.append({
@@ -392,12 +405,13 @@ def cmd_score(root: Path) -> int:
     lines = ["# A5 backtest report", "",
              "**Track A — the private nowcast.** The model nowcasts CES **total "
              "private** (`industry_code='05'`) and is scored against the **private** "
-             "first print at T−7 and T−1, decomposed by month type. Competitors are "
-             "**naive floors only** (random-walk, trailing-mean).",
-             "Consensus and ADP are absent by design: consensus forecasts **Total** "
-             "NFP, which has no meaning against the private nowcast alone — it belongs "
-             "to the deferred **Track B** (Total = private nowcast + government "
-             "forecast). ADP is removed entirely. See `specs/model_improvements.md`.",
+             "first print at T−7 and T−1, decomposed by month type. Competitors: "
+             "naive floors (random-walk, trailing-mean) plus the **private consensus** "
+             "(`industry_code='05'`) at T−1 (it locks release-eve, so it is absent "
+             "at T−7 by design).",
+             "**ADP** is removed entirely. The **Total** consensus contest lives in "
+             "`cmd_total` (Track B = private nowcast + government forecast). "
+             "See `specs/model_improvements.md`.",
              f"Venue(s) in this run: **{', '.join(venues) or 'public-only'}** — a "
              "`public-only` run scores a providerless skeleton (spec section 10).",
              "COVID (2020–2021) and shutdown-flagged months excluded from metrics.", ""]
@@ -409,7 +423,7 @@ def cmd_score(root: Path) -> int:
             n_months = sub.select(pl.col("ref_month").n_unique()).item()
             lines += [f"### {mtype} ({n_months} months)", "",
                       "| competitor | n | ME | MAE | RMSE |", "|---|---|---|---|---|"]
-            for comp in ["model", "model_5a", "naive_rw", "naive_mean"]:
+            for comp in ["model", "model_5a", "consensus", "naive_rw", "naive_mean"]:
                 e = sub.filter(pl.col("competitor") == comp)["error_k"].to_numpy()
                 m = score(e)
                 if m["n"] == 0:
@@ -429,6 +443,42 @@ def cmd_score(root: Path) -> int:
                               f"{_c} calibration — 80% coverage: {cov80:.0%}, "
                               f"90% coverage: {cov90:.0%}, mean CRPS: {crps:,.0f}k"]
             lines.append("")
+
+    # ---- Combination gate (t1; build-here/validate-on-port) ----
+    from nfp_vintages.diagnostics import combination_gate
+
+    gate = combination_gate(gate_cells)
+    gate_lines = [
+        "",
+        "## Combination gate (t1; build-here/validate-on-port)",
+        "",
+        "> **Skeleton run — informational only; the gate fires on the Bloomberg full regime "
+        "(§12.6). Locally `NFP_CONSENSUS_PATH` is unset so consensus is None everywhere and "
+        "no cells are populated.**",
+        "",
+        "| month_type | horizon | n | w_model | p_model_adds_info | model MAE | consensus MAE "
+        "| combo MAE | fires |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for (mtype, rname), cell in sorted(gate.items()):
+        r = cell.get("result")
+        fires = cell.get("fires", False)
+        if r is None:
+            reason = cell.get("reason", "—")
+            gate_lines.append(
+                f"| {mtype} | {rname} | {cell.get('n', 0)} | — | — | — | — | — | "
+                f"False ({reason}) |"
+            )
+        else:
+            gate_lines.append(
+                f"| {mtype} | {rname} | {r.n} | {r.w_model:.2f} | "
+                f"{r.p_model_adds_info:.3f} | {r.model_mae:,.0f}k | "
+                f"{r.consensus_mae:,.0f}k | {r.combo_mae:,.0f}k | {fires} |"
+            )
+    if not gate:
+        gate_lines.append("| (no cells — consensus absent; run on Bloomberg for live results) | | | | | | | | |")
+    lines += gate_lines
+
     (root / "a5_report.md").write_text("\n".join(lines) + "\n")
     print((root / "a5_report.md").read_text())
 
@@ -486,18 +536,34 @@ def cmd_total(root: Path) -> None:
     is the persisted ``nowcast_pred_draws`` from the existing batched private fit;
     the wedge leg is an as-of-censored wedge fit per release-eve. Read-only on the
     store (READ + FIT only — never writes the store).
+
+    Also emits ``total_report.md`` with a ``## Total-error decomposition`` section:
+    signed errors (pred − actual) decomposed as ``total_err = private_err + govt_err``
+    (an arithmetic identity — total = private + wedge by construction), plus the
+    implied-govt benchmark error beside the model wedge error.
     """
     from datetime import date
 
     from nfp_ingest.wedge_data import build_wedge_model_data
     from nfp_model.wedge import fit_wedge, wedge_pred_draws
     from nfp_vintages.assembly import assemble_total, score_total
-    from nfp_vintages.competitors.consensus import Consensus, load_consensus
+    from nfp_vintages.competitors.consensus import (
+        Consensus,
+        ImpliedGovernment,
+        load_consensus,
+    )
+    from nfp_vintages.scoreboard import change_draws_k
 
     manifest = _read_json(root / "grid_manifest.json")
     prov = manifest["provenance"]
-    consensus = Consensus(load_consensus())
+    idx_to_level = float(prov["idx_to_level"])
+    _ct = load_consensus()
+    consensus = Consensus(_ct)
+    implied_govt = ImpliedGovernment(_ct)
     rows = {}
+    # decomp_rows: per target signed-error decomposition
+    # Fields: regime, key, total_err, private_err, govt_err, implied_govt_err (None at t7)
+    decomp_rows: list[dict] = []
     for rname in REGIMES:
         reg = manifest["regimes"][rname]
         for key, t in sorted(reg["targets"].items()):
@@ -534,12 +600,131 @@ def cmd_total(root: Path) -> None:
             wedge = wedge_pred_draws(wfit, wdata["target_idx"], seed=BATCH_SEED)
             total = assemble_total(priv_growth, wedge,
                                    prev_index=float(t["prev_index"]),
-                                   idx_to_level=float(prov["idx_to_level"]))
+                                   idx_to_level=idx_to_level)
             cons = consensus.predict(target, as_of=as_of)
             rows[f"{rname}:{key}"] = score_total(
                 total, first_print_k=total_actual, consensus_k=cons)
+
+            # ---- Total-error decomposition (signed: pred − actual) ----
+            # Derive component point estimates directly (not from the assembled
+            # draws, which are resampled and would give an inexact identity):
+            #   total_point = priv_point + wedge_point  (exact by construction)
+            #   total_err   = private_err + govt_err     (arithmetic identity)
+            # Units: all change-k.
+            priv_change_k = change_draws_k(
+                priv_growth, prev_index=float(t["prev_index"]), idx_to_level=idx_to_level
+            )
+            priv_point = float(priv_change_k.mean())
+            wedge_point = float(wedge.mean())
+
+            # Realized private first print — None for months at the store edge
+            fp05 = t.get("first_print_change_k")        # private '05' first print
+            if fp05 is None:
+                # Cannot decompose without the private first print; still score Total
+                print(f"[{rname}] {key}: no '05' first print — decomp skipped", flush=True)
+                continue
+
+            fp05 = float(fp05)
+            fp00 = float(total_actual)                   # Total '00' first print
+            realized_govt = fp00 - fp05                  # realized government contribution
+
+            # Signed errors: pred − actual (positive = model over-estimated)
+            private_err = priv_point - fp05
+            govt_err = wedge_point - realized_govt
+            total_err = private_err + govt_err           # == (priv_point+wedge_point) − fp00
+
+            implied_k = implied_govt.predict(target, as_of=as_of)   # None at t7
+            implied_govt_err = None if implied_k is None else implied_k - realized_govt
+
+            decomp_rows.append({
+                "regime": rname,
+                "key": key,
+                "target": target.isoformat(),
+                "total_err": total_err,
+                "private_err": private_err,
+                "govt_err": govt_err,
+                "implied_govt_err": implied_govt_err,
+            })
+
     _write_json(root / "total_scores.json", rows)
     print(f"Scored {len(rows)} Total targets → {root / 'total_scores.json'}")
+
+    # ---- Emit total_report.md ----
+    _write_total_report(root, decomp_rows)
+
+
+def _fmt_err(v: float | None) -> str:
+    """Format a signed error (k) for markdown tables; '—' when absent."""
+    if v is None:
+        return "—"
+    return f"{v:+,.0f}k"
+
+
+def _write_total_report(root: Path, decomp_rows: list[dict]) -> None:
+    """Write total_report.md with the Total-error decomposition section."""
+    lines = [
+        "# Track B — Total backtest report",
+        "",
+        "Total = private nowcast (`'05'`) + government wedge. Errors are signed "
+        "**pred − actual** (positive = model over-estimated). The identity "
+        "`total_err = private_err + govt_err` holds by construction.",
+        "",
+        "> **Note:** `total_err` below is a **component-mean decomposition diagnostic** "
+        "(private + wedge point estimates) and **differs second-order from the scored "
+        "`point_err` in `total_scores.json`** (which uses the resampled assembled-Total "
+        "draws) — the latter is the authoritative model error.",
+        "",
+        "## Total-error decomposition",
+        "",
+        "### Per-target",
+        "",
+        "| regime | target | total_err | private_err | govt_err | implied_govt_err |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in decomp_rows:
+        lines.append(
+            f"| {r['regime']} | {r['target']} "
+            f"| {_fmt_err(r['total_err'])} "
+            f"| {_fmt_err(r['private_err'])} "
+            f"| {_fmt_err(r['govt_err'])} "
+            f"| {_fmt_err(r['implied_govt_err'])} |"
+        )
+
+    # Pooled by regime
+    lines += ["", "### Pooled by regime", ""]
+    lines += [
+        "Signed errors: ME = mean(pred − actual); MAE = mean |pred − actual|. "
+        "`implied_govt` is T−1 only (None at T−7 by design).",
+        "",
+        "| regime | component | n | ME | MAE |",
+        "|---|---|---|---|---|",
+    ]
+    for rname in REGIMES:
+        sub = [r for r in decomp_rows if r["regime"] == rname]
+        for comp in ("total_err", "private_err", "govt_err"):
+            vals = [r[comp] for r in sub if r[comp] is not None]
+            if not vals:
+                lines.append(f"| {rname} | {comp} | 0 | — | — |")
+            else:
+                arr = np.array(vals, dtype=float)
+                lines.append(
+                    f"| {rname} | {comp} | {len(arr)} "
+                    f"| {arr.mean():+,.0f}k | {np.abs(arr).mean():,.0f}k |"
+                )
+        # implied_govt: only present at t1
+        ig_vals = [r["implied_govt_err"] for r in sub if r["implied_govt_err"] is not None]
+        if ig_vals:
+            ig_arr = np.array(ig_vals, dtype=float)
+            lines.append(
+                f"| {rname} | implied_govt_err | {len(ig_arr)} "
+                f"| {ig_arr.mean():+,.0f}k | {np.abs(ig_arr).mean():,.0f}k |"
+            )
+        else:
+            lines.append(f"| {rname} | implied_govt_err | 0 | — | — |")
+
+    report_path = root / "total_report.md"
+    report_path.write_text("\n".join(lines) + "\n")
+    print(f"Total report → {report_path}")
 
 
 def main() -> None:
