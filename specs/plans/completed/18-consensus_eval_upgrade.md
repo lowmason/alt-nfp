@@ -1,5 +1,21 @@
 # Consensus-on-both-tracks — Evaluation Upgrade Implementation Plan (plans/18)
 
+> **Status: ✅ IMPLEMENTED — retired to `plans/completed/` 2026-06-23, on branch
+> `consensus-both-tracks` so it lands with the PR (#15) when that merges (`main` is still at
+> the branch point; this is *code-complete*, not yet merged).** All six TDD tasks shipped — the
+> `- [ ]` boxes below were never ticked, but the commits exist: `T1` implied-government consensus
+> (`c6ad28c`), `T2` forecast-encompassing + Bates–Granger weight (`55cfd30`), `T3` per-cell
+> combination gate (`68e2fae`), `T4` `ImpliedGovernment` competitor (`2419b4e`), `T5`
+> private-consensus competitor + gate wired into `cmd_score` (`12761ae`), `T6` Total-error
+> decomposition + implied-govt benchmark in `cmd_total` (`9180569`), plus a final-review
+> consistency fix (consistent ddof in the Bates–Granger weight, `d9047e1`). Suite green (897),
+> ruff clean, all per-task reviews + the broad whole-branch review clean (scope/firewall PASS).
+> **Eval-side only by design** — the `model_combo` blend, the gate actually *firing*, the
+> combination weights, and the wedge-prior change are the **"Out of scope"** items below,
+> deferred to the Bloomberg port (spec §12.5/§12.6): the providerless local skeleton can
+> *compute* the gate but cannot fire it. Not "stale": built, reviewed, with a port-deferred
+> firing tail (build-here / validate-on-port).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
@@ -18,7 +34,7 @@ the weights, and any `model_combo` layer are Bloomberg-port decisions).
 **Tech Stack:** Python 3.12, Polars, NumPy, SciPy (`scipy.stats.chi2`, already a dep — `diagnostics.py:208`),
 pytest, ruff (line 100; E,W,F,I,B,C4,UP). uv workspace.
 
-**Spec:** [specs/model_improvements.md](../model_improvements.md) §12 (the design of record).
+**Spec:** [specs/model_improvements.md](../../model_improvements.md) §12 (the design of record).
 
 ---
 
