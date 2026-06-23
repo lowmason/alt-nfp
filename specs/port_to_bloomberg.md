@@ -47,8 +47,8 @@ falls back to local `./data`, which is **not writable** in the Bloomberg contain
 
 ### Step 1 — Secrets / `.env` and the four `*_URI` roots
 
-**Files:** `.env.example` (template), `conftest.py:12` (test-only `load_dotenv`),
-`paths.py:98-219`.
+**Files:** `conftest.py:12` (test-only `load_dotenv`), `paths.py:98-219`. The full env-var set
+is enumerated in the block below (on Bloomberg set them as container env, not via a file).
 
 Production library + CLI code does **not** call `load_dotenv` — only the test bootstrap
 (`conftest.py:12`) and the two scratch scripts do. So on Bloomberg the env vars **must be
@@ -208,9 +208,9 @@ that URI; `ProviderConfig.file` paths are joined to the root and must match the 
 layout exactly. Missing files degrade **gracefully**: `read_provider_table` → None,
 `ingest_provider` → `empty_panel()`, model runs **providerless**. This is the dropped
 turning-point edge a real validation needs — not a crash-blocker but a correctness lever.
-- **DECISION:** the `.env.example` default is `s3://alt-nfp-providers`, but the real
-  Bloomberg URI is **maintainer-supplied** and not committed anywhere. Confirm it and that
-  the parquets are present.
+- **DECISION:** the placeholder default is `s3://alt-nfp-providers` (the Step-1 env block above),
+  but the real Bloomberg URI is **maintainer-supplied** and not committed anywhere. Confirm it and
+  that the parquets are present.
 ```bash
 # Verify presence (with NFP_PROVIDERS_URI set):
 python -c "from nfp_ingest.payroll import load_provider_series; from nfp_lookups.provider_config import PROVIDERS_DEFAULT; \

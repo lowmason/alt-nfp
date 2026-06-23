@@ -72,7 +72,7 @@ to `main`.
   `nfp_ingest.snapshots.snapshots_location`. All thread `storage_options_for` + an
   `is_remote` mkdir guard. Rebuild scratch (raw downloads, HTTP cache, SAE checkpoint)
   goes to `tempfile` automatically; dev scripts must take their output root as an
-  arg/env (a `/tmp` path or `s3://` URI), never `data/`. See `.env.example` and
+  arg/env (a `/tmp` path or `s3://` URI), never `data/`. See
   `specs/plans/completed/15-container_safe_storage.md`.
 - **Boundaries**: no upward imports (e.g. lookups must not import download);
   no cross-package imports of underscore-private names.

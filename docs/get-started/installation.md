@@ -59,11 +59,15 @@ Object-storage credentials go in the same file:
 | `AWS_SECRET_ACCESS_KEY` | S3 / MinIO secret key |
 | `AWS_ENDPOINT_URL` | Override endpoint (e.g. `http://127.0.0.1:9000` for local MinIO; leave unset for AWS S3) |
 
-Copy `.env.example` to `.env` (gitignored) and fill in your values:
+Create a `.env` file (gitignored) at the repo root with the variables above and fill in your values:
 
 ```bash
-cp .env.example .env
-# edit .env with your credentials
+# .env (repo root, gitignored) — the *_URI roots + AWS_* credentials from the tables above, e.g.:
+NFP_STORE_URI=s3://alt-nfp/store
+NFP_DATA_URI=s3://alt-nfp
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+# AWS_ENDPOINT_URL=http://127.0.0.1:9000   # local MinIO only; leave unset for AWS S3
 ```
 
 The root `conftest.py` loads `.env` automatically for `pytest`. The `alt-nfp` CLI loads it on startup.
