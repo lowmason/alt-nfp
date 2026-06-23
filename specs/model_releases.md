@@ -81,6 +81,14 @@ QCEW, CES, and payroll-provider observation equations. The target is the officia
 adjusted CES headline**, modeled as a biased, scaled, revision-dependent observation of latent total
 growth.
 
+> **Object note (2026-06-23).** The model's *industry* object is being **retargeted to private `'05'`**
+> per `specs/model_improvements.md` §1 — a data-layer change (which `industry_code` arrays are fed in),
+> landing behind new parity baselines, **not** an equation change. The observation/decomposition equations
+> below are **industry-code-agnostic**: `g_total_sa = g_cont + BD` is the within-model *continuing-units +
+> birth/death* decomposition, **not** a total-nonfarm-vs-private distinction (a private fit is
+> private-cont + private-BD). This document stays pinned to the `'00'`-validated implemented model (the A3
+> parity contract); the private retarget lives in `model_improvements.md`.
+
 ## System Description
 
 Continuing-units growth is the economic signal common to payroll providers and (after birth/death
@@ -269,8 +277,10 @@ latter being the provider signal-quality and bias diagnostics.
     scored at each information regime (e.g. T−12/9/6/3/1); LOO-CV is treated as a data-quality audit,
     not model evaluation.
 -   Coverage of 80%/95% credible intervals.
--   Comparison to naive baselines (random walk on CES) as a sanity floor, and — once added (Phase A5)
-    — to ADP and consensus-median competitors at each regime.
+-   Comparison to naive baselines (random walk on CES) as a sanity floor, and — added in Phase A5 — to
+    **consensus-median** competitors at each regime (the consensus file carries both Total `'00'` and
+    private `'05'` survey series; `specs/model_improvements.md` §12). **ADP was dropped entirely** — not a
+    competitor, not a regressor.
 -   Birth/death estimates vs. realized QCEW birth/death (with lag).
 -   Per-provider signal-quality and bias rankings.
 
@@ -289,8 +299,8 @@ latter being the provider signal-quality and bias diagnostics.
 > (`specs/plans/0-port_and_staged_plan.md`): B1 supersector narrative, B2 forecasted QCEW + time-varying
 > provider bias, B3 MinT reconciliation + production hardening. Do not treat the equations below as a
 > description of `nfp-model`. Several Phase-B strategic questions (target = first print vs.
-> benchmark-informed truth; consumer of the output; whether the banked model beats consensus/ADP)
-> are to be resolved before this work begins.
+> benchmark-informed truth; consumer of the output; whether the banked model beats consensus — ADP
+> dropped entirely) are to be resolved before this work begins.
 >
 > Note: the existing 44-cell (11 supersector × 4 region) QCEW-weighted **compositing** lives in the
 > **data** layer (`nfp_ingest/compositing.py`) and collapses cell-level provider data into a single

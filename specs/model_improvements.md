@@ -197,8 +197,10 @@ insufficient. Because the gate cannot truly fire on the providerless local **ske
 
 ### 12.6 Scope — built here vs deferred to the port
 
-**Build now, off the firewall, locally correctness-testable** (extends the A5 harness; touches no
-`nfp-model` and no pinned path):
+**Build-here, off the firewall, locally correctness-testable** (extends the A5 harness; touches no
+`nfp-model` and no pinned path) — **BUILT 2026-06-23 (plan 18, eval-side): all three items below shipped**
+(`specs/plans/completed/18-consensus_eval_upgrade.md`; commits `c6ad28c`..`d9047e1`; suite green,
+scope/firewall PASS). The deferrals beneath ("Do NOT build locally") remain deferred.
 
 1. Wire the three consensus series as **series-keyed competitors** — private `'05'` on the private board,
    implied-govt `Total − Private` on a new wedge board, Total `'00'` on the Total board.
@@ -218,9 +220,9 @@ prior change (§12.2), and Phase 2 are the **port's** decisions (build-here/vali
 This amendment **supersedes** TL;DR #3 and §3 (the private nowcast now has a consensus competitor) and
 **extends** §4.2 (the consensus Mincer–Zarnowitz can now run on the **private** track too, not only Track
 B) and §10 (the private nowcast now has its **own** consensus ceiling — no longer only a Total figure).
-The §9 sequencing gains: Track A step 2 wires the private/implied-govt consensus competitors + the gate
-computation; Track B step gains the implied-govt wedge benchmark. The two-track A/B framing **stands**,
-re-priced.
+The §9 sequencing gained (built — plan 18): Track A step 2 now carries the private/implied-govt consensus
+competitors + the gate computation; the Track B step carries the implied-govt wedge benchmark. The
+two-track A/B framing **stands**, re-priced.
 
 **Strategic framing (the product story).** Honest expectation: the model **matches** consensus in normal
 months and **beats** it at turning points (the first print is near-efficient month to month — Klein 2022;
