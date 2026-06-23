@@ -38,6 +38,7 @@ uv sync                                   # install workspace + dev group
 uv run pytest -m "not network" --no-cov   # full local suite (~3 min; MCMC smoke included)
 uv run pytest -m "not network and not slow" --no-cov  # fast suite (~30s), skips MCMC smoke
 uv run ruff check .                       # lint (line 100; E,W,F,I,B,C4,UP)
+uv run --group docs interrogate -c pyproject.toml packages  # docstring coverage — docs-deploy gate (100% required)
 uv run alt-nfp --help                     # production vintage-store CLI
 uv run alt-nfp update --as-of 2026-01-12  # capture knowable month-T prints, append to store
 uv run alt-nfp status                     # store coverage + uncaptured/corrected alarm
@@ -46,8 +47,13 @@ uv run python scripts/bootstrap_store.py \  # one-time historical rebuild + prom
     --scratch s3://alt-nfp/store-rebuild --canonical s3://alt-nfp/store
 ```
 
-CI (`.github/workflows/ci.yml`) runs ruff + the non-network suite on push/PR
-to `main`.
+**No push/PR CI** — the GitHub Actions CI was removed (PR #12), so ruff + the test
+suite are **local-only** (run them before pushing). The one workflow is
+`.github/workflows/docs.yml`, **manual** (`workflow_dispatch`): it gates the GitHub
+Pages publish on a strict `mkdocs build` **and** `interrogate` at **100%** docstring
+coverage of `packages/`. **Gotcha:** the local suite does **not** run `interrogate`, so
+a new public symbol shipped without a docstring passes locally and silently blocks the
+next docs deploy — run the `interrogate` command above before adding public API.
 
 ## Hard rules
 
