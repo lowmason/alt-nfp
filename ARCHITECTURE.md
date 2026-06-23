@@ -40,11 +40,11 @@ nfp-lookups  →  nfp-download  →  nfp-ingest  →  nfp-vintages
 ## Build / test / deploy
 
 - **Install:** `uv sync` (workspace + `dev` group).
-- **Test:** `uv run pytest` — `testpaths = packages`; markers `network` (excluded in CI) and `slow` (MCMC smoke). Coverage across all five `src/` trees by default; suites use `--no-cov` for speed. Store-dependent tests **self-skip** when the vintage store is unavailable.
+- **Test:** `uv run pytest` — `testpaths = packages`; markers `network` (excluded by the default `-m "not network"` run) and `slow` (MCMC smoke). Coverage across all five `src/` trees by default; suites use `--no-cov` for speed. Store-dependent tests **self-skip** when the vintage store is unavailable.
 - **Lint/format:** `uv run ruff check .` (line 100; `E,W,F,I,B,C4,UP`; excludes `docs`), black (100), mypy (soft — research code leans on Polars expression dynamism).
-- **CI** (`.github/workflows/ci.yml`, push/PR to `main`): `uv sync` → `ruff check .` → `pytest -m "not network" --no-cov` on `ubuntu-latest`.
+- **CI:** **none** — the GitHub Actions CI (`ci.yml`) was removed (PR #12), so `ruff` + the test suite are **local-only** (run them before pushing). The lone workflow is `.github/workflows/docs.yml`, **manual** (`workflow_dispatch`), which gates the GitHub Pages publish on a strict `mkdocs build` + `interrogate` 100% docstring coverage of `packages/`.
 - **"Deploy":** none in the production sense — this is a research/inference repo. Operational surface is the `alt-nfp` CLI (pipeline maintenance) and the `nfp_model` library (fits/backtests). GPU is the intended A4 speed lever; the same batched code runs unmodified there.
-- **Config & data:** `.env` (gitignored) loaded by the root `conftest.py` and the CLI; `NFP_STORE_URI` (e.g. `s3://alt-nfp/store`) + `AWS_*` select MinIO/S3, unset ⇒ local `data/store/` fallback (CI mode). **All filesystem layout comes from `nfp_lookups.paths`** (override root with `NFP_BASE_DIR`). The canonical store holds the **rebuilt** schema (reconstructable public CES/QCEW, 2017+; promoted from `…/store-rebuild` on 2026-06-18) — it is **replaceable**, not append-only/irreplaceable. Still: never `alt-nfp build` straight to `…/store` — rebuild to a scratch prefix and promote deliberately (see root `CLAUDE.md`).
+- **Config & data:** `.env` (gitignored) loaded by the root `conftest.py` and the CLI; `NFP_STORE_URI` (e.g. `s3://alt-nfp/store`) + `AWS_*` select MinIO/S3, unset ⇒ local `data/store/` fallback (dev/local mode). **All filesystem layout comes from `nfp_lookups.paths`** (override root with `NFP_BASE_DIR`). The canonical store holds the **rebuilt** schema (reconstructable public CES/QCEW, 2017+; promoted from `…/store-rebuild` on 2026-06-18) — it is **replaceable**, not append-only/irreplaceable. Still: never `alt-nfp build` straight to `…/store` — rebuild to a scratch prefix and promote deliberately (see root `CLAUDE.md`).
 
 ## How the system fits together (data & control flow)
 
