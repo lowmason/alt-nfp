@@ -14,8 +14,10 @@ lifted into a Bloomberg-terminal workspace. It defines (a) the **contract** the
 adapter expects — the part this repo owns and pins — and (b) a **Bloomberg-side
 retrieval recipe** to produce a file in that contract. Companions:
 `specs/completed/a5_real_competitors.md` (the harness this consensus scores in) and
-`specs/completed/government_wedge.md` (the government forecast that makes the Total contest
-valid — consensus is a Total object, meaningless against the private nowcast alone).
+`specs/completed/government_wedge.md` (the government forecast that makes the **Total** assembly — and
+thus the Total consensus contest — valid). *(Superseded framing, `model_improvements.md` §12: the file
+carries **both** Total `'00'` and private `'05'` consensus series, so consensus is **no longer** a
+Total-only object — the private nowcast now has its own consensus competitor too; see §4.)*
 
 The split matters: **the contract is normative; the retrieval recipe is a
 reference implementation.** As long as the file matches the contract, the
@@ -170,13 +172,14 @@ file — not the API path.
 ## 4. Wiring into `alt-nfp`
 
 The adapter lives at `nfp_vintages/competitors/consensus.py` (per
-`a5_real_competitors.md` §6). It is consumed on the **Total track (Track B)**, not
-the private one: `run_a5_backtest.py:cmd_total` calls `load_consensus()`, wraps it in
-`Consensus` (defaulting to the Total `00` median), and for each release-eve target scores
-the consensus median against the **assembled Total** (private nowcast +
-government wedge) and the **Total `00` first print** — consensus forecasts the Total
-number, so it is meaningless against the private nowcast alone. (It does **not**
-appear on the private scoreboard or in the private MZ.) Until the file exists,
+`a5_real_competitors.md` §6). As of `model_improvements.md` §12 / plan 18 it is consumed on **both
+tracks** (the file carries Total `'00'` **and** private `'05'` series): `run_a5_backtest.py:cmd_total`
+wraps the **Total `'00'`** median in `Consensus` and scores it against the **assembled Total** (private
+nowcast + government wedge) and the **Total `'00'` first print**; `run_a5_backtest.py:cmd_score` wraps the
+**private `'05'`** median as a competitor on the **private** scoreboard (with the combination gate), and
+`cmd_total` adds the implied-government benchmark (`Total − Private`). *(This supersedes the earlier
+"consensus forecasts the Total number, so it is meaningless against the private nowcast alone / does not
+appear on the private scoreboard" framing.)* Until the file exists,
 `load_consensus()` returns `None`, `Consensus.predict` returns `None`, and the
 consensus column renders `—`; the join and scoring are still exercised by committed
 synthetic fixtures (null + populated) so the path cannot rot.
