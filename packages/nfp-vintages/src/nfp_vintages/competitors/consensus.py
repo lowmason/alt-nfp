@@ -152,6 +152,12 @@ class ImpliedGovernment:
             self._table = implied_government_consensus(table, statistic=statistic)
 
     def predict(self, ref_month: date, *, as_of: date) -> float | None:
+        """Implied government consensus (Total − Private) for ``ref_month``.
+
+        Returns the value once it has locked (``as_of >= release_date − _LOCK_LAG``),
+        else ``None`` — so it is ``None`` at t7 and present at t1. Also ``None`` when no
+        table is configured or the month is absent from both consensus series.
+        """
         if self._table is None:
             return None
         month = date(ref_month.year, ref_month.month, 1)
