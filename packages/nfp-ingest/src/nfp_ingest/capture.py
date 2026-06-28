@@ -12,16 +12,18 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import polars as pl
 from nfp_lookups.industry import ownership_for
-from nfp_lookups.paths import VINTAGE_STORE_PATH
+from nfp_lookups.paths import VINTAGE_DATES_PATH, VINTAGE_STORE_PATH, storage_options_for
 from nfp_lookups.revision_schedules import get_qcew_vintage_date
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
+from nfp_ingest.ces_alfred import build_ces_alfred_window
 from nfp_ingest.qcew_acquire import acquire_qcew_levels, acquire_qcew_size_native
 from nfp_ingest.qcew_crosswalk import build_qcew_panel
 from nfp_ingest.releases import _fetch_ces_releases
@@ -65,11 +67,14 @@ class CaptureResult:
         Existing-ukey rows whose incoming level differs from the stored level.
     skipped : int
         Rows present in the capture but already in the store (anti-joined out).
+    would_append : int
+        Rows that would be appended on a real run (dry-run only; 0 otherwise).
     """
 
     appended: int
     corrected: list[CorrectedLevel]
     skipped: int
+    would_append: int = 0
 
 
 def _remap_ces_to_store_schema(df: pl.DataFrame) -> pl.DataFrame:
@@ -466,3 +471,144 @@ def capture_qcew_quarter(
         len(corrected),
     )
     return CaptureResult(appended=appended, corrected=corrected, skipped=skipped)
+
+
+# ---------------------------------------------------------------------------
+# CES ALFRED window capture (spec §5 / §6 extended)
+# ---------------------------------------------------------------------------
+
+
+def _ces_store_frontier(store_path: Path) -> date:
+    """Max CES ``vintage_date`` currently in the store (or a low sentinel if empty).
+
+    Computes the newest ``vintage_date`` across all CES rows in the store to
+    determine the frontier for ALFRED window capture. Returns a low sentinel
+    (``1900-01-01``) when the store partition does not exist or is empty,
+    allowing the caller to decide whether to backfill from the beginning or
+    append from a known frontier.
+
+    Parameters
+    ----------
+    store_path : Path
+        Root of the Hive-partitioned vintage store.
+
+    Returns
+    -------
+    date
+        Maximum ``vintage_date`` currently in the store, or ``date(1900, 1, 1)``
+        if the CES partition is absent or empty.
+    """
+    part = store_path / "source=ces"
+    if not part.exists():
+        return date(1900, 1, 1)
+    fr = (
+        read_vintage_store(store_path, source="ces")
+        .select(pl.col("vintage_date").max())
+        .collect()
+    )
+    val = fr.item() if fr.height else None
+    return val or date(1900, 1, 1)
+
+
+def capture_ces_alfred_window(
+    *,
+    through: date,
+    store_path: Path = VINTAGE_STORE_PATH,
+    api_key: str | None = None,
+    dry_run: bool = False,
+    calendar: pl.DataFrame | None = None,
+    builder: Callable[..., pl.DataFrame] | None = None,
+) -> CaptureResult:
+    """Patch the CES store frontier from ALFRED through *through* and append it.
+
+    Computes the store's CES ``vintage_date`` frontier, builds the missing
+    ``(0,0)/(1,0)/(2,0)`` cohorts from ALFRED (spec §5/§6), flags corrected
+    levels, then (unless *dry_run*) appends + compacts each touched
+    ``(ces, sa)`` partition. Idempotent: a re-run appends 0 via the anti-join.
+
+    Parameters
+    ----------
+    through : datetime.date
+        Upper bound on the window's ``vintage_date`` (typically today).
+    store_path : Path
+        Hive-partitioned store root. Tests MUST pass a local ``tmp_path``.
+    api_key : str or None
+        FRED API key; falls back to ``FRED_API_KEY``.
+    dry_run : bool
+        If ``True``, compute + flag corrections but write nothing (``appended=0``).
+    calendar : pl.DataFrame or None
+        Release calendar; defaults to reading ``VINTAGE_DATES_PATH``.
+    builder : Callable or None
+        Injection seam for ``build_ces_alfred_window`` (tests pass a stub).
+
+    Returns
+    -------
+    CaptureResult
+        Rows appended, corrected-level records, and rows skipped.
+    """
+    key = api_key or os.environ.get("FRED_API_KEY", "")
+    if not key and builder is None:
+        raise RuntimeError("FRED_API_KEY is required for ALFRED capture.")
+
+    if calendar is None:
+        calendar = pl.read_parquet(
+            str(VINTAGE_DATES_PATH), storage_options=storage_options_for(VINTAGE_DATES_PATH)
+        )
+
+    frontier = _ces_store_frontier(store_path)
+    build = builder or build_ces_alfred_window
+    rows = build(store_frontier=frontier, through=through, calendar=calendar, api_key=key)
+    if rows.is_empty():
+        return CaptureResult(appended=0, corrected=[], skipped=0)
+
+    corrected: list[CorrectedLevel] = []
+    sas = rows["seasonally_adjusted"].unique().to_list()
+    for sa in sas:
+        part = rows.filter(pl.col("seasonally_adjusted") == sa)
+        cl = _detect_corrected_levels(part, store_path, source="ces", seasonally_adjusted=sa)
+        for c in cl:
+            logger.warning(
+                "CORRECTED-LEVEL ces sa=%s ref=%s code=%s rev=%s "
+                "stored=%s incoming=%s",
+                sa,
+                c.ref_date,
+                c.industry_code,
+                c.revision,
+                c.stored_employment,
+                c.incoming_employment,
+            )
+        corrected.extend(cl)
+
+    if dry_run:
+        would_append = 0
+        for sa in sas:
+            part = rows.filter(pl.col("seasonally_adjusted") == sa)
+            partition_dir = (
+                store_path
+                / "source=ces"
+                / f"seasonally_adjusted={str(sa).lower()}"
+            )
+            if not partition_dir.exists():
+                would_append += part.height
+            else:
+                existing_keys = (
+                    read_vintage_store(store_path, source="ces", seasonally_adjusted=sa)
+                    .select(_CES_CORRECTED_UKEY)
+                    .unique()
+                    .collect()
+                )
+                surviving = part.join(
+                    existing_keys, on=_CES_CORRECTED_UKEY, how="anti", nulls_equal=True
+                )
+                would_append += surviving.height
+        return CaptureResult(
+            appended=0,
+            corrected=corrected,
+            skipped=rows.height - would_append,
+            would_append=would_append,
+        )
+
+    appended = append_to_vintage_store(rows, store_path)
+    for sa in sas:
+        compact_partition(store_path, source="ces", seasonally_adjusted=sa)
+    return CaptureResult(appended=appended, corrected=corrected, skipped=rows.height - appended)

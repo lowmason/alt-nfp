@@ -2207,6 +2207,7 @@ name = "nfp-ingest"
 version = "0.1.0"
 source = { editable = "packages/nfp-ingest" }
 dependencies = [
+    { name = "httpx", extra = ["http2"] },
     { name = "nfp-download" },
     { name = "nfp-lookups" },
     { name = "numpy" },
@@ -2215,6 +2216,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", extras = ["http2"], specifier = ">=0.24.0" },
     { name = "nfp-download", editable = "packages/nfp-download" },
     { name = "nfp-lookups", editable = "packages/nfp-lookups" },
     { name = "numpy", specifier = ">=1.24.0,<2.4" },
