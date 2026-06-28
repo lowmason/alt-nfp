@@ -222,13 +222,22 @@ git commit -m "feat(download): ALFRED CES series resolution tables (SA+NSA)"
   - `get_vintage_dates(client: httpx.Client, series_id: str, *, api_key: str, start: str | None = None) -> list[str]`
   - `fetch_vintage_matrix(client, series_id, *, api_key, vintage_dates: list[str], observation_start: str, chunk_size: int = 100) -> pl.DataFrame` — long frame `(ref_date: Date, vintage_date: Date, value: Float64)`.
   - `verify_series_concept(client, series_id, *, api_key, sa: bool) -> tuple[str, bool]` — `(title, seasonal_ok)`.
+  - `verify_ces_series(client, industry_type: str, industry_code: str, *, sa: bool, api_key: str) -> tuple[str, bool]` — **public** title-verify for a store key (resolves the id + checks SA flag + concept substring); keeps the title map private to this package so `nfp_ingest` imports no download-private name (CLAUDE.md boundary rule).
+  - `_title_matches(industry_type, industry_code, title) -> bool` — pure substring check (unit-testable without network).
 
 - [ ] **Step 1: Write the failing test** (parsing is unit-testable without network)
 
 ```python
 # append to test_alfred.py
 import polars as pl
-from nfp_download.alfred import _matrix_from_observations
+from nfp_download.alfred import _matrix_from_observations, _title_matches
+
+
+def test_title_matches_accepts_right_concept_rejects_swap():
+    # The USSERV->08 mis-map that title-verify must catch: USSERV is "Other Services".
+    assert _title_matches("supersector", "80", "All Employees, Other Services")
+    assert not _title_matches("domain", "08", "All Employees, Other Services")
+    assert _title_matches("domain", "08", "All Employees, Private Service-Providing")
 
 
 def test_matrix_parses_sid_yyyymmdd_columns():
@@ -411,6 +420,48 @@ def verify_series_concept(
     meta = payload["seriess"][0]
     seasonal_ok = meta["seasonal_adjustment_short"] == ("SA" if sa else "NSA")
     return meta["title"], seasonal_ok
+
+
+def _title_matches(industry_type: str, industry_code: str, title: str) -> bool:
+    """True iff *title* contains the expected concept substring for the key."""
+    return _EXPECTED_TITLE_SUBSTR[(industry_type, industry_code)] in title
+
+
+def verify_ces_series(
+    client: httpx.Client,
+    industry_type: str,
+    industry_code: str,
+    *,
+    sa: bool,
+    api_key: str,
+) -> tuple[str, bool]:
+    """Title-verify the resolved CES series for a store key (public boundary fn).
+
+    Resolves ``(industry_type, industry_code, sa)`` to its ALFRED id, fetches the
+    ``/series`` metadata, and returns ``(title, ok)`` where *ok* is ``True`` iff
+    BOTH the seasonal-adjustment flag matches and the title contains the expected
+    concept substring. Keeps all title-verify logic in the download layer so
+    ``nfp_ingest`` never imports a download-private name.
+
+    Parameters
+    ----------
+    client : httpx.Client
+        Shared HTTP client.
+    industry_type, industry_code : str
+        Vintage-store key (NAICS-coded sectors).
+    sa : bool
+        Seasonal-adjustment flag.
+    api_key : str
+        FRED API key.
+
+    Returns
+    -------
+    tuple[str, bool]
+        ``(title, ok)``.
+    """
+    series_id = resolve_series_id(industry_type, industry_code, sa=sa)
+    title, seasonal_ok = verify_series_concept(client, series_id, api_key=api_key, sa=sa)
+    return title, seasonal_ok and _title_matches(industry_type, industry_code, title)
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -597,7 +648,7 @@ git commit -m "feat(ingest): ALFRED print extraction with real-time guard"
 - Test: `packages/nfp-ingest/src/nfp_ingest/tests/test_ces_alfred.py`
 
 **Interfaces:**
-- Consumes: `extract_prints`; `nfp_download.alfred` (`CES_SERIES_SA`/`CES_SERIES_NSA`, `get_vintage_dates`, `fetch_vintage_matrix`, `verify_series_concept`, `_EXPECTED_TITLE_SUBSTR`); `nfp_lookups.industry.ownership_for`; `nfp_lookups.schemas.VINTAGE_STORE_SCHEMA`.
+- Consumes: `extract_prints`; `nfp_download.alfred` (`CES_SERIES_SA`/`CES_SERIES_NSA`, `get_vintage_dates`, `fetch_vintage_matrix`, `verify_ces_series` — the **public** title-verify); `nfp_lookups.industry.ownership_for`; `nfp_lookups.schemas.VINTAGE_STORE_SCHEMA`.
 - Produces: `build_ces_alfred_window(*, store_frontier: date, through: date, calendar: pl.DataFrame, api_key: str, adjustments: tuple[bool, ...] = (True, False), keys: list[tuple[str, str]] | None = None, fetch: Callable | None = None) -> pl.DataFrame` — `VINTAGE_STORE_SCHEMA` rows. The `fetch` seam (default real ALFRED) lets tests inject a stub.
 
 - [ ] **Step 1: Write the failing test** (inject a stub `fetch`, no network)
@@ -686,30 +737,29 @@ import polars as pl
 from nfp_download.alfred import (
     CES_SERIES_NSA,
     CES_SERIES_SA,
-    _EXPECTED_TITLE_SUBSTR,
     fetch_vintage_matrix,
     get_vintage_dates,
-    verify_series_concept,
+    verify_ces_series,
 )
 from nfp_lookups.industry import ownership_for
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
 
 def _default_fetch(api_key: str) -> Callable[..., pl.DataFrame]:
-    """Return a real-ALFRED fetch closure ``(series_id, *, sa) -> matrix``.
+    """Return a real-ALFRED fetch closure ``(series_id, *, sa, key) -> matrix``.
 
-    Title-verifies (raising on a SA-flag or concept-substring mismatch), pulls
-    vintage dates, and returns the long vintage matrix. Shares one client.
+    Title-verifies through the public ``verify_ces_series`` (raising on a SA-flag
+    or concept-substring mismatch — no download-private import), pulls vintage
+    dates, and returns the long vintage matrix. Shares one client.
     """
     client = httpx.Client(http2=True)
 
     def fetch(series_id: str, *, sa: bool, key: tuple[str, str]) -> pl.DataFrame:
-        title, seasonal_ok = verify_series_concept(client, series_id, api_key=api_key, sa=sa)
-        expect = _EXPECTED_TITLE_SUBSTR[key]
-        if not seasonal_ok or expect not in title:
+        itype, code = key
+        title, ok = verify_ces_series(client, itype, code, sa=sa, api_key=api_key)
+        if not ok:
             raise ValueError(
-                f"title-verify failed for {series_id} ({key}): "
-                f"sa_ok={seasonal_ok}, title={title!r}, expected ~{expect!r}"
+                f"title-verify failed for {series_id} ({key}): title={title!r}"
             )
         obs_start = "2024-01-01"
         vds = get_vintage_dates(client, series_id, api_key=api_key, start=obs_start)
