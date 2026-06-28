@@ -8,9 +8,8 @@ is **not** a replacement: the `cesvinall`/`ces_builder` path remains the source 
 all history ≤ 2026-01, and ALFRED only patches the frontier gap.
 
 **Why a patch, not a replacement** (decided 2026-06-28 after verification): the BLS
-`cesvinall` triangular CSVs simply **don't carry data for `2026-02-12+`** (a source
-gap, consistent with the Oct-2025 shutdown tail), so the store dead-ends at ref
-2026-01-12. A *full* ALFRED replacement was rejected because the probe proved domain
+`cesvinall` CES revision CSVs simply **don't have the data for `2026-02-12+`**, so the
+store dead-ends at ref 2026-01-12. A *full* ALFRED replacement was rejected because the probe proved domain
 `08` and 12 fine sectors have **no ALFRED archive before 2011-03** — replacing
 everything would *delete* 2003–2010 history the `cesvinall` path already has (§9). The
 patch keeps that history and fills only the hole. Companion:
@@ -68,11 +67,6 @@ ALFRED probes + read-only store/calendar inspection on 2026-06-27/28**, not assu
 - **The gap** = cohorts with `vintage_date > 2026-02-11`: Dec-2025 `(2,0)`; Jan-2026
   `(1,0)/(2,0)`; Feb/Mar/Apr/May-2026 `(0,0)/(1,0)/(2,0)` as the calendar allows.
 - ALFRED currency confirmed: all sampled series carry vintages through **2026-06-05/08**.
-
-> **Out of scope (separate concern):** the store starts at **2017-01**, not 2003. If
-> the store should also reach back to 2003, that is a `ces_builder` re-run with a 2003
-> ref floor (it already supports the full history) — *not* an ALFRED job, and not this
-> patch.
 
 ## 3. Series-ID resolution table (probe-verified, SA)
 
@@ -202,8 +196,6 @@ Per resolved series, fetch **all** vintage dates (no tail cap), `output_type=2` 
   frontier key, `_detect_corrected_levels` flags it (not auto-applied). Expect near-
   exact agreement (§9: ~98% on the 2017+ overlap); investigate any flagged row rather
   than ignore.
-- **2003 history is a *separate* concern** (the store starts 2017, see §2 note) — a
-  cesvinall `ces_builder` re-run, not this patch.
 - **Rate limits**: sequential per-series fetch with backoff/checkpoint (~1s/series); a
   ~30-series × SA/NSA window pull is minutes, not a parallel workflow.
 - **Ongoing capture**: if cesvinall keeps lagging, the regular `alt-nfp update` CES
