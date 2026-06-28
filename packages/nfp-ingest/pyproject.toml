@@ -7,6 +7,7 @@ license = {text = "MIT"}
 dependencies = [
     "nfp-lookups",
     "nfp-download",
+    "httpx[http2]>=0.24.0",
     "numpy>=1.24.0,<2.4",
     "polars>=0.20.0",
 ]
