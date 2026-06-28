@@ -3,11 +3,11 @@ import os
 import polars as pl
 import pytest
 from nfp_download.alfred import (
-    CES_SERIES_SA,
     CES_SERIES_NSA,
-    resolve_series_id,
+    CES_SERIES_SA,
     _matrix_from_observations,
     _title_matches,
+    resolve_series_id,
 )
 
 

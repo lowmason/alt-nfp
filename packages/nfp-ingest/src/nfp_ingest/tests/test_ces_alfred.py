@@ -1,7 +1,8 @@
 import datetime as dt
+
 import polars as pl
+from nfp_ingest.ces_alfred import build_ces_alfred_window, extract_prints
 from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
-from nfp_ingest.ces_alfred import extract_prints, build_ces_alfred_window
 
 
 def _row(ref, vint, val):

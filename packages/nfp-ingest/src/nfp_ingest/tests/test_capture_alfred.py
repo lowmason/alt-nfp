@@ -1,11 +1,9 @@
 import datetime as dt
 
 import polars as pl
-import pytest
-
-from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 from nfp_ingest.capture import capture_ces_alfred_window
 from nfp_ingest.vintage_store import append_to_vintage_store, read_vintage_store
+from nfp_lookups.schemas import VINTAGE_STORE_SCHEMA
 
 
 def _store_row(ref, vint, rev, emp, sa=True):
