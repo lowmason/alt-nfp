@@ -1,311 +1,240 @@
-# ALFRED as the CES vintage source of record
+# ALFRED frontier patch for CES vintages
 
-Status: **design / approved for spec (2026-06-27).** Replace the `cesvinall`-file
-CES builder (`nfp_ingest/ces_builder.py::build_ces_panel`, which the store rebuild
-calls) with the FRED **ALFRED** real-time vintage API as the sole producer of the
-`source='ces'` partition of the vintage store. Motivated by the current store
-dead-ending at **ref 2026-01-12** (read-only inventory, 2026-06-27): the bulk
-`cesvinall` triangular files are stale/unrefreshed past that edge (compounded by the
-Oct-2025 shutdown gap), so ~5 monthly prints (Feb–Jun 2026) are missing. ALFRED is
-API-driven (never stale) and returns the literal published BLS vintage.
+Status: **design / approved for spec (2026-06-28).** Use the FRED **ALFRED** real-time
+vintage API to **forward-fill the recent CES window** (`vintage_date > 2026-02-11`)
+that the `cesvinall` bulk-file path cannot supply, and **append** it to the existing
+`source='ces'` partition via the store's existing incremental-append machinery. This
+is **not** a replacement: the `cesvinall`/`ces_builder` path remains the source for
+all history ≤ 2026-01, and ALFRED only patches the frontier gap.
 
-**Framing: ALFRED reproduces `ces_builder`'s exact row structure — from the API
-instead of `cesvinall` files — extended back to 2003 and forward past 2026-01.** This
-is a producer swap with an unchanged downstream (`write_rebuild_store` → store →
-`_select_ces_at_horizon` → `first_print_changes` → panel). Companion:
-`specs/completed/store_rebuild.md` (the schema + scratch→promote cutover this reuses).
+**Why a patch, not a replacement** (decided 2026-06-28 after verification): the BLS
+`cesvinall` triangular CSVs simply **don't carry data for `2026-02-12+`** (a source
+gap, consistent with the Oct-2025 shutdown tail), so the store dead-ends at ref
+2026-01-12. A *full* ALFRED replacement was rejected because the probe proved domain
+`08` and 12 fine sectors have **no ALFRED archive before 2011-03** — replacing
+everything would *delete* 2003–2010 history the `cesvinall` path already has (§9). The
+patch keeps that history and fills only the hole. Companion:
+`specs/completed/store_rebuild.md` (schema + `ces_builder`), `capture.py` spec (the
+append path this reuses).
 
-All series-ID, depth, alias, and revision-convention facts below are from **live
-ALFRED probes + read-only store inspection on 2026-06-27**, not assumption — the
-naive plan ("fetch `CES{code}01` for all keys") was empirically falsified, and the
-extraction rule is matched to the store's *observed* convention, not derived a priori.
+All series-ID, depth, revision-convention, and value facts below are from **live
+ALFRED probes + read-only store/calendar inspection on 2026-06-27/28**, not assumption.
 
 ## TL;DR
 
-1. **Full replacement.** ALFRED becomes the sole source for `source='ces'`. A new
-   ALFRED builder is a **drop-in for `ces_builder.build_ces_panel`** in
-   `bootstrap_store.py` — same `VINTAGE_STORE_SCHEMA` output, no `cesvinall_dir` arg.
-   Build to **scratch**, validate, promote via the existing copy-then-delete cutover,
-   then retire `ces_builder`'s `cesvinall` dependency + the dead `ces_triangular.py`.
-2. **Coverage = full parity**: all **30 industry keys × {SA, NSA}** (total `00`/`05`,
-   domain `06`/`08`, 10 supersectors, 16 sectors).
-3. **Per series, reproduce `ces_builder`'s cohorts**: `(0,0)/(1,0)/(2,0)` (first/
-   second/third print, current benchmark basis) **plus** `(2,1)` — one row per
-   distinct annual-benchmark basis (deduped by value-change). All from ALFRED vintages.
-4. **History floor 2003-01** where the archive allows; **depth is ragged** (§5).
-   2003 is also the principled floor — NAICS-basis CES begins ~2003.
-5. **Series-ID resolution is alias-first and title-verified.** The deep real-time
-   archives live under FRED *friendly aliases* (PAYEMS, USPRIV, MANEMP, …), not the
-   systematic `CES…01` IDs. Every alias is verified against its `/series` title before
-   use — the probe caught a USSERV(=Other Services)→08 mis-map that would have poisoned
-   the store.
-6. **Extraction = ordinal among *all* vintages, as-published** (no benchmark
-   exclusion, no value-dedup for the monthly prints). PAYEMS `output_type=4` is the
-   rev-0 oracle; the store itself is the cohort-convention oracle.
+1. **Frontier patch.** ALFRED supplies only the cohorts the calendar says should exist
+   (`vintage_date > 2026-02-11`, ≤ today) and the store lacks; everything ≤ 2026-01
+   stays `cesvinall`-sourced and untouched.
+2. **Reuse the append path.** A new ALFRED *source* feeds the existing
+   `append_to_vintage_store()` (7-col anti-join ⇒ idempotent) + `_detect_corrected_levels()`
+   (flags any seam value discrepancy). **Minimal append** at the seam — add only
+   missing `(ref, revision)` rows; existing cesvinall rows stay, discrepancies flagged
+   for review, never silently clobbered.
+3. **Coverage = all 30 keys × {SA, NSA}** for the window (2026 is past every series'
+   archive floor, so even the fine sectors + domain 08 are fully available).
+4. **Cohorts**: `(0,0)/(1,0)/(2,0)` (first/second/third print) only. No new annual
+   benchmark falls in this window (the Feb-2026 benchmark is already captured at the
+   store frontier; next is Feb-2027), so `(2,1)` is out of scope here.
+5. **Series-ID resolution is alias-first and title-verified** — required even for a
+   2026-only patch because the aggregates (`00/05/06`/supersectors) have **no**
+   systematic `CES…01` id; their archives live only under aliases (PAYEMS/USPRIV/…).
+6. **Vintage dates come from the existing calendar** (`vintage_dates.parquet`,
+   schedule-derived) — values from ALFRED, dates from the calendar — so the patched
+   rows match the store's existing `vintage_date` convention exactly (no downstream
+   ripple).
 
-## 1. Decisions (locked 2026-06-27)
+## 1. Decisions (locked 2026-06-27/28)
 
 | # | Decision | Choice |
 |---|---|---|
-| 1 | Purpose | Replace the `cesvinall`-file CES path; ALFRED = source of record |
-| 2 | Scope | Full replacement of `source='ces'`; retire the `cesvinall` CES builder |
-| 3 | Cohorts captured | Reproduce `ces_builder`: `(0,0)/(1,0)/(2,0)` + per-benchmark `(2,1)` |
-| 4 | Industry coverage | Full parity — all 30 keys × SA/NSA (subject to ALFRED availability) |
-| 5 | History floor | 2003-01 request; **accept ragged per-series depth**, no synthesis |
-| 6 | Code home | ALFRED primitives → `nfp_download/alfred.py`; builder → `nfp_ingest/ces_alfred.py` |
-| 7 | Promotion | Build→scratch→validate→promote (the repo hard rule) |
+| 1 | Purpose | Forward-fill the 2026-02-12+ CES window the cesvinall files lack |
+| 2 | Scope | **Patch, not replacement**; cesvinall/ces_builder keep ≤2026-01 + all history |
+| 3 | Cohorts | `(0,0)/(1,0)/(2,0)` only (no new benchmark in-window) |
+| 4 | Coverage | All 30 keys × SA/NSA for the window |
+| 5 | Seam handling | **Minimal append** — only missing `(ref, rev)` rows; flag discrepancies |
+| 6 | Vintage dates | **Schedule-derived from the existing calendar** (not ALFRED-actual) |
+| 7 | Append mechanism | Reuse `append_to_vintage_store` + `_detect_corrected_levels` |
+| 8 | Code home | ALFRED primitives → `nfp_download/alfred.py`; window builder → `nfp_ingest/ces_alfred.py` |
 
-## 2. The current partition (read-only inventory, target of the replacement)
+## 2. Current state (read-only inventory, 2026-06-27/28)
 
-`source='ces'`, ref 2017-01-12 → 2026-01-12, **30 keys × {SA, NSA} = 60**, produced
-by `ces_builder.build_ces_panel` from `cesvinall`:
+- `source='ces'`: **30 keys × {SA, NSA}**, ref **2017-01-12 → 2026-01-12**, vintage max
+  **2026-02-11** (produced by `ces_builder` from `cesvinall`).
+  - `total`: `00`,`05` · `domain`: `06`,`08` · `supersector`: `10 20 30 40 50 55 60 65 70 80`
+  - `sector` (NAICS, 16): `21 22 31 32 42 44 48 52 53 54 55 56 61 62 71 72`
+- **Calendar** (`vintage_dates.parquet`): CES ref **2003-01-12 → 2026-05-12**, vintage
+  → **2026-06-08** — i.e. the schedule already covers the gap; this is a **frontier
+  gap, not a missing-schedule problem**.
+- **The gap** = cohorts with `vintage_date > 2026-02-11`: Dec-2025 `(2,0)`; Jan-2026
+  `(1,0)/(2,0)`; Feb/Mar/Apr/May-2026 `(0,0)/(1,0)/(2,0)` as the calendar allows.
+- ALFRED currency confirmed: all sampled series carry vintages through **2026-06-05/08**.
 
-- `total`: `00`, `05` · `domain`: `06`, `08` · `supersector`: `10 20 30 40 50 55 60 65 70 80`
-- `sector` (NAICS-coded, 16): `21 22 31 32 42 44 48 52 53 54 55 56 61 62 71 72`
-
-**Revision cohorts per (key, ref_date)** — verified at the 2023→2024 benchmark
-boundary (total `00`, SA):
-
-- `(0,0)/(1,0)/(2,0)` — first/second/third print, as published in months p+1/p+2/p+3,
-  on the benchmark basis *at the time* (`benchmark_revision=0`).
-- `(2,1)` — the benchmark-restatement **history**: one row per distinct annual
-  benchmark (Feb 2024, Feb 2025, Feb 2026, …), emitted only when the restated value
-  **changes** from the previously emitted benchmark value. Up to **9** distinct `(2,1)`
-  vintages per ref month observed (deeper history → more benchmarks). *This is a
-  multi-vintage history, not a single "final" value.*
-
-Observed nuance: a month whose 3rd print lands on a benchmark release carries the
-**same value+date** as both `(2,0)` and the first `(2,1)` (e.g. ref 2023-11, vintage
-2024-02-02, 157014). And **rev0 can sit on a benchmark release** — ref 2024-01's
-`(0,0)` vintage is 2024-02-02, the Feb-2024 benchmark itself. The builder never
-excludes benchmark vintages from the monthly-print count.
-
-`55` appears at **both** `supersector` (Financial Activities) and `sector` (Mgmt of
-companies); keys are the `(industry_type, industry_code)` pair.
+> **Out of scope (separate concern):** the store starts at **2017-01**, not 2003. If
+> the store should also reach back to 2003, that is a `ces_builder` re-run with a 2003
+> ref floor (it already supports the full history) — *not* an ALFRED job, and not this
+> patch.
 
 ## 3. Series-ID resolution table (probe-verified, SA)
 
-Alias-first for depth; systematic `CES…01` fallback where no alias archives exist.
-**Floor** = earliest real-time vintage observed on 2026-06-27.
+Alias-first (the aggregates have no systematic id); systematic `CES…01` fallback for
+the fine sectors. All are current through 2026-06, so all serve the window.
 
-| store key (type, code) | concept | ALFRED SA id | floor |
-|---|---|---|---|
-| total `00` | Total Nonfarm | `PAYEMS` | 1955-05 |
-| total `05` | Total Private | `USPRIV` | 1971-09 |
-| domain `06` | Goods-Producing | `USGOOD` | 1971-09 |
-| domain `08` | Private Service-Providing | `CES0800000001` † | 2011-03 |
-| supersector `10` | Mining & Logging | `USMINE` | 1961-11 |
-| supersector `20` | Construction | `USCONS` | 1961-11 |
-| supersector `30` | Manufacturing | `MANEMP` | 1961-11 |
-| supersector `40` | Trade/Transp/Util | `USTPU` | 1961-11 |
-| supersector `50` | Information | `USINFO` | 2003-06 |
-| supersector `55` | Financial Activities | `USFIRE` | 1961-11 |
-| supersector `60` | Prof & Business Svcs | `USPBS` | 2003-06 |
-| supersector `65` | Private Ed & Health | `USEHS` | 2003-06 |
-| supersector `70` | Leisure & Hospitality | `USLAH` | 2003-06 |
-| supersector `80` | Other Services | `USSERV` | 1961-11 |
-| sector `31` | Durable Goods | `DMANEMP` | 1961-11 |
-| sector `32` | Nondurable Goods | `NDMANEMP` | 1961-11 |
-| sector `42` | Wholesale Trade (NAICS 42) | `USWTRADE` | 1961-11 |
-| sector `44` | Retail Trade (NAICS 44) | `USTRADE` | 1961-11 |
-| sector `21` | Mining (NAICS 21) | `CES1021000001` | 2011-03 |
-| sector `22` | Utilities | `CES4422000001` | 2011-03 |
-| sector `48` | Transp & Warehousing | `CES4300000001` | 2011-03 |
-| sector `52` | Finance & Insurance | `CES5552000001` | 2011-03 |
-| sector `53` | Real Estate | `CES5553000001` | 2011-03 |
-| sector `54` | Prof/Sci/Tech Svcs | `CES6054000001` | 2011-03 |
-| sector `55` | Mgmt of Companies | `CES6055000001` | 2011-03 |
-| sector `56` | Admin & Waste Svcs | `CES6056000001` | 2011-03 |
-| sector `61` | Educational Svcs | `CES6561000001` | 2011-03 |
-| sector `62` | Health Care | `CES6562000001` | 2011-03 |
-| sector `71` | Arts/Entertain/Rec | `CES7071000001` | 2011-03 |
-| sector `72` | Accommodation & Food | `CES7072000001` | 2011-03 |
+| store key (type, code) | concept | ALFRED SA id |
+|---|---|---|
+| total `00` | Total Nonfarm | `PAYEMS` |
+| total `05` | Total Private | `USPRIV` |
+| domain `06` | Goods-Producing | `USGOOD` |
+| domain `08` | Private Service-Providing | `CES0800000001` |
+| supersector `10` | Mining & Logging | `USMINE` |
+| supersector `20` | Construction | `USCONS` |
+| supersector `30` | Manufacturing | `MANEMP` |
+| supersector `40` | Trade/Transp/Util | `USTPU` |
+| supersector `50` | Information | `USINFO` |
+| supersector `55` | Financial Activities | `USFIRE` |
+| supersector `60` | Prof & Business Svcs | `USPBS` |
+| supersector `65` | Private Ed & Health | `USEHS` |
+| supersector `70` | Leisure & Hospitality | `USLAH` |
+| supersector `80` | Other Services | `USSERV` |
+| sector `31` | Durable Goods | `DMANEMP` |
+| sector `32` | Nondurable Goods | `NDMANEMP` |
+| sector `42` | Wholesale Trade (NAICS 42) | `USWTRADE` |
+| sector `44` | Retail Trade (NAICS 44) | `USTRADE` |
+| sector `21` | Mining (NAICS 21) | `CES1021000001` |
+| sector `22` | Utilities | `CES4422000001` |
+| sector `48` | Transp & Warehousing | `CES4300000001` |
+| sector `52` | Finance & Insurance | `CES5552000001` |
+| sector `53` | Real Estate | `CES5553000001` |
+| sector `54` | Prof/Sci/Tech Svcs | `CES6054000001` |
+| sector `55` | Mgmt of Companies | `CES6055000001` |
+| sector `56` | Admin & Waste Svcs | `CES6056000001` |
+| sector `61` | Educational Svcs | `CES6561000001` |
+| sector `62` | Health Care | `CES6562000001` |
+| sector `71` | Arts/Entertain/Rec | `CES7071000001` |
+| sector `72` | Accommodation & Food | `CES7072000001` |
 
-† `08` has no deep alias; `CES0800000001` floors at 2011. (Derivation as `05−06` was
-offered and declined — a derived value isn't a literally-published print.)
+**Title-verification is a hard build gate**: the probe mis-mapped `USSERV`→08 (it is
+Other Services = 80) and `SRVPRD`→80 (it is domain 07). Each id's `/series` title +
+`seasonal_adjustment_short` must match the store concept before use. Repo tables
+`sae_states.INDUSTRIES`/`industry._CES_SECTOR` are SM/EN-oriented and **wrong** for
+national CES ids — the probe is truth.
 
-**Title-verification is a hard build gate**: the probe's mnemonic guesses mis-mapped
-`USSERV`→08 (it is Other Services = 80) and `SRVPRD`→80 (it is total Service-Providing
-= domain 07, not even in the store). Each resolved id's `/series` title +
-`seasonal_adjustment_short` must match the store concept and `SA` before any fetch.
-The repo tables `sae_states.INDUSTRIES` / `industry._CES_SECTOR` are SM/EN-oriented
-and **wrong** for national CES ids — the probe is the source of truth.
+**NSA.** Fine-sector `CEU…01` ids exist (verified `CEU4142000001`, `CEU5552000001`);
+NSA aggregates have no systematic id and need NSA aliases (`PAYNSA` family), resolved +
+title-verified in the build discovery phase.
 
-**NSA.** Systematic `CEU…01` ids exist for the fine sectors (verified
-`CEU4142000001`, `CEU5552000001` at 2011-03) but **not** for the aggregates
-(`CEU0000000001` is absent). NSA aggregates need NSA aliases (`PAYNSA` family),
-resolved in the build discovery phase under the same title-verification gate; expect
-an ~2011 floor for most NSA keys.
-
-## 4. Architecture — producer swap
+## 4. Architecture — ALFRED source into the existing append path
 
 ```
-nfp_download/alfred.py            NEW. ALFRED vintage primitives lifted out of
-  get_vintage_dates()             nfp_vintages/processing/sae_states.py into the
-  get_observations_for_vintages() download layer (boundary: fetching only). Adds a
-  resolve_series_id()+title check /series title-verification helper. sae_states imports them back.
+nfp_download/alfred.py            NEW. ALFRED vintage primitives (lifted from
+  get_vintage_dates()             sae_states.py) + resolve_series_id()/title-verify.
+  get_observations_for_vintages()
         │
         ▼
-nfp_ingest/ces_alfred.py          NEW — drop-in for ces_builder.build_ces_panel
-  build_ces_panel_alfred(*, as_of) resolve ids (§3) → fetch all vintages ≥2003 (output_type=2)
-                                  → extract cohorts (§5) → CES→NAICS translate
-                                  → VINTAGE_STORE_SCHEMA rows (SA+NSA)
+nfp_ingest/ces_alfred.py          NEW. build_ces_alfred_window(through, *, store_frontier)
+  resolve §3 ids → fetch all vintages (output_type=2) → §5 extract (0,0)/(1,0)/(2,0)
+  with real-time guard → CES→NAICS translate → join calendar vintage_date
+  → VINTAGE_STORE_SCHEMA rows for the window (SA+NSA)
         │
         ▼
-bootstrap_store.py  (build_ces_panel → build_ces_panel_alfred)
-  → write_rebuild_store(panel, scratch)        UNCHANGED downstream
+append_to_vintage_store(rows)     REUSED. 7-col anti-join (idempotent) +
+  + _detect_corrected_levels()    _detect_corrected_levels (flags seam discrepancies)
+        │
+        ▼
+scripts/patch_ces_alfred.py       NEW thin driver: dry-run report → review → append.
 ```
 
-The new builder returns the **same `VINTAGE_STORE_SCHEMA` rows** `ces_builder` does
-(national geography, null size class, `source='ces'`, both adjustments), so
-`write_rebuild_store` / `_select_ces_at_horizon` / `first_print_changes` / panel
-construction are untouched. After promotion, retire `ces_builder`'s `cesvinall`
-lineage and delete the already-dead `ces_triangular.py` + `cesvinall.zip` download in
-`nfp_download.bls.bulk`.
+Nothing in `ces_builder` / `cesvinall` / the rank-based censoring / `first_print`
+changes. The patch is additive.
 
-## 5. Extraction algorithm
+## 5. Extraction algorithm (window-scoped)
 
-For each resolved series (`observation_start=2003-01-01`, **all** vintage dates — no
-tail cap; `output_type=2` wide):
+Per resolved series, fetch **all** vintage dates (no tail cap), `output_type=2` wide:
 
-1. **Order vintages by date.** Every monthly release re-states the ref months it
-   covers, so each ref month `p` appears in its release vintage and every later one.
-2. **Monthly prints `(0,0)/(1,0)/(2,0)` = the 1st/2nd/3rd *appearance* of `p`,
-   as-published.** No benchmark exclusion (Jan's rev0 legitimately sits on a Feb
-   benchmark release — §2), and **no value-dedup** (CES is in thousands; a small
-   revision can leave the rounded number unchanged, so deduping by value would drop a
-   real print and shift the index). This rule reproduces `output_type=4` automatically.
-3. **Benchmark cohort `(2,1)`**: walk the annual-benchmark vintages (each Feb release;
-   value+date both from that vintage), emit one `(2,1)` row per benchmark basis whose
-   restated value **differs** from the previously emitted one (first always emitted).
-   Mirrors `ces_builder`'s `bench_year` dedupe-by-change.
-4. **`vintage_date`** = ALFRED's actual real-time date (more accurate than
-   `ces_builder`'s schedule-derived `get_ces_vintage_date` stamp; all revisions in a
-   release share one date). **Deliberate divergence** from the legacy stamp — see §6/§7
-   for the consumers to re-verify.
-5. **Real-time guard (mandatory — verified necessary 2026-06-27).** A shallow series'
-   *first* archived vintage carries the full back-history *as it stood that day*, so a
-   naive "1st/2nd/3rd appearance" mislabels a years-late revised value as a first
-   print. Empirically: `CES0800000001`'s ref-2003-01 first appearance is the 2011-03
-   vintage — a **2,984-day** gap (vs PAYEMS's genuine **37 days**). **Emit `(0,0)`
-   only when its vintage lands within ~70 days of `ref_date`** (the real first
-   release); drop the cohort otherwise. Equivalently and authoritatively: restrict
-   emitted ref months to those FRED returns under `output_type=4` (initial-release-only,
-   which never fabricates pre-archive first prints) — use it as both the genuine-floor
-   bound and the rev-0 oracle. This is what makes the per-series floors in §3 the
-   *genuine real-time* floors, not the (misleading) archive-contains-it floor.
-6. **Frontier / shallow series**: emit only the cohorts that pass the guard (a recent
-   month may have only `(0,0)`; a 2011-floor series simply has no genuine prints before
-   2011). **No synthesis** — an absent print is correct, recorded in the coverage
-   report. Honor `as_of` for the frontier `(2,1)` cutoff exactly as `ces_builder` does.
-
-**Oracles (PAYEMS first, before scaling):** `output_type=4` (initial-release-only)
-returns every ref month's true first print in one call — confirm step 2 reproduces it.
-Then read the **current store** at a benchmark boundary (ref 2023-11/12, 2024-01) and
-confirm the ALFRED cohorts match `ces_builder`'s `(revision, benchmark_revision)`
-tagging value-for-value. Frame as "which rule reproduces the store's cohorts," not
-"confirm positional works."
+1. Order vintage columns by date; each ref month `p` appears in its release vintage and
+   every later one.
+2. **`(0,0)/(1,0)/(2,0)` = the 1st/2nd/3rd *appearance* of `p`, as-published.** No
+   benchmark exclusion, **no value-dedup** (CES is in thousands; a small revision can
+   leave the rounded value unchanged, so deduping would drop a print and shift the
+   index). Reproduces `output_type=4` automatically (§9).
+3. **Real-time guard (mandatory — verified necessary, §9).** A series' first archived
+   vintage carries full back-history, so a naive first-appearance mislabels a years-late
+   value as a first print (`CES0800000001` ref-2003-01 first appearance = the 2011-03
+   vintage, a **2,984-day** gap vs PAYEMS's genuine 37). **Keep `(0,0)` only when its
+   vintage lands within ~70 days of `ref_date`**; equivalently, bound emitted ref months
+   by `output_type=4`. For the 2026 window this is always satisfied, but the guard stays
+   in the shared extractor.
+4. **Window filter**: keep only cohorts with calendar `vintage_date > store_frontier`
+   (2026-02-11) and `≤ today`. The `append_to_vintage_store` anti-join makes a re-run a
+   no-op regardless, but window-filtering minimizes fetch + append volume.
+5. **Value source = ALFRED; date source = calendar.** Attach each `(ref, revision)`'s
+   schedule `vintage_date` from `vintage_dates.parquet` (which already covers the
+   window), keeping the store's existing convention.
 
 ## 6. Store mapping
 
-Rows are written under `VINTAGE_STORE_SCHEMA` with `source='ces'`,
-`geographic_type='national'`, `geographic_code='00'`, `size_class_*` null,
-`ownership` from `industry.ownership_for(type, code)` (00→total, else private), and
-**CES→NAICS code translation** for sectors via `industry.CES_SECTOR_TO_NAICS`. The §3
-table is already keyed in the store's NAICS sector codes.
+`VINTAGE_STORE_SCHEMA` rows: `source='ces'`, `geographic_type='national'`,
+`geographic_code='00'`, `size_class_*` null, `ownership` from
+`industry.ownership_for` (00→total, else private), **CES→NAICS sector translation** via
+`industry.CES_SECTOR_TO_NAICS` (the §3 table is already NAICS-keyed),
+`benchmark_revision=0`, `vintage_date` from the calendar (§5.5). Reuse
+`capture._remap_ces_to_store_schema` where it fits.
 
-**`vintage_date` semantics decision:** use ALFRED-**actual** dates (the real
-`realtime_start`), accept the shift vs `ces_builder`'s schedule-derived stamps, and
-re-verify the consumers that assumed the old convention: rank-based
-`_select_ces_at_horizon` (ranks by recency — should be robust), `first_print.py`'s
-`_RELEASE_WINDOW_DAYS=15` window (was tuned to *staggered* stamps; ALFRED's same-day
-stamps should resolve the rev-1 partner *better* — verify, don't assume), and
-`rebuild_gates.py`'s `(2,1)` checks (lines ~355/547).
+## 7. Build → dry-run → append (reuse the safe path)
 
-## 7. Build → scratch → validate → promote
-
-1. **Discover/resolve** §3 (+ NSA aliases), title-verify, write a coverage report
-   (per-key floor, cohorts available).
-2. **Fetch + build** §5 → `VINTAGE_STORE_SCHEMA` rows (rebuild scratch → `tempfile`;
-   sequential per-series with backoff/checkpoint, ~1s/series; **no parallel workflow** —
-   it fights the rate limiter; cf. memory `prefer-cheap-inline-audits`).
-3. **Write to scratch store** `NFP_STORE_URI=s3://alt-nfp/store-rebuild` (guarded by
-   `is_canonical_store`; never write `…/store` directly; cf. memory
-   `store-write-test-safety`).
-4. **Gates:**
-   - **PAYEMS oracle** — step-2 rev-0 reproduces `output_type=4`.
-   - **Cohort match** vs the current store at benchmark boundaries (§5) — the
-     `(revision, benchmark_revision)` tagging agrees.
-   - **Overlap-diff is a real value-level correctness test, not "ALFRED wins ties":**
-     the current SA `source='ces'` is the *published* CES drop-in (plans/11), so
-     ALFRED (also published CES) should match it **~exactly on values**, with
-     `vintage_date` **expected to shift** (actual vs schedule-derived). Compare on
-     `(key, ref_date, revision, benchmark_revision)` values; a value divergence is an
-     **extraction bug to fix**, not a residual to wave through. Benchmark-boundary
-     months are where it will light up — investigate there. (Only series the old store
-     *reconstructed* rather than published would invoke "external truth wins" — confirm
-     which, if any, on the SA side; the aggregates are published-CES.)
-   - **`first_print_changes`** resolves the rev-1 partner under ALFRED's same-day
-     stamps (§6).
-   - **`rebuild_gates.py`** `(2,1)` checks pass under the new builder.
-   - **A1/A2 golden re-baseline** — goldens move under full replacement; re-baseline
-     deliberately.
-5. **Promote** via the copy-then-delete cutover (`bootstrap_store.py`), snapshot prior
-   canonical first.
-6. **Retire** `ces_builder`'s `cesvinall` lineage + the dead `ces_triangular.py` +
-   `cesvinall.zip` download.
+1. **Discover/resolve** §3 (+ NSA aliases), title-verify.
+2. **Build** the window rows (§5) → `VINTAGE_STORE_SCHEMA`.
+3. **Dry run**: compute `CaptureResult(appended, corrected, skipped)` **without
+   writing**; review the `corrected` list (seam discrepancies vs cesvinall) and the
+   `appended` count (expect the Feb–May 2026 cohorts + Dec-2025/Jan-2026 tail).
+4. **Validate against ALFRED's own oracle**: the window's `(0,0)` matches FRED
+   `output_type=4` (the §9 method) before writing.
+5. **Append** via `append_to_vintage_store` (to a scratch store copy first if touching
+   canonical — cf. memory `store-write-test-safety`; the wipe incident makes a
+   scratch-first dry pass cheap insurance). Then run against canonical.
+6. **Confirm**: gap filled (ref now reaches 2026-05), `first_print_changes` extends
+   cleanly, a re-run appends 0 (idempotent).
 
 ## 8. Risks / open items
 
-- **NSA alias coverage** is the least-probed leg; NSA aggregates need `PAYNSA`-family
-  aliases (build discovery phase). Worst case NSA floors at 2011 for aggregates too.
-- **`vintage_date` semantics change** (ALFRED-actual vs schedule-derived) ripples to
-  `_select_ces_at_horizon`, `first_print`, and `rebuild_gates` — §6/§7 list the
-  re-verification. If any gate proves brittle, the fallback is to *re-derive* the
-  legacy schedule stamps via `get_ces_vintage_date` for drop-in parity (values from
-  ALFRED, dates from the schedule) — a documented escape hatch, not the default.
-- **Ragged depth** (2003 deep aggregates / 2011 fine sectors + NSA) is accepted and
-  surfaced in the coverage report; downstream tolerates ragged history.
-- **Benchmark-vintage identification** back to 2003 must be reliable for the §5 step-3
-  `(2,1)` walk — derive from the annual benchmark schedule (Feb release / Jan-Y first
-  print, `ces_builder`'s convention), cross-check against observed ALFRED cadence.
-- **Pre-2003 depth left on the table**: aliases reach 1955–1971, but 2003 is the clean
-  NAICS floor; deeper is a deliberate future extension, not this spec.
+- **NSA aggregate aliases** (`PAYNSA` family) are the one unresolved id leg; the build
+  discovery phase resolves + title-verifies them like the SA side.
+- **Seam value discrepancies**: where cesvinall and ALFRED disagree on an existing
+  frontier key, `_detect_corrected_levels` flags it (not auto-applied). Expect near-
+  exact agreement (§9: ~98% on the 2017+ overlap); investigate any flagged row rather
+  than ignore.
+- **2003 history is a *separate* concern** (the store starts 2017, see §2 note) — a
+  cesvinall `ces_builder` re-run, not this patch.
+- **Rate limits**: sequential per-series fetch with backoff/checkpoint (~1s/series); a
+  ~30-series × SA/NSA window pull is minutes, not a parallel workflow.
+- **Ongoing capture**: if cesvinall keeps lagging, the regular `alt-nfp update` CES
+  source could later move to ALFRED too — a follow-up, out of this patch's scope.
 
 ## 9. Verification (extraction PoC, 2026-06-27)
 
-The §5 rule was implemented and run against live ALFRED for a sample spanning every
-level, validated against **two independent oracles**: FRED `output_type=4`
-(initial-release) and the current store's own `(0,0)/(1,0)/(2,0)` over the 2017+
-overlap.
+The §5 rule was implemented and run against live ALFRED across every level, validated
+against two independent oracles: FRED `output_type=4` (initial-release) and the current
+store's own `(0,0)/(1,0)/(2,0)` over the 2017+ overlap.
 
 | level | series | genuine 3-print floor | rev0 vs FRED ot4 | vs store 2017+ (r0/r1/r2) |
 |---|---|---|---|---|
-| national `00` | PAYEMS | **2003-01** | 281/281 | 107/109 · 104/108 · 103/107 |
-| national `05` | USPRIV | **2003-01** | 281/281 | 107/109 · 104/108 · 103/107 |
-| domain `06` | USGOOD | **2003-01** | 281/281 | 108/109 · 106/108 · 106/107 |
-| domain `08` | CES0800000001 | **2011-01** † | 183/183 | 107/109 · 104/108 · 103/107 |
-| supersector `30` | MANEMP | **2003-01** | 281/281 | 108/109 · 107/108 · 106/107 |
-| supersector `60` | USPBS | **2003-06** | 276/276 | 107/109 · 104/108 · 103/107 |
-| sector `31` | DMANEMP | **2003-01** | 281/281 | 108/109 · 106/108 · 106/107 |
-| sector `44` | USTRADE | **2003-01** | 281/281 | 108/109 · 106/108 · 106/107 |
-| sector `21` | CES1021000001 | **2011-01** † | 183/183 | 108/109 · 106/108 · 106/107 |
-| sector `52` | CES5552000001 | **2011-01** † | 183/183 | 108/109 · 106/108 · 106/107 |
+| national `00` | PAYEMS | 2003-01 | 281/281 | 107/109 · 104/108 · 103/107 |
+| national `05` | USPRIV | 2003-01 | 281/281 | 107/109 · 104/108 · 103/107 |
+| domain `06` | USGOOD | 2003-01 | 281/281 | 108/109 · 106/108 · 106/107 |
+| domain `08` | CES0800000001 | 2011-01 † | 183/183 | 107/109 · 104/108 · 103/107 |
+| supersector `30` | MANEMP | 2003-01 | 281/281 | 108/109 · 107/108 · 106/107 |
+| supersector `60` | USPBS | 2003-06 | 276/276 | 107/109 · 104/108 · 103/107 |
+| sector `31` | DMANEMP | 2003-01 | 281/281 | 108/109 · 106/108 · 106/107 |
+| sector `44` | USTRADE | 2003-01 | 281/281 | 108/109 · 106/108 · 106/107 |
+| sector `21` | CES1021000001 | 2011-01 † | 183/183 | 108/109 · 106/108 · 106/107 |
+| sector `52` | CES5552000001 | 2011-01 † | 183/183 | 108/109 · 106/108 · 106/107 |
 
-† shallow tier — genuine prints only from 2011 (the real-time guard, §5 step 5, drops
-the pre-2011 back-history artifacts the naive rule would emit).
+† shallow tier — genuine prints only from 2011 (the real-time guard drops the pre-2011
+back-history artifacts). **Irrelevant to this patch** (the window is 2026), but it is
+exactly why full replacement was rejected: those keys would lose 2003–2010 history.
 
 **Findings:** (1) rev-0 reproduces FRED's initial-release oracle **exactly** wherever
-genuine prints exist (281/281 deep, 276/276 for 2003-06 supersectors, 183/183
-shallow). (2) The reconstruction matches the *independently-built* store **~98% on
-values** over 2017+ across all three revisions; the ~2% residual is concentrated at
-benchmark-boundary months + COVID — exactly the §7 cohort-tag investigation set, not a
-systemic gap. (3) The real-time guard is **necessary**: without it, shallow series emit
-fake 2003–2010 prints from their 2011 first vintage.
-
-**Answer to "(0,0)/(1,0)/(2,0) from 2003 on?":** YES for national `00`/`05`, domain
-`06`, supersectors `10/20/30/40/55/80` and sectors `31/32/42/44` (2003-01);
-supersectors `50/60/65/70` from 2003-06. NOT to 2003 for domain `08` and sectors
-`21/22/48/52/53/54/55/56/61/62/71/72` — those genuinely floor at **2011-03** (no deep
-archive exists; emitting earlier would be synthesis). NSA: ~2011 pending the alias
-probe.
+genuine prints exist. (2) The ALFRED extraction matches the *independently-built* store
+**~98% on values** over 2017+; the residual is benchmark-boundary + COVID months. (3)
+The real-time guard is necessary in general (kept in the shared extractor) though
+trivially satisfied for the 2026 window. ⇒ ALFRED reliably reconstructs `(0,0)/(1,0)/
+(2,0)` for the patch window across the full hierarchy, SA (NSA pending the alias probe).
