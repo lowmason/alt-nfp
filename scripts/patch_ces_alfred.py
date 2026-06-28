@@ -12,6 +12,10 @@ from __future__ import annotations
 import argparse
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from upath import UPath
 
 from dotenv import load_dotenv
 
@@ -21,7 +25,7 @@ from nfp_ingest.capture import capture_ces_alfred_window  # noqa: E402
 from nfp_lookups.paths import VINTAGE_STORE_PATH  # noqa: E402
 
 
-def _store(uri: str | None):
+def _store(uri: str | None) -> Path | UPath:
     """Resolve a --store argument to a Path/UPath (default VINTAGE_STORE_PATH)."""
     if uri is None:
         return VINTAGE_STORE_PATH
@@ -44,9 +48,13 @@ def main() -> None:
     res = capture_ces_alfred_window(
         through=args.through, store_path=_store(args.store), dry_run=not args.apply
     )
-    mode = "APPLIED" if args.apply else "DRY-RUN"
-    print(f"[{mode}] appended={res.appended} skipped={res.skipped} "
-          f"corrected={len(res.corrected)}")
+    if args.apply:
+        print(f"[APPLIED] appended={res.appended} skipped={res.skipped} corrected={len(res.corrected)}")
+    else:
+        print(
+            f"[DRY-RUN] would_append={res.would_append} already_present={res.skipped} "
+            f"corrected={len(res.corrected)}"
+        )
     for c in res.corrected:
         print(f"  CORRECTED ref={c.ref_date} code={c.industry_code} rev={c.revision} "
               f"stored={c.stored_employment} incoming={c.incoming_employment}")

@@ -92,7 +92,8 @@ def test_dry_run_writes_nothing(tmp_path):
         calendar=pl.DataFrame(),
     )
     assert res.appended == 0
+    assert res.would_append == 2  # both rev1 + rev2 are new ukeys
     stored = read_vintage_store(
         tmp_path, source="ces", seasonally_adjusted=True
     ).collect()
-    assert stored.height == 1  # only the seed row
+    assert stored.height == 1  # only the seed row, nothing written

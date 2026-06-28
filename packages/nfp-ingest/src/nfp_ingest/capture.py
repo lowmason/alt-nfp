@@ -67,11 +67,14 @@ class CaptureResult:
         Existing-ukey rows whose incoming level differs from the stored level.
     skipped : int
         Rows present in the capture but already in the store (anti-joined out).
+    would_append : int
+        Rows that would be appended on a real run (dry-run only; 0 otherwise).
     """
 
     appended: int
     corrected: list[CorrectedLevel]
     skipped: int
+    would_append: int = 0
 
 
 def _remap_ces_to_store_schema(df: pl.DataFrame) -> pl.DataFrame:
@@ -577,7 +580,33 @@ def capture_ces_alfred_window(
         corrected.extend(cl)
 
     if dry_run:
-        return CaptureResult(appended=0, corrected=corrected, skipped=rows.height)
+        would_append = 0
+        for sa in sas:
+            part = rows.filter(pl.col("seasonally_adjusted") == sa)
+            partition_dir = (
+                store_path
+                / "source=ces"
+                / f"seasonally_adjusted={str(sa).lower()}"
+            )
+            if not partition_dir.exists():
+                would_append += part.height
+            else:
+                existing_keys = (
+                    read_vintage_store(store_path, source="ces", seasonally_adjusted=sa)
+                    .select(_CES_CORRECTED_UKEY)
+                    .unique()
+                    .collect()
+                )
+                surviving = part.join(
+                    existing_keys, on=_CES_CORRECTED_UKEY, how="anti", nulls_equal=True
+                )
+                would_append += surviving.height
+        return CaptureResult(
+            appended=0,
+            corrected=corrected,
+            skipped=rows.height - would_append,
+            would_append=would_append,
+        )
 
     appended = append_to_vintage_store(rows, store_path)
     for sa in sas:
