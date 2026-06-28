@@ -183,10 +183,21 @@ tail cap; `output_type=2` wide):
    `ces_builder`'s schedule-derived `get_ces_vintage_date` stamp; all revisions in a
    release share one date). **Deliberate divergence** from the legacy stamp — see §6/§7
    for the consumers to re-verify.
-5. **Frontier / shallow series**: emit only the cohorts that exist (a recent month may
-   have only `(0,0)`; a 2011-floor series simply starts later). **No synthesis** — an
-   absent print is correct, recorded in the coverage report. Honor `as_of` for the
-   frontier `(2,1)` cutoff exactly as `ces_builder` does.
+5. **Real-time guard (mandatory — verified necessary 2026-06-27).** A shallow series'
+   *first* archived vintage carries the full back-history *as it stood that day*, so a
+   naive "1st/2nd/3rd appearance" mislabels a years-late revised value as a first
+   print. Empirically: `CES0800000001`'s ref-2003-01 first appearance is the 2011-03
+   vintage — a **2,984-day** gap (vs PAYEMS's genuine **37 days**). **Emit `(0,0)`
+   only when its vintage lands within ~70 days of `ref_date`** (the real first
+   release); drop the cohort otherwise. Equivalently and authoritatively: restrict
+   emitted ref months to those FRED returns under `output_type=4` (initial-release-only,
+   which never fabricates pre-archive first prints) — use it as both the genuine-floor
+   bound and the rev-0 oracle. This is what makes the per-series floors in §3 the
+   *genuine real-time* floors, not the (misleading) archive-contains-it floor.
+6. **Frontier / shallow series**: emit only the cohorts that pass the guard (a recent
+   month may have only `(0,0)`; a 2011-floor series simply has no genuine prints before
+   2011). **No synthesis** — an absent print is correct, recorded in the coverage
+   report. Honor `as_of` for the frontier `(2,1)` cutoff exactly as `ces_builder` does.
 
 **Oracles (PAYEMS first, before scaling):** `output_type=4` (initial-release-only)
 returns every ref month's true first print in one call — confirm step 2 reproduces it.
@@ -260,3 +271,41 @@ stamps should resolve the rev-1 partner *better* — verify, don't assume), and
   print, `ces_builder`'s convention), cross-check against observed ALFRED cadence.
 - **Pre-2003 depth left on the table**: aliases reach 1955–1971, but 2003 is the clean
   NAICS floor; deeper is a deliberate future extension, not this spec.
+
+## 9. Verification (extraction PoC, 2026-06-27)
+
+The §5 rule was implemented and run against live ALFRED for a sample spanning every
+level, validated against **two independent oracles**: FRED `output_type=4`
+(initial-release) and the current store's own `(0,0)/(1,0)/(2,0)` over the 2017+
+overlap.
+
+| level | series | genuine 3-print floor | rev0 vs FRED ot4 | vs store 2017+ (r0/r1/r2) |
+|---|---|---|---|---|
+| national `00` | PAYEMS | **2003-01** | 281/281 | 107/109 · 104/108 · 103/107 |
+| national `05` | USPRIV | **2003-01** | 281/281 | 107/109 · 104/108 · 103/107 |
+| domain `06` | USGOOD | **2003-01** | 281/281 | 108/109 · 106/108 · 106/107 |
+| domain `08` | CES0800000001 | **2011-01** † | 183/183 | 107/109 · 104/108 · 103/107 |
+| supersector `30` | MANEMP | **2003-01** | 281/281 | 108/109 · 107/108 · 106/107 |
+| supersector `60` | USPBS | **2003-06** | 276/276 | 107/109 · 104/108 · 103/107 |
+| sector `31` | DMANEMP | **2003-01** | 281/281 | 108/109 · 106/108 · 106/107 |
+| sector `44` | USTRADE | **2003-01** | 281/281 | 108/109 · 106/108 · 106/107 |
+| sector `21` | CES1021000001 | **2011-01** † | 183/183 | 108/109 · 106/108 · 106/107 |
+| sector `52` | CES5552000001 | **2011-01** † | 183/183 | 108/109 · 106/108 · 106/107 |
+
+† shallow tier — genuine prints only from 2011 (the real-time guard, §5 step 5, drops
+the pre-2011 back-history artifacts the naive rule would emit).
+
+**Findings:** (1) rev-0 reproduces FRED's initial-release oracle **exactly** wherever
+genuine prints exist (281/281 deep, 276/276 for 2003-06 supersectors, 183/183
+shallow). (2) The reconstruction matches the *independently-built* store **~98% on
+values** over 2017+ across all three revisions; the ~2% residual is concentrated at
+benchmark-boundary months + COVID — exactly the §7 cohort-tag investigation set, not a
+systemic gap. (3) The real-time guard is **necessary**: without it, shallow series emit
+fake 2003–2010 prints from their 2011 first vintage.
+
+**Answer to "(0,0)/(1,0)/(2,0) from 2003 on?":** YES for national `00`/`05`, domain
+`06`, supersectors `10/20/30/40/55/80` and sectors `31/32/42/44` (2003-01);
+supersectors `50/60/65/70` from 2003-06. NOT to 2003 for domain `08` and sectors
+`21/22/48/52/53/54/55/56/61/62/71/72` — those genuinely floor at **2011-03** (no deep
+archive exists; emitting earlier would be synthesis). NSA: ~2011 pending the alias
+probe.
