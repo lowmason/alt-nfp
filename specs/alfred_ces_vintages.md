@@ -112,9 +112,13 @@ Other Services = 80) and `SRVPRD`→80 (it is domain 07). Each id's `/series` ti
 `sae_states.INDUSTRIES`/`industry._CES_SECTOR` are SM/EN-oriented and **wrong** for
 national CES ids — the probe is truth.
 
-**NSA.** Fine-sector `CEU…01` ids exist (verified `CEU4142000001`, `CEU5552000001`);
-NSA aggregates have no systematic id and need NSA aliases (`PAYNSA` family), resolved +
-title-verified in the build discovery phase.
+**NSA (probe-verified 2026-06-28).** Cleaner than SA: **29/30 keys via systematic
+`CEU{8digit}01`** (all current to 2026-06-05, titles verified) — `05`→`CEU0500000001`,
+`06`→`CEU0600000001`, `08`→`CEU0800000001`, supersector `XX`→`CEUXX00000001`, sectors
+per their 8-digit (`42`→`CEU4142000001`, `44`→`CEU4200000001`, `48`→`CEU4300000001`,
+`22`→`CEU4422000001`, `21`→`CEU1021000001`, `31`→`CEU3100000001`, `32`→`CEU3200000001`,
+`52`→`CEU5552000001`, …). The lone exception is **`00`→`PAYNSA`** (`CEU0000000001` is
+absent). Title-verification still gates the build.
 
 ## 4. Architecture — ALFRED source into the existing append path
 
@@ -190,8 +194,8 @@ Per resolved series, fetch **all** vintage dates (no tail cap), `output_type=2` 
 
 ## 8. Risks / open items
 
-- **NSA aggregate aliases** (`PAYNSA` family) are the one unresolved id leg; the build
-  discovery phase resolves + title-verifies them like the SA side.
+- **NSA ids fully resolved** (§3): 29/30 systematic `CEU…01` + `00`→`PAYNSA`. No
+  unresolved id leg remains; title-verification still gates the build.
 - **Seam value discrepancies**: where cesvinall and ALFRED disagree on an existing
   frontier key, `_detect_corrected_levels` flags it (not auto-applied). Expect near-
   exact agreement (§9: ~98% on the 2017+ overlap); investigate any flagged row rather
